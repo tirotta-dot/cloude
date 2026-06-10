@@ -1,0 +1,28 @@
+//@version=5
+// Replica del bot Coinrule "Rebalance Trend Following"
+// Logica: resta investito finche' l'asset e' in trend rialzista strutturale
+// (prezzo sopra SMA lunga e SMA media sopra SMA lunga), esce quando il
+// trend si rompe. Su Coinrule il "rebalance" sposta capitale tra coin in
+// trend; su un singolo chart equivale a un filtro di regime on/off.
+strategy("Coinrule Replica - Rebalance Trend Following", overlay=true,
+     initial_capital=10000, default_qty_type=strategy.percent_of_equity,
+     default_qty_value=100, commission_type=strategy.commission.percent,
+     commission_value=0.1, slippage=2)
+
+midLen  = input.int(50,  "SMA media")
+longLen = input.int(200, "SMA lunga")
+
+smaMid  = ta.sma(close, midLen)
+smaLong = ta.sma(close, longLen)
+
+plot(smaMid,  "SMA 50",  color=color.teal)
+plot(smaLong, "SMA 200", color=color.orange)
+
+inTrend  = close > smaLong and smaMid > smaLong
+trendOff = close < smaMid
+
+if inTrend and strategy.position_size == 0
+    strategy.entry("Long", strategy.long)
+
+if trendOff and strategy.position_size > 0
+    strategy.close("Long", comment="Trend rotto")

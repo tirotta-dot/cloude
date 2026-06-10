@@ -1,0 +1,29 @@
+//@version=5
+// Replica del bot Coinrule "Buy The Uptrend Flash Crash"
+// Logica: il trend di fondo e' rialzista (prezzo sopra EMA lunga) ma si
+// verifica un crollo improvviso di X% in poche barre -> compra lo sconto
+// e rivendi sul rimbalzo (TP %) o taglia con lo stop.
+strategy("Coinrule Replica - Uptrend Flash Crash", overlay=true,
+     initial_capital=10000, default_qty_type=strategy.percent_of_equity,
+     default_qty_value=100, commission_type=strategy.commission.percent,
+     commission_value=0.1, slippage=2)
+
+trendLen  = input.int(100, "EMA trend di fondo")
+crashPerc = input.float(8.0, "Calo % per flash crash", step=0.5)
+crashBars = input.int(3,   "Barre del crollo", minval=1)
+tpPerc    = input.float(6.0, "Take profit %", step=0.5)
+slPerc    = input.float(5.0, "Stop loss %",  step=0.5)
+
+emaTrend = ta.ema(close, trendLen)
+plot(emaTrend, "EMA trend", color=color.orange)
+
+drop = (close[crashBars] - close) / close[crashBars] * 100
+crash = drop >= crashPerc and close > emaTrend * 0.95  // ancora vicino al trend rialzista
+
+if crash and strategy.position_size == 0
+    strategy.entry("Long", strategy.long)
+
+if strategy.position_size > 0
+    strategy.exit("TP/SL", "Long",
+         limit=strategy.position_avg_price * (1 + tpPerc / 100),
+         stop =strategy.position_avg_price * (1 - slPerc / 100))

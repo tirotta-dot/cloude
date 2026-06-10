@@ -1,0 +1,27 @@
+//@version=5
+// Replica del bot Coinrule "Maximized Moving Average Crossing"
+// Logica: entra long sul golden cross di due EMA, esce sul death cross.
+// Classico trend following: pochi segnali, soffre il chop laterale.
+strategy("Coinrule Replica - MA Crossing", overlay=true,
+     initial_capital=10000, default_qty_type=strategy.percent_of_equity,
+     default_qty_value=100, commission_type=strategy.commission.percent,
+     commission_value=0.1, slippage=2)
+
+fastLen = input.int(9,  "EMA veloce")
+slowLen = input.int(21, "EMA lenta")
+slPerc  = input.float(6.0, "Stop loss %", step=0.5)
+
+emaFast = ta.ema(close, fastLen)
+emaSlow = ta.ema(close, slowLen)
+
+plot(emaFast, "EMA veloce", color=color.teal)
+plot(emaSlow, "EMA lenta",  color=color.orange)
+
+if ta.crossover(emaFast, emaSlow) and strategy.position_size == 0
+    strategy.entry("Long", strategy.long)
+
+if ta.crossunder(emaFast, emaSlow) and strategy.position_size > 0
+    strategy.close("Long", comment="Death cross")
+
+if strategy.position_size > 0
+    strategy.exit("SL", "Long", stop=strategy.position_avg_price * (1 - slPerc / 100))

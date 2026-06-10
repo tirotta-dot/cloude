@@ -1,0 +1,68 @@
+//@version=5
+// ─────────────────────────────────────────────────────────────────────
+//  APEX Trend Strategy - long only, timeframe GIORNALIERO (crypto spot)
+//
+//  Regole (identiche a backtest/strategies.py::apex):
+//   • Regime:   si opera solo se close > EMA200 (uptrend strutturale)
+//   • Entrata:  chiusura sopra il massimo di chiusura dei 30 gg precedenti
+//   • Uscite:   chiusura sotto EMA20  |  trailing stop 4xATR(14)
+//               |  stop fisso di emergenza -12%
+//   • Sizing:   si investe solo la frazione di capitale per cui il
+//               trailing stop costa ~10% dell'equity (basso drawdown)
+//
+//  Backtest 2021->giu 2026 su BTC/ETH/SOL/BNB/XRP (vedi backtest/):
+//  portafoglio 5 cripto: CAGR ~28%, MaxDD -17%, Sharpe 1.31.
+// ─────────────────────────────────────────────────────────────────────
+strategy("APEX Trend Strategy [Daily]", overlay=true,
+     initial_capital=10000, commission_type=strategy.commission.percent,
+     commission_value=0.1, slippage=2)
+
+// ── Input ──────────────────────────────────────────────────────────
+regimeLen = input.int(200,   "EMA regime",             group="Filtro di regime")
+chLen     = input.int(30,    "Canale breakout (gg)",   group="Ingresso")
+exitLen   = input.int(20,    "EMA uscita",             group="Uscita")
+atrLen    = input.int(14,    "Lunghezza ATR",          group="Uscita")
+trailMult = input.float(4.0, "Trailing ATR x",         group="Uscita", step=0.25)
+slPerc    = input.float(12.0,"Stop emergenza %",       group="Uscita", step=0.5)
+riskPerc  = input.float(10.0,"Rischio per trade % equity", group="Money management",
+     tooltip="La posizione viene dimensionata in modo che la distanza del trailing stop costi al massimo questa % dell'equity. 100 = sempre tutto il capitale (piu' rendimento, molto piu' drawdown).")
+
+// ── Indicatori ─────────────────────────────────────────────────────
+ema200  = ta.ema(close, regimeLen)
+emaExit = ta.ema(close, exitLen)
+atrVal  = ta.atr(atrLen)
+chHigh  = ta.highest(close, chLen)[1]   // max di chiusura dei 30 gg precedenti
+
+inRegime = close > ema200
+breakout = close > chHigh
+
+plot(ema200,  "EMA 200",    color=color.orange, linewidth=2)
+plot(emaExit, "EMA uscita", color=color.teal)
+
+// ── Ingresso con sizing a rischio ──────────────────────────────────
+stopDistPerc = trailMult * atrVal / close * 100
+frac = math.min(1.0, riskPerc / stopDistPerc)
+
+if inRegime and breakout and strategy.position_size == 0
+    strategy.entry("Long", strategy.long, qty=strategy.equity * frac / close)
+
+// ── Uscite ─────────────────────────────────────────────────────────
+// trailing stop ATR: sale, non scende mai
+var float trailStop = na
+if strategy.position_size > 0
+    lvl = close - trailMult * atrVal
+    trailStop := na(trailStop) ? lvl : math.max(trailStop, lvl)
+else
+    trailStop := na
+
+hardStop = strategy.position_size > 0 ? strategy.position_avg_price * (1 - slPerc / 100) : na
+effStop  = strategy.position_size > 0 ? math.max(nz(trailStop, hardStop), hardStop) : na
+
+if strategy.position_size > 0
+    strategy.exit("Trail/SL", "Long", stop=effStop)
+
+if strategy.position_size > 0 and close < emaExit
+    strategy.close("Long", comment="Sotto EMA20")
+
+plot(strategy.position_size > 0 ? effStop : na, "Stop effettivo",
+     color=color.red, style=plot.style_linebr)
