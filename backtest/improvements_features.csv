@@ -1,0 +1,9 @@
+config,full_CAGR%,full_DD%,full_Calmar,full_PF,oos_CAGR%,oos_DD%,oos_PF
+APEX-X baseline,116.42,-36.85,3.16,6.7,75.39,-30.83,4.62
+F1 smart exit (EMA solo se in perdita),92.09,-60.16,1.53,7.06,59.77,-46.07,3.65
+F2 chandelier trailing,116.5,-36.72,3.17,6.71,75.39,-30.83,4.62
+F3 momentum positivo richiesto,87.8,-40.07,2.19,5.18,73.1,-33.03,4.58
+F4 rischio scalato su ampiezza regime,90.33,-34.5,2.62,6.7,65.95,-32.79,4.62
+F5 protezione equity-curve,110.48,-36.9,2.99,6.7,73.84,-27.17,4.62
+F6 piramidazione (1 add-on),126.93,-41.5,3.06,4.8,40.02,-38.96,2.54
+F7 cap volatilita' (90° pctile),118.49,-36.85,3.22,7.01,75.39,-30.83,4.62

@@ -25,7 +25,11 @@ useAlignment = input.bool(true, "Richiedi EMA50 > EMA200",    group="Regime")
 useBtcFilter = input.bool(true, "Filtro regime BTC (per le alt)", group="Regime")
 btcSymbol    = input.symbol("BINANCE:BTCUSDT", "Simbolo BTC", group="Regime")
 chLen        = input.int(30,    "Canale breakout (gg)",       group="Ingresso")
+useVolCap    = input.bool(true, "Filtro volatilita' estrema", group="Ingresso",
+     tooltip="Blocca gli ingressi quando ATR/prezzo supera l'85° percentile dell'ultimo anno: i breakout in volatilita' da blow-off hanno atteso negativo.")
 exitLen      = input.int(20,    "EMA uscita",                 group="Uscita")
+useChand     = input.bool(true, "Trailing chandelier",        group="Uscita",
+     tooltip="Trailing calcolato dal massimo close dall'ingresso invece che dal close corrente: aggancia i profitti un filo piu' in alto.")
 atrLen       = input.int(14,    "Lunghezza ATR",              group="Uscita")
 trailMult    = input.float(4.0, "Trailing ATR x",             group="Uscita", step=0.25)
 slPerc       = input.float(12.0,"Stop emergenza %",           group="Uscita", step=0.5)
@@ -56,6 +60,11 @@ inDate   = time >= startDate and time <= endDate
 inRegime = close > ema200 and (not useAlignment or ema50 > ema200)
 breakout = close > chHigh
 
+// filtro volatilita': niente ingressi con ATR% oltre l'85° pctile annuale
+atrPerc = atrVal / close
+volThr  = ta.percentile_linear_interpolation(atrPerc, 365, 85)[1]
+volOk   = not useVolCap or na(volThr) or atrPerc <= volThr
+
 plot(ema200,  "EMA 200",    color=color.orange, linewidth=2)
 plot(emaExit, "EMA uscita", color=color.teal)
 bgcolor(useBtcFilter and not btcOk ? color.new(color.red, 92) : na,
@@ -65,18 +74,22 @@ bgcolor(useBtcFilter and not btcOk ? color.new(color.red, 92) : na,
 stopDistPerc = trailMult * atrVal / close * 100
 frac = math.min(maxFracPerc / 100, riskPerc / stopDistPerc)
 
-longCond = inDate and inRegime and btcOk and breakout and strategy.position_size == 0
+longCond = inDate and inRegime and btcOk and breakout and volOk and strategy.position_size == 0
 if longCond
     strategy.entry("Long", strategy.long, qty=strategy.equity * frac * levMult / close,
          alert_message='{"action":"buy","ticker":"{{ticker}}","price":{{close}},"strategy":"APEX_v2"}')
 
 // ── Uscite ─────────────────────────────────────────────────────────
 var float trailStop = na
+var float hhClose   = na
 if strategy.position_size > 0
-    lvl = close - trailMult * atrVal
+    hhClose := na(hhClose) ? close : math.max(hhClose, close)
+    base = useChand ? hhClose : close
+    lvl = base - trailMult * atrVal
     trailStop := na(trailStop) ? lvl : math.max(trailStop, lvl)
 else
     trailStop := na
+    hhClose := na
 
 hardStop = strategy.position_size > 0 ? strategy.position_avg_price * (1 - slPerc / 100) : na
 effStop  = strategy.position_size > 0 ? math.max(nz(trailStop, hardStop), hardStop) : na

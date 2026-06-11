@@ -43,23 +43,40 @@ class ApexParams:
     top_k: int | None = None       # entra solo nelle prime k coin per momentum 90g
     leverage: float = 1.0          # esposizione massima in multipli di equity
     borrow_apr: float = 12.0       # costo annuo del margine sul cash negativo
+    # ── feature sperimentali (testate in improvements.py) ──
+    smart_exit: bool = False       # uscita EMA20 solo se il trade e' in perdita
+    chandelier: bool = False       # trailing dal massimo close dall'ingresso
+    require_mom_pos: bool = False  # entra solo con momentum 90g positivo
+    breadth_scaling: bool = False  # rischio scalato sull'ampiezza del regime
+    eq_curve_filter: bool = False  # rischio dimezzato se equity < EMA50(equity)
+    pyramid: bool = False          # un add-on a meta' size su nuovo breakout
+    vol_cap_pctile: float | None = None  # blocca ingressi se ATR% oltre il percentile
 
 
 def build_signals(df: pd.DataFrame, p: ApexParams, btc_regime: pd.Series | None,
                   is_btc: bool) -> dict:
     c = df["close"]
     e200 = ema(c, 200)
+    a = atr(df, 14)
     hi = c.rolling(p.ch_len).max().shift(1)
+    regime = (c > e200) & (ema(c, 50) > e200)
     entry = (c > hi) & (c > e200)
     if p.use_alignment:
         entry &= ema(c, 50) > e200
     if p.use_btc_filter and not is_btc and btc_regime is not None:
         entry &= btc_regime.reindex(df.index).fillna(False)
+    if p.require_mom_pos:
+        entry &= c.pct_change(90) > 0
+    if p.vol_cap_pctile is not None:
+        atrp = a / c
+        thr = atrp.rolling(365, min_periods=100).quantile(p.vol_cap_pctile).shift(1)
+        entry &= (atrp <= thr) | thr.isna()
     return {
         "entry": entry.fillna(False).to_numpy(),
         "exit": (c < ema(c, p.exit_len)).fillna(False).to_numpy(),
-        "atr": atr(df, 14).to_numpy(),
+        "atr": a.to_numpy(),
         "mom": c.pct_change(90).fillna(-9.9).to_numpy(),  # priorita' ingressi
+        "regime": regime.fillna(False).to_numpy(),
     }
 
 
@@ -73,24 +90,29 @@ class PortfolioResult:
 
 def run_portfolio(data: dict[str, pd.DataFrame], p: ApexParams,
                   initial: float = 10_000) -> PortfolioResult:
-    dates = data[SYMBOLS[0]].index
-    for s in SYMBOLS:
+    syms = list(data.keys())
+    dates = data[syms[0]].index
+    for s in syms:
         assert len(data[s].index) == len(dates), f"{s}: indice non allineato"
 
     arr = {s: {k: data[s][k].to_numpy() for k in ["open", "high", "low", "close"]}
-           for s in SYMBOLS}
+           for s in syms}
     btc_c = data["BTCUSD"]["close"]
     btc_regime = btc_c > ema(btc_c, 200)
-    sig = {s: build_signals(data[s], p, btc_regime, s == "BTCUSD") for s in SYMBOLS}
+    sig = {s: build_signals(data[s], p, btc_regime, s == "BTCUSD") for s in syms}
 
     cost = (p.fee_pct + p.slippage_pct) / 100
     cash = initial
-    pos = {s: None for s in SYMBOLS}   # dict: qty, entry_px, stop, trail, entry_i
-    pend_in = {s: False for s in SYMBOLS}
-    pend_out = {s: False for s in SYMBOLS}
+    pos = {s: None for s in syms}   # dict: qty, entry_px, stop, trail, entry_i, hh, adds
+    pend_in = {s: False for s in syms}
+    pend_out = {s: False for s in syms}
+    pend_add = {s: False for s in syms}
     trades: list[tuple] = []
     equity = np.empty(len(dates))
     exposure = np.empty(len(dates))
+    eq_ema = initial          # EMA50 dell'equity (protezione equity-curve)
+    eq_prev = initial
+    EQ_ALPHA = 2 / 51
 
     def mark_equity(i: int, price_key: str) -> float:
         val = cash
@@ -109,20 +131,36 @@ def run_portfolio(data: dict[str, pd.DataFrame], p: ApexParams,
                             fill, f"long:{s}", ret, reason))
         pos[s] = None
 
+    def entry_frac(s: str, i: int, eq_now: float) -> float:
+        """Frazione di equity da investire, con tutte le scale di rischio."""
+        o = arr[s]["open"][i]
+        a = sig[s]["atr"][i - 1] if i > 0 else np.nan  # ATR di ieri: no lookahead
+        if np.isnan(a) or o <= 0:
+            return 0.0
+        stop_dist_pct = p.trail_mult * a / o * 100
+        risk = p.risk_pct
+        if p.breadth_scaling and i > 0:
+            breadth = np.mean([sig[x]["regime"][i - 1] for x in syms])
+            risk *= max(0.4, breadth)
+        frac = min(p.max_frac, risk / max(stop_dist_pct, 1e-9))
+        if p.eq_curve_filter and eq_prev < eq_ema:
+            frac *= 0.5   # il sistema stesso e' in drawdown: de-risk
+        return frac
+
     for i in range(len(dates)):
         # 1) uscite da segnale, eseguite all'apertura
-        for s in SYMBOLS:
+        for s in syms:
             if pend_out[s] and pos[s]:
                 close_pos(s, i, arr[s]["open"][i], "signal")
             pend_out[s] = False
 
         # 2) ingressi all'apertura: priorita' al momentum piu' forte
         eq_now = mark_equity(i, "open")
-        candidates = [s for s in SYMBOLS if pend_in[s] and pos[s] is None]
+        candidates = [s for s in syms if pend_in[s] and pos[s] is None]
         candidates.sort(key=lambda s: sig[s]["mom"][i], reverse=True)
         # rotazione: solo le prime k coin per momentum sono eleggibili
         if p.top_k is not None:
-            rank = sorted(SYMBOLS, key=lambda s: sig[s]["mom"][i], reverse=True)
+            rank = sorted(syms, key=lambda s: sig[s]["mom"][i], reverse=True)
             allowed = set(rank[:p.top_k])
             candidates = [s for s in candidates if s in allowed]
         for s in candidates:
@@ -130,13 +168,10 @@ def run_portfolio(data: dict[str, pd.DataFrame], p: ApexParams,
             n_open = sum(1 for ps in pos.values() if ps)
             if n_open >= p.max_pos or eq_now <= 0:
                 continue
-            o = arr[s]["open"][i]
-            # ATR della barra precedente: quello odierno non e' noto all'open
-            a = sig[s]["atr"][i - 1] if i > 0 else np.nan
-            if np.isnan(a) or o <= 0:
+            frac = entry_frac(s, i, eq_now)
+            if frac <= 0:
                 continue
-            stop_dist_pct = p.trail_mult * a / o * 100
-            frac = min(p.max_frac, p.risk_pct / max(stop_dist_pct, 1e-9))
+            o = arr[s]["open"][i]
             # potere d'acquisto: con leva 1 e' il cash; con leva >1 si puo'
             # andare a cash negativo fino a leverage * equity di esposizione
             invested_now = eq_now - cash
@@ -148,12 +183,33 @@ def run_portfolio(data: dict[str, pd.DataFrame], p: ApexParams,
                 continue
             fill = o * (1 + cost)
             pos[s] = {"qty": invested / fill, "entry_px": fill, "entry_i": i,
-                      "stop": fill * (1 - p.sl_pct / 100), "trail": -np.inf}
+                      "stop": fill * (1 - p.sl_pct / 100), "trail": -np.inf,
+                      "hh": -np.inf, "adds": 0}
             cash -= invested
+
+        # 2b) piramidazione: un solo add-on a meta' size su nuovo breakout
+        for s in syms:
+            if pend_add[s] and pos[s]:
+                ps = pos[s]
+                frac = entry_frac(s, i, eq_now) * 0.5
+                invested_now = eq_now - cash
+                buying_power = p.leverage * eq_now - invested_now
+                invested = min(frac * eq_now, buying_power)
+                if p.leverage <= 1.0:
+                    invested = min(invested, cash)
+                if invested >= eq_now * 0.01:
+                    fill = arr[s]["open"][i] * (1 + cost)
+                    new_qty = invested / fill
+                    tot = ps["qty"] + new_qty
+                    ps["entry_px"] = (ps["entry_px"] * ps["qty"] + fill * new_qty) / tot
+                    ps["qty"] = tot
+                    ps["adds"] += 1
+                    cash -= invested
+            pend_add[s] = False
 
         # 3) stop intrabar (trailing aggiornato solo fino a ieri: no lookahead);
         #    lo stop fisso e' attivo anche sulla barra di ingresso
-        for s in SYMBOLS:
+        for s in syms:
             ps = pos[s]
             if ps and i == ps["entry_i"] and arr[s]["low"][i] <= ps["stop"]:
                 close_pos(s, i, ps["stop"], "stop")
@@ -163,26 +219,39 @@ def run_portfolio(data: dict[str, pd.DataFrame], p: ApexParams,
                     close_pos(s, i, min(arr[s]["open"][i], eff), "stop")
 
         # 4) aggiorna trailing con la chiusura odierna
-        for s in SYMBOLS:
+        #    (chandelier: dal massimo close dall'ingresso, non dal close odierno)
+        for s in syms:
             ps = pos[s]
             if ps and not np.isnan(sig[s]["atr"][i]):
-                lvl = arr[s]["close"][i] - p.trail_mult * sig[s]["atr"][i]
+                ps["hh"] = max(ps["hh"], arr[s]["close"][i])
+                base = ps["hh"] if p.chandelier else arr[s]["close"][i]
+                lvl = base - p.trail_mult * sig[s]["atr"][i]
                 ps["trail"] = max(ps["trail"], lvl)
 
         # 5) segnali di fine giornata per domani
-        for s in SYMBOLS:
-            if pos[s] is None and sig[s]["entry"][i]:
+        for s in syms:
+            ps = pos[s]
+            if ps is None and sig[s]["entry"][i]:
                 pend_in[s] = True
-            if pos[s] is not None and sig[s]["exit"][i]:
-                pend_out[s] = True
+            if ps is not None and sig[s]["exit"][i]:
+                # smart exit: l'uscita EMA20 scatta solo se il trade e' in
+                # perdita; i vincitori restano gestiti dal solo trailing
+                if not p.smart_exit or arr[s]["close"][i] < ps["entry_px"]:
+                    pend_out[s] = True
+            if (p.pyramid and ps is not None and sig[s]["entry"][i]
+                    and ps["adds"] == 0 and i > ps["entry_i"]
+                    and arr[s]["close"][i] > ps["entry_px"] * 1.05):
+                pend_add[s] = True
 
         # interessi sul margine (cash negativo) e mark-to-market
         if cash < 0:
             cash -= abs(cash) * p.borrow_apr / 100 / 365
         equity[i] = mark_equity(i, "close")
         exposure[i] = (equity[i] - cash) / equity[i] if equity[i] > 0 else 0
+        eq_prev = equity[i]
+        eq_ema = eq_ema + EQ_ALPHA * (equity[i] - eq_ema)
         if equity[i] <= 0:  # conto azzerato: liquidazione forzata, fine
-            for s in SYMBOLS:
+            for s in syms:
                 if pos[s]:
                     close_pos(s, i, arr[s]["close"][i], "margin_call")
             cash = 0.0
@@ -192,7 +261,7 @@ def run_portfolio(data: dict[str, pd.DataFrame], p: ApexParams,
 
     # liquidazione finale per il calcolo dei rendimenti
     last = len(dates) - 1
-    for s in SYMBOLS:
+    for s in syms:
         if pos[s]:
             close_pos(s, last, arr[s]["close"][last], "end_of_data")
     equity[last] = cash
@@ -207,3 +276,12 @@ def run_portfolio(data: dict[str, pd.DataFrame], p: ApexParams,
 
 def load_all() -> dict[str, pd.DataFrame]:
     return {s: load_csv(os.path.join(DATA, f"{s}.csv")) for s in SYMBOLS}
+
+
+SYMBOLS_10 = SYMBOLS + ["ADAUSD", "DOGEUSD", "LINKUSD", "AVAXUSD", "DOTUSD"]
+
+
+def load_universe(symbols=None) -> dict[str, pd.DataFrame]:
+    """Carica un universo arbitrario di coin (default: le 5 originali)."""
+    symbols = symbols or SYMBOLS
+    return {s: load_csv(os.path.join(DATA, f"{s}.csv")) for s in symbols}
