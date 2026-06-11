@@ -1,53 +1,73 @@
 //@version=5
 // ─────────────────────────────────────────────────────────────────────
-//  APEX Trend Strategy - long only, timeframe GIORNALIERO (crypto spot)
+//  APEX Trend Strategy v2 - long only, timeframe GIORNALIERO (crypto spot)
 //
-//  Regole (identiche a backtest/strategies.py::apex):
-//   • Regime:   si opera solo se close > EMA200 (uptrend strutturale)
-//   • Entrata:  chiusura sopra il massimo di chiusura dei 30 gg precedenti
-//   • Uscite:   chiusura sotto EMA20  |  trailing stop 4xATR(14)
-//               |  stop fisso di emergenza -12%
-//   • Sizing:   si investe solo la frazione di capitale per cui il
-//               trailing stop costa ~10% dell'equity (basso drawdown)
+//  Regole (identiche a backtest/portfolio.py, config FINAL):
+//   • Regime locale:  close > EMA200 e EMA50 > EMA200
+//   • Regime mercato: BTC > EMA200(BTC)  -> le alt si muovono con BTC
+//   • Entrata:        chiusura sopra il massimo di chiusura dei 30 gg precedenti
+//   • Uscite:         chiusura sotto EMA20 | trailing 4xATR(14) | stop -12%
+//   • Sizing:         frazione di equity tale che il trailing stop costi
+//                     ~10% dell'equity, con cap del 30% per posizione
 //
-//  Backtest 2021->giu 2026 su BTC/ETH/SOL/BNB/XRP (vedi backtest/):
-//  portafoglio 5 cripto: CAGR ~28%, MaxDD -17%, Sharpe 1.31.
+//  Validazione 2021->giu 2026 su BTC/ETH/SOL/BNB/XRP (vedi backtest/):
+//   portafoglio: CAGR 83% full-period | out-of-sample 2024-26: CAGR ~19%,
+//   MaxDD -22%, profit factor 3.6 | Monte Carlo DD p95: -48%
+//  Su un grafico singolo i risultati differiscono dal portafoglio.
 // ─────────────────────────────────────────────────────────────────────
-strategy("APEX Trend Strategy [Daily]", overlay=true,
+strategy("APEX Trend Strategy v2 [Daily]", overlay=true,
      initial_capital=10000, commission_type=strategy.commission.percent,
      commission_value=0.1, slippage=2)
 
 // ── Input ──────────────────────────────────────────────────────────
-regimeLen = input.int(200,   "EMA regime",             group="Filtro di regime")
-chLen     = input.int(30,    "Canale breakout (gg)",   group="Ingresso")
-exitLen   = input.int(20,    "EMA uscita",             group="Uscita")
-atrLen    = input.int(14,    "Lunghezza ATR",          group="Uscita")
-trailMult = input.float(4.0, "Trailing ATR x",         group="Uscita", step=0.25)
-slPerc    = input.float(12.0,"Stop emergenza %",       group="Uscita", step=0.5)
-riskPerc  = input.float(10.0,"Rischio per trade % equity", group="Money management",
-     tooltip="La posizione viene dimensionata in modo che la distanza del trailing stop costi al massimo questa % dell'equity. 100 = sempre tutto il capitale (piu' rendimento, molto piu' drawdown).")
+regimeLen    = input.int(200,   "EMA regime",                 group="Regime")
+useAlignment = input.bool(true, "Richiedi EMA50 > EMA200",    group="Regime")
+useBtcFilter = input.bool(true, "Filtro regime BTC (per le alt)", group="Regime")
+btcSymbol    = input.symbol("BINANCE:BTCUSDT", "Simbolo BTC", group="Regime")
+chLen        = input.int(30,    "Canale breakout (gg)",       group="Ingresso")
+exitLen      = input.int(20,    "EMA uscita",                 group="Uscita")
+atrLen       = input.int(14,    "Lunghezza ATR",              group="Uscita")
+trailMult    = input.float(4.0, "Trailing ATR x",             group="Uscita", step=0.25)
+slPerc       = input.float(12.0,"Stop emergenza %",           group="Uscita", step=0.5)
+riskPerc     = input.float(10.0,"Rischio per trade % equity", group="Money management",
+     tooltip="La posizione e' dimensionata in modo che la distanza del trailing stop costi questa % dell'equity.")
+maxFracPerc  = input.float(30.0,"Cap posizione % equity",     group="Money management",
+     tooltip="Limite massimo di capitale per singola posizione. Nel portafoglio a 5 cripto il 30% e' la config validata; su chart singolo puoi alzarlo (piu' rendimento, piu' drawdown).")
+startDate    = input.time(timestamp("2021-01-01"), "Inizio backtest", group="Periodo")
+endDate      = input.time(timestamp("2030-01-01"), "Fine backtest",   group="Periodo")
 
 // ── Indicatori ─────────────────────────────────────────────────────
 ema200  = ta.ema(close, regimeLen)
+ema50   = ta.ema(close, 50)
 emaExit = ta.ema(close, exitLen)
 atrVal  = ta.atr(atrLen)
-chHigh  = ta.highest(close, chLen)[1]   // max di chiusura dei 30 gg precedenti
+chHigh  = ta.highest(close, chLen)[1]
 
-inRegime = close > ema200
+// regime BTC calcolato sul daily del simbolo scelto (no lookahead)
+[btcClose, btcEma] = request.security(btcSymbol, "D",
+     [close, ta.ema(close, regimeLen)], lookahead=barmerge.lookahead_off)
+isBtcChart = str.contains(syminfo.ticker, "BTC")
+btcOk      = not useBtcFilter or isBtcChart or btcClose > btcEma
+
+inDate   = time >= startDate and time <= endDate
+inRegime = close > ema200 and (not useAlignment or ema50 > ema200)
 breakout = close > chHigh
 
 plot(ema200,  "EMA 200",    color=color.orange, linewidth=2)
 plot(emaExit, "EMA uscita", color=color.teal)
+bgcolor(useBtcFilter and not btcOk ? color.new(color.red, 92) : na,
+     title="Regime BTC off")
 
 // ── Ingresso con sizing a rischio ──────────────────────────────────
 stopDistPerc = trailMult * atrVal / close * 100
-frac = math.min(1.0, riskPerc / stopDistPerc)
+frac = math.min(maxFracPerc / 100, riskPerc / stopDistPerc)
 
-if inRegime and breakout and strategy.position_size == 0
-    strategy.entry("Long", strategy.long, qty=strategy.equity * frac / close)
+longCond = inDate and inRegime and btcOk and breakout and strategy.position_size == 0
+if longCond
+    strategy.entry("Long", strategy.long, qty=strategy.equity * frac / close,
+         alert_message='{"action":"buy","ticker":"{{ticker}}","price":{{close}},"strategy":"APEX_v2"}')
 
 // ── Uscite ─────────────────────────────────────────────────────────
-// trailing stop ATR: sale, non scende mai
 var float trailStop = na
 if strategy.position_size > 0
     lvl = close - trailMult * atrVal
@@ -59,10 +79,34 @@ hardStop = strategy.position_size > 0 ? strategy.position_avg_price * (1 - slPer
 effStop  = strategy.position_size > 0 ? math.max(nz(trailStop, hardStop), hardStop) : na
 
 if strategy.position_size > 0
-    strategy.exit("Trail/SL", "Long", stop=effStop)
+    strategy.exit("Trail/SL", "Long", stop=effStop,
+         alert_message='{"action":"sell","ticker":"{{ticker}}","price":{{close}},"reason":"stop","strategy":"APEX_v2"}')
 
 if strategy.position_size > 0 and close < emaExit
-    strategy.close("Long", comment="Sotto EMA20")
+    strategy.close("Long", comment="Sotto EMA20",
+         alert_message='{"action":"sell","ticker":"{{ticker}}","price":{{close}},"reason":"ema_exit","strategy":"APEX_v2"}')
 
 plot(strategy.position_size > 0 ? effStop : na, "Stop effettivo",
      color=color.red, style=plot.style_linebr)
+
+// ── Tabella statistiche live sul grafico ───────────────────────────
+var table stats = table.new(position.top_right, 2, 6, border_width=1,
+     bgcolor=color.new(color.black, 80))
+if barstate.islastconfirmedhistory
+    netPct   = strategy.netprofit / strategy.initial_capital * 100
+    ddPct    = strategy.max_drawdown / strategy.initial_capital * 100
+    pf       = strategy.grossloss > 0 ? strategy.grossprofit / strategy.grossloss : na
+    winRate  = strategy.closedtrades > 0 ? strategy.wintrades / strategy.closedtrades * 100 : na
+    table.cell(stats, 0, 0, "APEX v2",        text_color=color.white, text_size=size.small)
+    table.cell(stats, 1, 0, "",               text_color=color.white, text_size=size.small)
+    table.cell(stats, 0, 1, "Profitto netto", text_color=color.white, text_size=size.small)
+    table.cell(stats, 1, 1, str.tostring(netPct, "#.#") + "%",
+         text_color=netPct >= 0 ? color.lime : color.red, text_size=size.small)
+    table.cell(stats, 0, 2, "Max drawdown",   text_color=color.white, text_size=size.small)
+    table.cell(stats, 1, 2, str.tostring(ddPct, "#.#") + "%", text_color=color.orange, text_size=size.small)
+    table.cell(stats, 0, 3, "Profit factor",  text_color=color.white, text_size=size.small)
+    table.cell(stats, 1, 3, str.tostring(pf, "#.##"), text_color=color.white, text_size=size.small)
+    table.cell(stats, 0, 4, "Win rate",       text_color=color.white, text_size=size.small)
+    table.cell(stats, 1, 4, str.tostring(winRate, "#.#") + "%", text_color=color.white, text_size=size.small)
+    table.cell(stats, 0, 5, "Trade chiusi",   text_color=color.white, text_size=size.small)
+    table.cell(stats, 1, 5, str.tostring(strategy.closedtrades), text_color=color.white, text_size=size.small)

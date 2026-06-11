@@ -34,19 +34,22 @@ prova di profittabilità**, per tre motivi:
 sulle cripto. Quelli *mean reversion* (BB short, range trading) perdono nel
 lungo periodo. Da qui nasce APEX.
 
-## 🏆 APEX Trend Strategy (la strategia costruita)
+## 🏆 APEX Trend Strategy v2 (la strategia costruita)
 
-File: [`pinescript/apex_trend_strategy.pine`](pinescript/apex_trend_strategy.pine) — copia/incolla nel Pine Editor di TradingView, timeframe **1D**.
+File: [`pinescript/apex_trend_strategy.pine`](pinescript/apex_trend_strategy.pine) — copia/incolla nel Pine Editor di TradingView, timeframe **1D**. Include alert JSON pronti per webhook (Coinrule/3Commas), tabella statistiche sul grafico e tutti i parametri configurabili.
 
 Regole:
-- **Regime**: si opera solo se `close > EMA200` (mai contro il trend strutturale)
+- **Regime locale**: `close > EMA200` **e** `EMA50 > EMA200` (mai contro il trend)
+- **Regime di mercato**: le altcoin entrano solo se **anche BTC** è sopra la sua
+  EMA200 — quando BTC è in bear, le alt sanguinano: questo filtro da solo
+  migliora CAGR *e* drawdown (vedi `backtest/experiments.csv`)
 - **Entrata**: chiusura sopra il massimo di chiusura degli ultimi 30 giorni (breakout Donchian)
 - **Uscite**: chiusura sotto EMA20 • trailing stop 4×ATR(14) • stop di emergenza -12%
-- **Money management** (la vera differenza): si investe solo la frazione di
-  capitale per cui il trailing stop costa ~10% dell'equity. Con volatilità alta
-  si compra poco, con volatilità bassa di più. È questo che taglia il drawdown.
+- **Money management** (dove si vince davvero): posizione dimensionata perché lo
+  stop costi ~10% dell'equity, **con cap del 30% di capitale per coin**. Il cap
+  forza la diversificazione: nel test taglia il DD di 10 punti *e aumenta* il CAGR.
 
-### Risultati backtest (2021 → giu 2026, commissioni 0.10% + slippage 0.05% per lato)
+### Risultati per singola cripto (2021 → giu 2026, costi 0.15%/lato)
 
 | Cripto | Rendimento tot. | CAGR | MaxDD | Sharpe | Trade | Win rate | Profit factor |
 |---|---|---|---|---|---|---|---|
@@ -56,13 +59,40 @@ Regole:
 | BNB | +237.1% | 25.1% | -44.5% | 0.78 | 31 | 35.5% | 5.51 |
 | XRP | +193.6% | 21.9% | -41.8% | 0.81 | 28 | 32.1% | 2.85 |
 
-**Portafoglio (capitale diviso sulle 5 cripto): +276.8% totale, CAGR 27.7%,
-MaxDD -17.0%, Sharpe 1.31.** Nel bear market 2022 (quando BTC faceva -65% e
-SOL -94%) il portafoglio ha perso solo il 4.5%.
+### Portafoglio reale a capitale condiviso (un conto, 5 cripto insieme)
 
-Il profit factor è positivo su **tutte e 5** le cripto e i parametri sono su un
-plateau robusto (le combinazioni vicine danno risultati simili, vedi
-`backtest/sweep_results.csv`): non è un risultato cucito sui dati.
+Simulato in [`backtest/portfolio.py`](backtest/portfolio.py): un solo conto,
+sizing a rischio sull'equity corrente, cap 30%/posizione, priorità ai segnali
+con momentum più forte. Profit factor positivo su tutte e 5 le coin.
+
+| Periodo | CAGR | MaxDD | Sharpe | Sortino | Calmar | Profit factor |
+|---|---|---|---|---|---|---|
+| **Full 2021→2026** | **83.5%** | **-24.6%** | 1.69 | 1.69 | 3.39 | 6.64 |
+| **Out-of-sample 2024→2026** (parametri congelati) | **18.9%** | **-22.2%** | 0.78 | 0.63 | 0.85 | 3.61 |
+
+Rendimenti per anno: 2021 **+903%** · 2022 **0%** (bear: la strategia resta
+fuori) · 2023 **+67%** · 2024 **+40%** · 2025 **+10%** · 2026 YTD ~0%.
+
+### Validazione (la parte che i report di marketing non mostrano)
+
+- **Walk-forward**: parametri ottimizzati SOLO su 2021-23 e congelati →
+  su 2024-26 la strategia resta profittevole (PF 3.6). La config migliore
+  in-sample (30/3.0/20) e quella finale (30/4.0/20) sono adiacenti sul plateau:
+  niente overfitting da picco isolato.
+- **Monte Carlo** (2000 block-bootstrap): DD mediano -32%, 95° percentile
+  -48%. Tradotto: il -24.6% realizzato è nella parte fortunata della
+  distribuzione, **pianifica come se un -40/50% potesse accadere**.
+- **Stress test costi doppi** (0.30%/lato): CAGR 83.5% → 80.5%. Robusta.
+- **Senza i 5 trade migliori**: profit factor ancora 2.8 → l'edge non dipende
+  da pochi colpi fortunati.
+- Report completo: [`backtest/validation_report.txt`](backtest/validation_report.txt),
+  lista trade: [`backtest/trades_final.csv`](backtest/trades_final.csv),
+  grafici: `backtest/charts/`.
+
+**Aspettativa realistica**: il CAGR full-period (83%) è gonfiato dal bull 2021.
+Il numero su cui ragionare è l'out-of-sample: **~15-20% annuo con DD ~-20/25%**
+in condizioni normali, con upside enorme quando arriva un bull market vero —
+e soprattutto capitale protetto nei bear (2022: 0% contro -65% di BTC).
 
 ## Struttura del repo
 
@@ -73,13 +103,25 @@ pinescript/
 backtest/
   engine.py                     ← motore event-driven (no lookahead, costi inclusi)
   strategies.py                 ← logica identica ai .pine
-  tune.py                       ← sweep parametri
-  run.py                        ← esegue tutto e genera results.md
-  results.md                    ← report completo
+  portfolio.py                  ← simulatore portafoglio a capitale condiviso
+  validate.py                   ← walk-forward, Monte Carlo, stress test, grafici
+  tune.py                       ← sweep parametri single-symbol
+  run.py                        ← backtest per-cripto, genera results.md
+  results.md / validation_report.txt / trades_final.csv / charts/
 data/                           ← OHLCV giornalieri 2021→2026 (fonte FMP)
 ```
 
-Per riprodurre: `pip install pandas numpy && python3 backtest/run.py`
+Per riprodurre: `pip install pandas numpy matplotlib`, poi
+`python3 backtest/run.py` (per-cripto) e `python3 backtest/validate.py`
+(portafoglio + validazione completa).
+
+### Nota metodologica (trasparenza)
+
+I parametri core (canale 30, trailing 4×ATR, EMA20 di uscita) sono validati
+walk-forward. Le scelte *strutturali* (filtro BTC, cap 30%, rischio 10%) sono
+state selezionate guardando l'intero periodo: è una forma leggera di bias di
+selezione, mitigata dal fatto che ogni variante vicina resta ampiamente
+profittevole (vedi `backtest/experiments.csv`). Nessun backtest è una promessa.
 
 ## Limiti e avvertenze
 

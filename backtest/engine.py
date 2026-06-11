@@ -225,19 +225,30 @@ def compute_metrics(eq: pd.Series, trades: list, initial: float) -> dict:
     max_dd = dd.min()
     daily_ret = eq.pct_change().dropna()
     sharpe = (daily_ret.mean() / daily_ret.std() * np.sqrt(365)) if daily_ret.std() > 0 else 0.0
+    downside = daily_ret[daily_ret < 0].std()
+    sortino = (daily_ret.mean() / downside * np.sqrt(365)) if downside and downside > 0 else 0.0
+    calmar = cagr / abs(max_dd) if max_dd < 0 else float("inf")
     wins = [t for t in trades if t.ret_pct > 0]
     losses = [t for t in trades if t.ret_pct <= 0]
     gross_win = sum(t.ret_pct for t in wins)
     gross_loss = -sum(t.ret_pct for t in losses)
+    # massima serie di perdite consecutive
+    max_consec = streak = 0
+    for t in trades:
+        streak = streak + 1 if t.ret_pct <= 0 else 0
+        max_consec = max(max_consec, streak)
     return {
         "total_return_pct": round(total_ret, 2),
         "cagr_pct": round(cagr, 2),
         "max_drawdown_pct": round(max_dd, 2),
         "sharpe": round(float(sharpe), 2),
+        "sortino": round(float(sortino), 2),
+        "calmar": round(float(calmar), 2),
         "n_trades": len(trades),
         "win_rate_pct": round(len(wins) / len(trades) * 100, 1) if trades else 0.0,
         "profit_factor": round(gross_win / gross_loss, 2) if gross_loss > 0 else float("inf"),
         "avg_trade_pct": round(np.mean([t.ret_pct for t in trades]), 2) if trades else 0.0,
+        "max_consec_losses": max_consec,
     }
 
 
