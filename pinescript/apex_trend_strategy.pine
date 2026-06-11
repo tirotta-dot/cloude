@@ -11,8 +11,8 @@
 //                     ~10% dell'equity, con cap del 30% per posizione
 //
 //  Validazione 2021->giu 2026 su BTC/ETH/SOL/BNB/XRP (vedi backtest/):
-//   portafoglio: CAGR 83% full-period | out-of-sample 2024-26: CAGR ~19%,
-//   MaxDD -22%, profit factor 3.6 | Monte Carlo DD p95: -48%
+//   portafoglio: CAGR 85% full / ~19% out-of-sample 2024-26, MaxDD -22%,
+//   profit factor 3.6 | Monte Carlo DD p95: -48%
 //  Su un grafico singolo i risultati differiscono dal portafoglio.
 // ─────────────────────────────────────────────────────────────────────
 strategy("APEX Trend Strategy v2 [Daily]", overlay=true,
@@ -35,7 +35,7 @@ maxFracPerc  = input.float(30.0,"Cap posizione % equity",     group="Money manag
      tooltip="Limite massimo di capitale per singola posizione. Nel portafoglio a 5 cripto il 30% e' la config validata; su chart singolo puoi alzarlo (piu' rendimento, piu' drawdown).")
 levMult      = input.float(1.0, "Leva (1 = spot)",            group="Money management",
      minval=1.0, maxval=3.0, step=0.25,
-     tooltip="PRESET APEX-X (aggressivo, solo futures): rischio 15, cap 50, leva 2, trailing 5. Backtest: CAGR ~111% full / ~68% out-of-sample, ma Monte Carlo stima drawdown fino a -60% (p95). Usalo solo se accetti questo rischio. Il funding dei perpetual NON e' simulato da TradingView.")
+     tooltip="PRESET APEX-X (aggressivo, solo futures): rischio 15, cap 50, leva 2, trailing 5. Backtest: CAGR ~116% full / ~75% out-of-sample, ma Monte Carlo stima drawdown fino a -60% (p95). Usalo solo se accetti questo rischio. Il funding dei perpetual NON e' simulato da TradingView.")
 startDate    = input.time(timestamp("2021-01-01"), "Inizio backtest", group="Periodo")
 endDate      = input.time(timestamp("2030-01-01"), "Fine backtest",   group="Periodo")
 
@@ -49,7 +49,7 @@ chHigh  = ta.highest(close, chLen)[1]
 // regime BTC calcolato sul daily del simbolo scelto (no lookahead)
 [btcClose, btcEma] = request.security(btcSymbol, "D",
      [close, ta.ema(close, regimeLen)], lookahead=barmerge.lookahead_off)
-isBtcChart = str.contains(syminfo.ticker, "BTC")
+isBtcChart = syminfo.basecurrency == "BTC"
 btcOk      = not useBtcFilter or isBtcChart or btcClose > btcEma
 
 inDate   = time >= startDate and time <= endDate

@@ -143,9 +143,11 @@ def run_backtest(df: pd.DataFrame, sig: StrategySignals, symbol: str,
             # tale che la distanza dello stop costi ~risk_pct% dell'equity
             frac = 1.0
             if sig.risk_pct is not None:
+                # ATR della barra PRECEDENTE: all'apertura quello odierno
+                # non e' ancora noto (e Pine usa quello della barra segnale)
                 stop_dist_pct = None
-                if sig.trail_atr_mult is not None and atr_arr is not None and not np.isnan(atr_arr[i]):
-                    stop_dist_pct = sig.trail_atr_mult * atr_arr[i] / o[i] * 100
+                if sig.trail_atr_mult is not None and atr_arr is not None and i > 0 and not np.isnan(atr_arr[i - 1]):
+                    stop_dist_pct = sig.trail_atr_mult * atr_arr[i - 1] / o[i] * 100
                 elif sig.sl_pct is not None:
                     stop_dist_pct = sig.sl_pct
                 if stop_dist_pct and stop_dist_pct > 0:
@@ -166,6 +168,14 @@ def run_backtest(df: pd.DataFrame, sig: StrategySignals, symbol: str,
                 tp_px = entry_px * (1 + sig.tp_pct / 100) if is_long else entry_px * (1 - sig.tp_pct / 100)
             trail_px = -np.inf if is_long else np.inf
             pending_entry = False
+
+        # stop fisso attivo gia' sulla barra di ingresso (protezione dai
+        # crolli nel giorno stesso dell'entrata, come strategy.exit in Pine)
+        if qty != 0 and i == entry_i and not np.isnan(stop_px):
+            if is_long and l[i] <= stop_px:
+                close_position(i, stop_px, "stop")
+            elif not is_long and h[i] >= stop_px:
+                close_position(i, stop_px, "stop")
 
         # 2) gestione intrabar di SL/TP/trailing sulla barra corrente.
         #    Il trailing usato qui e' quello calcolato fino alla barra

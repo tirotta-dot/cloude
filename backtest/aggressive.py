@@ -25,7 +25,8 @@ OOS_START = "2024-01-01"
 
 def evaluate(data, p: ApexParams) -> dict:
     full = run_portfolio(data, p)
-    d_oos = {s: df.loc["2023-06-01":] for s, df in data.items()}  # warmup indicatori
+    # warmup lungo (19 mesi) perche' EMA200 e momentum siano a regime
+    d_oos = {s: df.loc["2022-06-01":] for s, df in data.items()}
     oos = run_portfolio(d_oos, p)
     eq = oos.equity.loc[OOS_START:]
     m_oos = compute_metrics(eq / eq.iloc[0] * 10_000,

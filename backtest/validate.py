@@ -48,7 +48,8 @@ def walk_forward(data, base: ApexParams):
     """Ottimizza su 2021-2023 (in-sample), congela, verifica su 2024-2026."""
     is_end = "2023-12-31"
     d_is = {s: df.loc[:is_end] for s, df in data.items()}
-    d_oos = {s: df.loc["2023-06-01":] for s, df in data.items()}  # warmup EMA200
+    # warmup lungo (19 mesi) perche' l'EMA200 sia a regime all'inizio OOS
+    d_oos = {s: df.loc["2022-06-01":] for s, df in data.items()}
     oos_start = "2024-01-01"
 
     grid = list(product([20, 30, 40, 55], [3.0, 4.0, 5.0], [20, 30]))

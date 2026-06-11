@@ -22,13 +22,13 @@ prova di profittabilità**, per tre motivi:
 
 | Bot Coinrule | CAGR medio | MaxDD medio | Verdetto |
 |---|---|---|---|
-| BB + RSI Short Selling | **-22.9%** | -75% | ❌ Il peggiore: shortare gli eccessi rialzisti in un asset che fa +10x è suicida. Il +15% del report è una settimana fortunata. |
-| Range Trading (Solana) | -6.2% | -59% | ❌ Funziona solo nei laterali; nei trend forti compra i crolli senza protezione sufficiente. |
-| Flash Crash | -3.4% | -46% | ❌ Idea sensata ma TP/SL fissi la rovinano: vince spesso ma perde di più quando il "crash" continua. |
-| Buy + SL/TP | -2.2% | -50% | ❌ Troppo semplice: l'esito dipende solo dal rapporto TP/SL, le commissioni erodono tutto. |
-| Scalping On Trend | -0.5% | -13% | ⚠️ Quasi pari: TP 2% / SL 1.5% sul daily genera tante operazioni mangiate dalle commissioni (su timeframe brevi può andare meglio). |
+| BB + RSI Short Selling | **-17.6%** | -68% | ❌ Il peggiore: shortare gli eccessi rialzisti in un asset che fa +10x è suicida. Il +15% del report è una settimana fortunata. |
+| Flash Crash | -10.7% | -54% | ❌ Idea sensata ma TP/SL fissi la rovinano: vince spesso ma perde di più quando il "crash" continua. |
+| Range Trading (Solana) | -7.7% | -64% | ❌ Funziona solo nei laterali; nei trend forti compra i crolli senza protezione sufficiente. |
+| Buy + SL/TP | -1.5% | -46% | ❌ Troppo semplice: l'esito dipende solo dal rapporto TP/SL, le commissioni erodono tutto. |
+| Scalping On Trend | +0.9% | -10% | ⚠️ Quasi pari: TP 2% / SL 1.5% sul daily genera tante operazioni mangiate dalle commissioni (su timeframe brevi può andare meglio). |
 | Rebalance Trend Following | +9.7% | -58% | ⚠️ Profittevole ma DD inaccettabile: entra/esce troppo tardi. |
-| MA Crossing (9/21) | +19.6% | -55% | ⚠️ L'unico concetto che regge: il trend following paga sulle cripto. Ma il DD resta enorme. |
+| MA Crossing (9/21) | +21.4% | -51% | ⚠️ L'unico concetto che regge: il trend following paga sulle cripto. Ma il DD resta enorme. |
 
 **Conclusione**: dei 7 bot, solo quelli *trend following* hanno un edge reale
 sulle cripto. Quelli *mean reversion* (BB short, range trading) perdono nel
@@ -53,11 +53,11 @@ Regole:
 
 | Cripto | Rendimento tot. | CAGR | MaxDD | Sharpe | Trade | Win rate | Profit factor |
 |---|---|---|---|---|---|---|---|
-| BTC | +60.6% | 9.1% | -24.0% | 0.56 | 28 | 50.0% | 1.91 |
-| ETH | +40.3% | 6.4% | -20.0% | 0.43 | 25 | 44.0% | 1.94 |
-| SOL | +852.3% | 51.4% | -24.6% | 1.52 | 22 | 72.7% | 11.77 |
-| BNB | +237.1% | 25.1% | -44.5% | 0.78 | 31 | 35.5% | 5.51 |
-| XRP | +193.6% | 21.9% | -41.8% | 0.81 | 28 | 32.1% | 2.85 |
+| BTC | +61.1% | 9.2% | -24.1% | 0.56 | 28 | 50.0% | 1.91 |
+| ETH | +40.9% | 6.5% | -19.9% | 0.43 | 25 | 44.0% | 1.94 |
+| SOL | +945.9% | 54.0% | -24.5% | 1.56 | 22 | 72.7% | 16.89 |
+| BNB | +238.4% | 25.2% | -44.4% | 0.78 | 31 | 35.5% | 5.51 |
+| XRP | +171.0% | 20.1% | -46.8% | 0.75 | 29 | 31.0% | 2.85 |
 
 ### Portafoglio reale a capitale condiviso (un conto, 5 cripto insieme)
 
@@ -67,10 +67,10 @@ con momentum più forte. Profit factor positivo su tutte e 5 le coin.
 
 | Periodo | CAGR | MaxDD | Sharpe | Sortino | Calmar | Profit factor |
 |---|---|---|---|---|---|---|
-| **Full 2021→2026** | **83.5%** | **-24.6%** | 1.69 | 1.69 | 3.39 | 6.64 |
-| **Out-of-sample 2024→2026** (parametri congelati) | **18.9%** | **-22.2%** | 0.78 | 0.63 | 0.85 | 3.61 |
+| **Full 2021→2026** | **84.7%** | **-24.9%** | 1.71 | 1.71 | 3.41 | 6.92 |
+| **Out-of-sample 2024→2026** (parametri congelati) | **19.1%** | **-22.2%** | 0.79 | 0.64 | 0.86 | 3.61 |
 
-Rendimenti per anno: 2021 **+903%** · 2022 **0%** (bear: la strategia resta
+Rendimenti per anno: 2021 **+938%** · 2022 **0%** (bear: la strategia resta
 fuori) · 2023 **+67%** · 2024 **+40%** · 2025 **+10%** · 2026 YTD ~0%.
 
 ### Validazione (la parte che i report di marketing non mostrano)
@@ -80,16 +80,16 @@ fuori) · 2023 **+67%** · 2024 **+40%** · 2025 **+10%** · 2026 YTD ~0%.
   in-sample (30/3.0/20) e quella finale (30/4.0/20) sono adiacenti sul plateau:
   niente overfitting da picco isolato.
 - **Monte Carlo** (2000 block-bootstrap): DD mediano -32%, 95° percentile
-  -48%. Tradotto: il -24.6% realizzato è nella parte fortunata della
+  -48%. Tradotto: il -24.9% realizzato è nella parte fortunata della
   distribuzione, **pianifica come se un -40/50% potesse accadere**.
-- **Stress test costi doppi** (0.30%/lato): CAGR 83.5% → 80.5%. Robusta.
+- **Stress test costi doppi** (0.30%/lato): CAGR 84.7% → 81.8%. Robusta.
 - **Senza i 5 trade migliori**: profit factor ancora 2.8 → l'edge non dipende
   da pochi colpi fortunati.
 - Report completo: [`backtest/validation_report.txt`](backtest/validation_report.txt),
   lista trade: [`backtest/trades_final.csv`](backtest/trades_final.csv),
   grafici: `backtest/charts/`.
 
-**Aspettativa realistica**: il CAGR full-period (83%) è gonfiato dal bull 2021.
+**Aspettativa realistica**: il CAGR full-period (85%) è gonfiato dal bull 2021.
 Il numero su cui ragionare è l'out-of-sample: **~15-20% annuo con DD ~-20/25%**
 in condizioni normali, con upside enorme quando arriva un bull market vero —
 e soprattutto capitale protetto nei bear (2022: 0% contro -65% di BTC).
@@ -110,14 +110,16 @@ Differenze rispetto ad APEX base:
 
 | | full 2021→26 | OOS 2024→26 | Monte Carlo |
 |---|---|---|---|
-| **APEX base** | CAGR 83% · DD -25% | CAGR 19% · DD -22% | DD p95 **-48%** |
-| **APEX-X** | **CAGR 111%** · DD -37% | **CAGR 68%** · DD -31% | DD p95 **-60%**, p99 -68% |
+| **APEX base** | CAGR 85% · DD -25% | CAGR 19% · DD -22% | DD p95 **-48%** |
+| **APEX-X** | **CAGR 116%** · DD -37% | **CAGR 75%** · DD -31% | DD p95 **-60%**, p99 -69% |
 
-Per anno (APEX-X): 2021 **+572%** · 2022 **0%** · 2023 **+129%** · 2024 **+205%** · 2025 +17%.
+Per anno (APEX-X): 2021 **+597%** · 2022 **0%** · 2023 **+127%** · 2024 **+238%** · 2025 +17%.
 
 Robustezza: i parametri vicini (rischio 12-18, cap 40-50, leva 1.75-2, trailing
-4.5-5.5) danno tutti full 93-126% e OOS 57-76% → plateau, non overfitting.
-Stress: con funding al 50%/anno o costi doppi resta sopra il 100% full / 60% OOS.
+4.5-5.5) danno tutti full ~93-126% e OOS ~57-76% → plateau, non overfitting.
+Stress: con funding al 50%/anno o costi doppi resta sopra il 110% full / 69% OOS.
+Il motore è coperto da test automatici anti-lookahead (`backtest/test_engine.py`)
+e i dati FMP sono stati verificati contro Crypto.com Exchange (scarti ≤0.2%).
 Senza leva il motore di rotazione si spegne (OOS 14%): la leva qui non è un
 vezzo, è strutturale — e infatti il conto va gestito su futures.
 

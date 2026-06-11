@@ -131,7 +131,8 @@ def run_portfolio(data: dict[str, pd.DataFrame], p: ApexParams,
             if n_open >= p.max_pos or eq_now <= 0:
                 continue
             o = arr[s]["open"][i]
-            a = sig[s]["atr"][i]
+            # ATR della barra precedente: quello odierno non e' noto all'open
+            a = sig[s]["atr"][i - 1] if i > 0 else np.nan
             if np.isnan(a) or o <= 0:
                 continue
             stop_dist_pct = p.trail_mult * a / o * 100
@@ -150,10 +151,13 @@ def run_portfolio(data: dict[str, pd.DataFrame], p: ApexParams,
                       "stop": fill * (1 - p.sl_pct / 100), "trail": -np.inf}
             cash -= invested
 
-        # 3) stop intrabar (trailing aggiornato solo fino a ieri: no lookahead)
+        # 3) stop intrabar (trailing aggiornato solo fino a ieri: no lookahead);
+        #    lo stop fisso e' attivo anche sulla barra di ingresso
         for s in SYMBOLS:
             ps = pos[s]
-            if ps and i > ps["entry_i"]:
+            if ps and i == ps["entry_i"] and arr[s]["low"][i] <= ps["stop"]:
+                close_pos(s, i, ps["stop"], "stop")
+            elif ps and i > ps["entry_i"]:
                 eff = max(ps["stop"], ps["trail"]) if np.isfinite(ps["trail"]) else ps["stop"]
                 if arr[s]["low"][i] <= eff:
                     close_pos(s, i, min(arr[s]["open"][i], eff), "stop")
