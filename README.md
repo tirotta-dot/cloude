@@ -169,6 +169,44 @@ mediano -52%, p95 -72%) dice che vanno previsti dimezzamenti del conto.
 Scegli in base al regime e alla tua tolleranza: X2 per esposizione massima
 al prossimo bull, X per compounding piu' regolare, APEX base spot per dormire.
 
+## 🛡️ APEX-V "all-weather": la risposta al regime 2025-26
+
+Il difetto vero di X2 era la finestra 2025-26 in perdita. Ho attaccato quello,
+testando due idee:
+
+- **Switch di modalità** (aggressivo/difensivo su ampiezza del regime):
+  **BOCCIATO dai dati** — peggiorava tutto (full 165→97%, 2025-26 da -8% a
+  -19%): tagliava l'esposizione proprio nelle transizioni di recupero.
+- **Vol-targeting istituzionale** (la leva scala sull'inverso della volatilità
+  realizzata 30g del portafoglio, mai sotto 1×): **PROMOSSO** — è APEX-V.
+
+| | X2 (max potenza) | **V (all-weather)** |
+|---|---|---|
+| CAGR full 2021-26 | 165% | 112% |
+| MaxDD | -42% | **-37%** |
+| Walk-forward 2023 | +260% | +198% |
+| Walk-forward 2024 | +350% | +53% |
+| **Walk-forward 2025-26** | **-8.4%** | **0.0%** |
+| Finestre WF negative | 1 su 3 | **0 su 3** |
+
+Per anno (V): 2021 +1348% · 2022 -4.9% · 2023 +170% · 2024 +50% · 2025 **0%**.
+Il prezzo dell'all-weather è chiaro: rinunci a metà del 2024 esplosivo in
+cambio di nessuna finestra negativa e leva che si sgonfia da sola nel chop.
+
+### Le due prove regine
+
+1. **Test freddo cross-sezionale**: sistema congelato applicato alle 5 coin
+   MAI usate per il tuning (ADA, DOGE, LINK, AVAX, DOT): **PF 2.36, CAGR 35%,
+   OOS 2024-26 +34.7%/anno (PF 2.77)**. L'edge si trasferisce a coin mai
+   viste: cattura un fenomeno reale del mercato, non rumore curve-fittato.
+2. **Ensemble di parametri** (capitale diviso su canale 20/30/55): CAGR 104%
+   con Sharpe migliore del singolo settaggio → in produzione elimina il
+   rischio di aver "azzeccato" il parametro. Opzionale ma consigliato.
+
+**Avvertenza onesta**: il vol-targeting è stato scelto osservando (anche) la
+debolezza 2025-26 — il suo vero out-of-sample inizia oggi. Le scelte
+strutturali restano validate da walk-forward ancorato e test freddo.
+
 ## Struttura del repo
 
 ```

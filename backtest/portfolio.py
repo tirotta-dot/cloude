@@ -51,6 +51,16 @@ class ApexParams:
     eq_curve_filter: bool = False  # rischio dimezzato se equity < EMA50(equity)
     pyramid: bool = False          # un add-on a meta' size su nuovo breakout
     vol_cap_pctile: float | None = None  # blocca ingressi se ATR% oltre il percentile
+    # ── meta-strategia (APEX-S) ──
+    mode_switch: bool = False      # commuta aggressivo/difensivo su ampiezza regime
+    breadth_hi: float = 0.5        # soglia di ampiezza per la modalita' aggressiva
+    def_risk: float = 8.0          # parametri della modalita' difensiva
+    def_frac: float = 0.30
+    def_topk: int = 3
+    def_lev: float = 1.0
+    vol_target: float | None = None  # vol annua target del portafoglio (es. 0.50)
+    vol_floor: float = 0.3           # leva minima del vol-targeting (1.0 = taglia solo la leva)
+    trade_only: tuple | None = None  # se impostato, opera solo questi simboli
 
 
 def build_signals(df: pd.DataFrame, p: ApexParams, btc_regime: pd.Series | None,
@@ -131,18 +141,17 @@ def run_portfolio(data: dict[str, pd.DataFrame], p: ApexParams,
                             fill, f"long:{s}", ret, reason))
         pos[s] = None
 
-    def entry_frac(s: str, i: int, eq_now: float) -> float:
+    def entry_frac(s: str, i: int, eq_now: float, risk: float, cap: float) -> float:
         """Frazione di equity da investire, con tutte le scale di rischio."""
         o = arr[s]["open"][i]
         a = sig[s]["atr"][i - 1] if i > 0 else np.nan  # ATR di ieri: no lookahead
         if np.isnan(a) or o <= 0:
             return 0.0
         stop_dist_pct = p.trail_mult * a / o * 100
-        risk = p.risk_pct
         if p.breadth_scaling and i > 0:
             breadth = np.mean([sig[x]["regime"][i - 1] for x in syms])
             risk *= max(0.4, breadth)
-        frac = min(p.max_frac, risk / max(stop_dist_pct, 1e-9))
+        frac = min(cap, risk / max(stop_dist_pct, 1e-9))
         if p.eq_curve_filter and eq_prev < eq_ema:
             frac *= 0.5   # il sistema stesso e' in drawdown: de-risk
         return frac
@@ -156,28 +165,51 @@ def run_portfolio(data: dict[str, pd.DataFrame], p: ApexParams,
 
         # 2) ingressi all'apertura: priorita' al momentum piu' forte
         eq_now = mark_equity(i, "open")
-        candidates = [s for s in syms if pend_in[s] and pos[s] is None]
+
+        # ── selezione modalita' giornaliera (APEX-S) ────────────────
+        # Usa solo informazioni della barra precedente: nessun lookahead.
+        risk_today, cap_today = p.risk_pct, p.max_frac
+        topk_today, lev_today = p.top_k, p.leverage
+        entries_on = True
+        if p.mode_switch and i > 0:
+            btc_on = sig["BTCUSD"]["regime"][i - 1]
+            breadth = float(np.mean([sig[x]["regime"][i - 1] for x in syms]))
+            if not btc_on:
+                entries_on = False          # mercato in bear: niente nuovi rischi
+            elif breadth < p.breadth_hi:    # regime fragile: modalita' difensiva
+                risk_today, cap_today = p.def_risk, p.def_frac
+                topk_today, lev_today = p.def_topk, p.def_lev
+        # vol-targeting: la leva disponibile scala sull'inverso della
+        # volatilita' realizzata del portafoglio (30 gg, annualizzata)
+        if p.vol_target is not None and i > 31:
+            eq_win = equity[i - 31:i]
+            rets = np.diff(eq_win) / eq_win[:-1]
+            rv = float(np.std(rets)) * np.sqrt(365)
+            if rv > 1e-6:
+                lev_today = min(lev_today, max(p.vol_floor, p.vol_target / rv))
+
+        candidates = [s for s in syms if pend_in[s] and pos[s] is None] if entries_on else []
         candidates.sort(key=lambda s: sig[s]["mom"][i], reverse=True)
         # rotazione: solo le prime k coin per momentum sono eleggibili
-        if p.top_k is not None:
+        if topk_today is not None:
             rank = sorted(syms, key=lambda s: sig[s]["mom"][i], reverse=True)
-            allowed = set(rank[:p.top_k])
+            allowed = set(rank[:topk_today])
             candidates = [s for s in candidates if s in allowed]
         for s in candidates:
             pend_in[s] = False
             n_open = sum(1 for ps in pos.values() if ps)
             if n_open >= p.max_pos or eq_now <= 0:
                 continue
-            frac = entry_frac(s, i, eq_now)
+            frac = entry_frac(s, i, eq_now, risk_today, cap_today)
             if frac <= 0:
                 continue
             o = arr[s]["open"][i]
             # potere d'acquisto: con leva 1 e' il cash; con leva >1 si puo'
             # andare a cash negativo fino a leverage * equity di esposizione
             invested_now = eq_now - cash
-            buying_power = p.leverage * eq_now - invested_now
+            buying_power = lev_today * eq_now - invested_now
             invested = min(frac * eq_now, buying_power)
-            if p.leverage <= 1.0:
+            if lev_today <= 1.0:
                 invested = min(invested, cash)
             if invested < eq_now * 0.01:
                 continue
@@ -191,11 +223,11 @@ def run_portfolio(data: dict[str, pd.DataFrame], p: ApexParams,
         for s in syms:
             if pend_add[s] and pos[s]:
                 ps = pos[s]
-                frac = entry_frac(s, i, eq_now) * 0.5
+                frac = entry_frac(s, i, eq_now, risk_today, cap_today) * 0.5
                 invested_now = eq_now - cash
-                buying_power = p.leverage * eq_now - invested_now
+                buying_power = lev_today * eq_now - invested_now
                 invested = min(frac * eq_now, buying_power)
-                if p.leverage <= 1.0:
+                if lev_today <= 1.0:
                     invested = min(invested, cash)
                 if invested >= eq_now * 0.01:
                     fill = arr[s]["open"][i] * (1 + cost)
@@ -232,7 +264,8 @@ def run_portfolio(data: dict[str, pd.DataFrame], p: ApexParams,
         for s in syms:
             ps = pos[s]
             if ps is None and sig[s]["entry"][i]:
-                pend_in[s] = True
+                if p.trade_only is None or s in p.trade_only:
+                    pend_in[s] = True
             if ps is not None and sig[s]["exit"][i]:
                 # smart exit: l'uscita EMA20 scatta solo se il trade e' in
                 # perdita; i vincitori restano gestiti dal solo trailing

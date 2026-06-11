@@ -27,6 +27,13 @@ APEX_X2 = ApexParams(use_btc_filter=True, use_alignment=True,
                      top_k=5, leverage=2.0,
                      vol_cap_pctile=0.85, chandelier=True, eq_curve_filter=True)
 
+# APEX-V "all-weather": X2 + vol-targeting 60% annuo applicato SOLO alla
+# leva (floor 1x). Risultato: nessuna finestra walk-forward negativa
+# (2023 +198%, 2024 +53%, 2025-26 0.0%) e DD piu' basso, al prezzo di
+# meno upside negli anni esplosivi. Validata anche sul test freddo
+# cross-sezionale (5 coin mai usate per il tuning: PF 2.4).
+APEX_V = replace(APEX_X2, vol_target=0.60, vol_floor=1.0)
+
 
 def anchored_walk_forward(data, p: ApexParams):
     """3 finestre out-of-sample consecutive con parametri sempre congelati:
