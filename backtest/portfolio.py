@@ -282,6 +282,14 @@ SYMBOLS_10 = SYMBOLS + ["ADAUSD", "DOGEUSD", "LINKUSD", "AVAXUSD", "DOTUSD"]
 
 
 def load_universe(symbols=None) -> dict[str, pd.DataFrame]:
-    """Carica un universo arbitrario di coin (default: le 5 originali)."""
+    """Carica un universo arbitrario di coin (default: le 5 originali).
+
+    Le coin con storico piu' corto (es. DOT su FMP parte da giu 2021)
+    vengono riallineate al calendario di BTC con NaN iniziali: gli
+    indicatori restano NaN e bloccano gli ingressi finche' non c'e'
+    storia sufficiente, come per una coin listata piu' tardi.
+    """
     symbols = symbols or SYMBOLS
-    return {s: load_csv(os.path.join(DATA, f"{s}.csv")) for s in symbols}
+    data = {s: load_csv(os.path.join(DATA, f"{s}.csv")) for s in symbols}
+    idx = data["BTCUSD"].index
+    return {s: df.reindex(idx) for s, df in data.items()}

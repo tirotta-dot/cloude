@@ -24,7 +24,7 @@ SYMBOLS_X2 = ["BTCUSD", "ETHUSD", "SOLUSD", "BNBUSD", "XRPUSD",
 APEX_X2 = ApexParams(use_btc_filter=True, use_alignment=True,
                      ch_len=20, exit_len=20, trail_mult=5.0,
                      risk_pct=15.0, max_frac=0.50, max_pos=6,
-                     top_k=4, leverage=2.0,
+                     top_k=5, leverage=2.0,
                      vol_cap_pctile=0.85, chandelier=True, eq_curve_filter=True)
 
 

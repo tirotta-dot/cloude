@@ -133,6 +133,42 @@ APEX-X (rischio 15, cap 50, leva 2, trailing 5) sulle coin indicate dallo
 screener. Il funding dei perpetual non è simulato da TradingView: i numeri
 reali saranno leggermente più bassi.
 
+## ⚡ APEX-X2: piu' trade, universo a 10 coin (l'evoluzione iperattiva)
+
+Richiesta: piu' operazioni. Risposta misurata (`backtest/report.py`,
+`APEX_X2_report.md`): universo raddoppiato a **10 coin** (+ADA, DOGE, LINK,
+AVAX, DOT), rotazione **top-5**, max **6 posizioni**, canale piu' veloce
+(**20gg**), piu' i 3 miglioramenti promossi dal banco di prova
+(`improvements.py`): **filtro volatilita' 85° pctile** (blocca i breakout in
+blow-off), **trailing chandelier**, **protezione equity-curve** (rischio
+dimezzato quando il sistema stesso e' in drawdown). Bocciati dopo test:
+smart-exit, piramidazione, breadth-scaling, momentum-required (degradavano
+l'out-of-sample).
+
+| | APEX-X (5 coin) | **APEX-X2 (10 coin)** |
+|---|---|---|
+| Trade totali (5.5 anni) | 93 (~17/anno) | **157 (~29/anno)** |
+| CAGR full | 116% | **165%** |
+| MaxDD full | -37% | -42% |
+| Calmar | 3.16 | **3.89** |
+| Monte Carlo DD p95 | -60% | **-72%** |
+
+Per anno (X2): 2021 **+1420%** · 2022 -5% · 2023 **+230%** · 2024 **+347%** ·
+**2025 -12%** · 2026 ~0%.
+
+**Walk-forward ancorato** (parametri mai ri-ottimizzati sui dati che li
+giudicano): 2023 **+260%** (PF 8.6) · 2024 **+350%** (PF 8.2) ·
+**2025-26 -8.4% (PF 0.92)** ← *il sistema sta perdendo nel regime attuale*.
+
+### Lettura da professionista
+X2 e' una **macchina da bull market**: piu' coin + canale veloce + leva =
+esplosivo quando il mercato corre (2021/23/24), ma **negativo nei regimi
+deboli** (2025-26) dove X base restava a +17%/-0%. Piu' trade ≠ piu' soldi
+sempre: paghi l'attivita' extra nei mercati laterali. Il Monte Carlo (DD
+mediano -52%, p95 -72%) dice che vanno previsti dimezzamenti del conto.
+Scegli in base al regime e alla tua tolleranza: X2 per esposizione massima
+al prossimo bull, X per compounding piu' regolare, APEX base spot per dormire.
+
 ## Struttura del repo
 
 ```
