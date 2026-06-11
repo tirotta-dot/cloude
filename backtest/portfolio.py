@@ -40,6 +40,9 @@ class ApexParams:
     use_alignment: bool = False    # richiede anche EMA50 > EMA200
     fee_pct: float = 0.10
     slippage_pct: float = 0.05
+    top_k: int | None = None       # entra solo nelle prime k coin per momentum 90g
+    leverage: float = 1.0          # esposizione massima in multipli di equity
+    borrow_apr: float = 12.0       # costo annuo del margine sul cash negativo
 
 
 def build_signals(df: pd.DataFrame, p: ApexParams, btc_regime: pd.Series | None,
@@ -117,10 +120,15 @@ def run_portfolio(data: dict[str, pd.DataFrame], p: ApexParams,
         eq_now = mark_equity(i, "open")
         candidates = [s for s in SYMBOLS if pend_in[s] and pos[s] is None]
         candidates.sort(key=lambda s: sig[s]["mom"][i], reverse=True)
+        # rotazione: solo le prime k coin per momentum sono eleggibili
+        if p.top_k is not None:
+            rank = sorted(SYMBOLS, key=lambda s: sig[s]["mom"][i], reverse=True)
+            allowed = set(rank[:p.top_k])
+            candidates = [s for s in candidates if s in allowed]
         for s in candidates:
             pend_in[s] = False
             n_open = sum(1 for ps in pos.values() if ps)
-            if n_open >= p.max_pos or cash <= 1:
+            if n_open >= p.max_pos or eq_now <= 0:
                 continue
             o = arr[s]["open"][i]
             a = sig[s]["atr"][i]
@@ -128,7 +136,13 @@ def run_portfolio(data: dict[str, pd.DataFrame], p: ApexParams,
                 continue
             stop_dist_pct = p.trail_mult * a / o * 100
             frac = min(p.max_frac, p.risk_pct / max(stop_dist_pct, 1e-9))
-            invested = min(cash, frac * eq_now)
+            # potere d'acquisto: con leva 1 e' il cash; con leva >1 si puo'
+            # andare a cash negativo fino a leverage * equity di esposizione
+            invested_now = eq_now - cash
+            buying_power = p.leverage * eq_now - invested_now
+            invested = min(frac * eq_now, buying_power)
+            if p.leverage <= 1.0:
+                invested = min(invested, cash)
             if invested < eq_now * 0.01:
                 continue
             fill = o * (1 + cost)
@@ -158,8 +172,19 @@ def run_portfolio(data: dict[str, pd.DataFrame], p: ApexParams,
             if pos[s] is not None and sig[s]["exit"][i]:
                 pend_out[s] = True
 
+        # interessi sul margine (cash negativo) e mark-to-market
+        if cash < 0:
+            cash -= abs(cash) * p.borrow_apr / 100 / 365
         equity[i] = mark_equity(i, "close")
         exposure[i] = (equity[i] - cash) / equity[i] if equity[i] > 0 else 0
+        if equity[i] <= 0:  # conto azzerato: liquidazione forzata, fine
+            for s in SYMBOLS:
+                if pos[s]:
+                    close_pos(s, i, arr[s]["close"][i], "margin_call")
+            cash = 0.0
+            equity[i:] = 0.0
+            exposure[i:] = 0.0
+            break
 
     # liquidazione finale per il calcolo dei rendimenti
     last = len(dates) - 1

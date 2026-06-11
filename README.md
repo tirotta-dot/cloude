@@ -94,6 +94,43 @@ Il numero su cui ragionare è l'out-of-sample: **~15-20% annuo con DD ~-20/25%**
 in condizioni normali, con upside enorme quando arriva un bull market vero —
 e soprattutto capitale protetto nei bear (2022: 0% contro -65% di BTC).
 
+## 🚀 APEX-X: la versione aggressiva (target 100% annuo)
+
+> Prima la verità: **un "100% annuo garantito" non esiste**. APEX-X è quanto di
+> più vicino si possa costruire onestamente, e si paga in rischio. Tutto in
+> [`backtest/aggressive.py`](backtest/aggressive.py) e `aggressive_results.csv`.
+
+Differenze rispetto ad APEX base:
+- **Rotazione momentum**: opera solo le **top-3 coin per momentum 90 giorni**
+  (lo screener [`apex_momentum_screener.pine`](pinescript/apex_momentum_screener.pine)
+  replica la classifica su TradingView)
+- **Rischio 15% / cap 50%** per posizione (vs 10%/30%)
+- **Leva 2×** (futures/margin; funding simulato al 12%/anno, stress fino al 50%)
+- **Trailing più largo 5×ATR** (lascia correre i trend con la leva)
+
+| | full 2021→26 | OOS 2024→26 | Monte Carlo |
+|---|---|---|---|
+| **APEX base** | CAGR 83% · DD -25% | CAGR 19% · DD -22% | DD p95 **-48%** |
+| **APEX-X** | **CAGR 111%** · DD -37% | **CAGR 68%** · DD -31% | DD p95 **-60%**, p99 -68% |
+
+Per anno (APEX-X): 2021 **+572%** · 2022 **0%** · 2023 **+129%** · 2024 **+205%** · 2025 +17%.
+
+Robustezza: i parametri vicini (rischio 12-18, cap 40-50, leva 1.75-2, trailing
+4.5-5.5) danno tutti full 93-126% e OOS 57-76% → plateau, non overfitting.
+Stress: con funding al 50%/anno o costi doppi resta sopra il 100% full / 60% OOS.
+Senza leva il motore di rotazione si spegne (OOS 14%): la leva qui non è un
+vezzo, è strutturale — e infatti il conto va gestito su futures.
+
+**Il prezzo del biglietto**: la media storica supera il 100%, ma NON ogni anno
+(2022: 0%, 2025: +17%) e il Monte Carlo dice di **pianificare un drawdown del
+-40/-60%**. Se un -50% ti farebbe staccare la spina, usa APEX base: la
+strategia migliore è quella che riesci a seguire nei momenti peggiori.
+
+Su TradingView: stessa strategia `apex_trend_strategy.pine` con preset
+APEX-X (rischio 15, cap 50, leva 2, trailing 5) sulle coin indicate dallo
+screener. Il funding dei perpetual non è simulato da TradingView: i numeri
+reali saranno leggermente più bassi.
+
 ## Struttura del repo
 
 ```

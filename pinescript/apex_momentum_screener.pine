@@ -1,0 +1,63 @@
+//@version=5
+// ─────────────────────────────────────────────────────────────────────
+//  APEX Momentum Screener - compagno di APEX-X (timeframe GIORNALIERO)
+//
+//  Replica la logica di rotazione di backtest/portfolio.py (top_k=3):
+//  classifica le 5 cripto per momentum a 90 giorni e mostra per ognuna
+//  lo stato dei filtri di regime. La strategia APEX-X va attivata SOLO
+//  sulle prime 3 coin in classifica che hanno tutti i filtri verdi.
+//  Aggiorna le posizioni una volta al giorno alla chiusura della candela.
+// ─────────────────────────────────────────────────────────────────────
+indicator("APEX Momentum Screener [Daily]", overlay=true)
+
+momLen = input.int(90,  "Periodo momentum (gg)")
+regLen = input.int(200, "EMA regime")
+s1 = input.symbol("BINANCE:BTCUSDT", "Coin 1")
+s2 = input.symbol("BINANCE:ETHUSDT", "Coin 2")
+s3 = input.symbol("BINANCE:SOLUSDT", "Coin 3")
+s4 = input.symbol("BINANCE:BNBUSDT", "Coin 4")
+s5 = input.symbol("BINANCE:XRPUSDT", "Coin 5")
+
+f_data(sym) =>
+    [c, mom, e200, e50] = request.security(sym, "D",
+         [close, close / close[momLen] - 1, ta.ema(close, regLen), ta.ema(close, 50)],
+         lookahead=barmerge.lookahead_off)
+    [c, mom, e200, e50]
+
+[c1, m1, l1, f1] = f_data(s1)
+[c2, m2, l2, f2] = f_data(s2)
+[c3, m3, l3, f3] = f_data(s3)
+[c4, m4, l4, f4] = f_data(s4)
+[c5, m5, l5, f5] = f_data(s5)
+
+btcRegimeOk = c1 > l1   // coin 1 = BTC: regime di mercato per tutte le alt
+
+var table t = table.new(position.middle_right, 5, 7, border_width=1,
+     bgcolor=color.new(color.black, 75))
+
+f_row(row, name, c, mom, e200, e50, isBtc) =>
+    regimeOk = c > e200 and e50 > e200 and (isBtc or btcRegimeOk)
+    table.cell(t, 0, row, name, text_color=color.white, text_size=size.small)
+    table.cell(t, 1, row, str.tostring(mom * 100, "#.#") + "%",
+         text_color=mom > 0 ? color.lime : color.red, text_size=size.small)
+    table.cell(t, 2, row, c > e200 ? "✔" : "✘",
+         text_color=c > e200 ? color.lime : color.red, text_size=size.small)
+    table.cell(t, 3, row, e50 > e200 ? "✔" : "✘",
+         text_color=e50 > e200 ? color.lime : color.red, text_size=size.small)
+    table.cell(t, 4, row, regimeOk ? "OPERABILE" : "no",
+         text_color=regimeOk ? color.lime : color.gray, text_size=size.small)
+
+if barstate.islast
+    table.cell(t, 0, 0, "Coin",        text_color=color.orange, text_size=size.small)
+    table.cell(t, 1, 0, "Mom 90g",     text_color=color.orange, text_size=size.small)
+    table.cell(t, 2, 0, "C>EMA200",    text_color=color.orange, text_size=size.small)
+    table.cell(t, 3, 0, "EMA50>200",   text_color=color.orange, text_size=size.small)
+    table.cell(t, 4, 0, "Stato",       text_color=color.orange, text_size=size.small)
+    f_row(1, "BTC", c1, m1, l1, f1, true)
+    f_row(2, "ETH", c2, m2, l2, f2, false)
+    f_row(3, "SOL", c3, m3, l3, f3, false)
+    f_row(4, "BNB", c4, m4, l4, f4, false)
+    f_row(5, "XRP", c5, m5, l5, f5, false)
+    table.cell(t, 0, 6, "Regola: APEX-X solo sulle top-3 per momentum con stato OPERABILE",
+         text_color=color.silver, text_size=size.tiny)
+    table.merge_cells(t, 0, 6, 4, 6)

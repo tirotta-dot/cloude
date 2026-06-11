@@ -33,6 +33,9 @@ riskPerc     = input.float(10.0,"Rischio per trade % equity", group="Money manag
      tooltip="La posizione e' dimensionata in modo che la distanza del trailing stop costi questa % dell'equity.")
 maxFracPerc  = input.float(30.0,"Cap posizione % equity",     group="Money management",
      tooltip="Limite massimo di capitale per singola posizione. Nel portafoglio a 5 cripto il 30% e' la config validata; su chart singolo puoi alzarlo (piu' rendimento, piu' drawdown).")
+levMult      = input.float(1.0, "Leva (1 = spot)",            group="Money management",
+     minval=1.0, maxval=3.0, step=0.25,
+     tooltip="PRESET APEX-X (aggressivo, solo futures): rischio 15, cap 50, leva 2, trailing 5. Backtest: CAGR ~111% full / ~68% out-of-sample, ma Monte Carlo stima drawdown fino a -60% (p95). Usalo solo se accetti questo rischio. Il funding dei perpetual NON e' simulato da TradingView.")
 startDate    = input.time(timestamp("2021-01-01"), "Inizio backtest", group="Periodo")
 endDate      = input.time(timestamp("2030-01-01"), "Fine backtest",   group="Periodo")
 
@@ -64,7 +67,7 @@ frac = math.min(maxFracPerc / 100, riskPerc / stopDistPerc)
 
 longCond = inDate and inRegime and btcOk and breakout and strategy.position_size == 0
 if longCond
-    strategy.entry("Long", strategy.long, qty=strategy.equity * frac / close,
+    strategy.entry("Long", strategy.long, qty=strategy.equity * frac * levMult / close,
          alert_message='{"action":"buy","ticker":"{{ticker}}","price":{{close}},"strategy":"APEX_v2"}')
 
 // ── Uscite ─────────────────────────────────────────────────────────
