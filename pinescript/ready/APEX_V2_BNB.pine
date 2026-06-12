@@ -1,0 +1,136 @@
+//@version=5
+// ════════════════════════════════════════════════════════════════
+//  APEX-V2 PRONTA PER BNB - settaggi gia' impostati
+//  1. Apri il grafico BINANCE:BNBUSDT (o equivalente), timeframe 1D
+//  2. Incolla questo script nel Pine Editor -> Aggiungi al grafico
+//  Backtest 2021->giu 2026 (#2 su 10 coin): CAGR 27.31% |
+//  MaxDD -20.67% | PF 5.98 | 28 trade | win rate 28.6%
+//  Preset FUTURES (leva 2): per SPOT metti Leva=1 (rendimento ~meta',
+//  stesso profilo). Il funding dei perpetual non e' simulato.
+// ════════════════════════════════════════════════════════════════
+strategy("APEX-V2 BNB [Daily]", overlay=true,
+     initial_capital=10000, commission_type=strategy.commission.percent,
+     commission_value=0.1, slippage=2)
+
+// ── Input ──────────────────────────────────────────────────────────
+regimeLen    = input.int(200,   "EMA regime",                 group="Regime")
+useAlignment = input.bool(true, "Richiedi EMA50 > EMA200",    group="Regime")
+useBtcFilter = input.bool(true, "Filtro regime BTC (per le alt)", group="Regime")
+btcSymbol    = input.symbol("BINANCE:BTCUSDT", "Simbolo BTC", group="Regime")
+chLen        = input.int(20,    "Canale breakout (gg)",       group="Ingresso")
+useVolCap    = input.bool(true, "Filtro volatilita' estrema", group="Ingresso",
+     tooltip="Blocca gli ingressi quando ATR/prezzo supera l'85° percentile dell'ultimo anno: i breakout in volatilita' da blow-off hanno atteso negativo.")
+exitLen      = input.int(20,    "EMA uscita",                 group="Uscita")
+useChand     = input.bool(true, "Trailing chandelier",        group="Uscita",
+     tooltip="Trailing calcolato dal massimo close dall'ingresso invece che dal close corrente: aggancia i profitti un filo piu' in alto.")
+atrLen       = input.int(14,    "Lunghezza ATR",              group="Uscita")
+trailMult    = input.float(5.0, "Trailing ATR x",             group="Uscita", step=0.25)
+slPerc       = input.float(12.0,"Stop emergenza %",           group="Uscita", step=0.5)
+lockTrig     = input.float(50.0,"Profit-lock: oltre questo profitto %", group="Uscita", step=5,
+     tooltip="Quando il massimo profitto del trade supera questa soglia, il trailing si stringe al multiplo qui sotto: restituisce meno dai top parabolici. Backtest: CAGR su E drawdown giu'.")
+lockMult     = input.float(3.0, "Trailing ATR x post-lock",   group="Uscita", step=0.25)
+cooldownBars = input.int(15,    "Cooldown dopo perdita (barre)", group="Ingresso", minval=0,
+     tooltip="Dopo un trade chiuso in perdita su questa coin, niente rientro per N barre: elimina gli stop ripetuti nel chop (nel backtest AVAX veniva stoppata 5 volte in 2 mesi).")
+riskPerc     = input.float(15.0,"Rischio per trade % equity", group="Money management",
+     tooltip="La posizione e' dimensionata in modo che la distanza del trailing stop costi questa % dell'equity.")
+maxFracPerc  = input.float(50.0,"Cap posizione % equity",     group="Money management",
+     tooltip="Limite massimo di capitale per singola posizione. Nel portafoglio a 5 cripto il 30% e' la config validata; su chart singolo puoi alzarlo (piu' rendimento, piu' drawdown).")
+levMult      = input.float(2.0, "Leva (1 = spot)",            group="Money management",
+     minval=1.0, maxval=3.0, step=0.25,
+     tooltip="PRESET APEX-X (5 coin, top-3): rischio 15, cap 50, leva 2, trailing 5, canale 30. PRESET APEX-X2 (10 coin, top-5, piu' trade): uguale ma canale 20. Backtest X2: CAGR ~165% full ma con DD -42%, Monte Carlo p95 -72%, e finestra 2025-26 NEGATIVA (-8%). Solo futures, solo se accetti questo rischio. Il funding dei perpetual NON e' simulato da TradingView.")
+startDate    = input.time(timestamp("2021-01-01"), "Inizio backtest", group="Periodo")
+endDate      = input.time(timestamp("2030-01-01"), "Fine backtest",   group="Periodo")
+
+// ── Indicatori ─────────────────────────────────────────────────────
+ema200  = ta.ema(close, regimeLen)
+ema50   = ta.ema(close, 50)
+emaExit = ta.ema(close, exitLen)
+atrVal  = ta.atr(atrLen)
+chHigh  = ta.highest(close, chLen)[1]
+
+// regime BTC calcolato sul daily del simbolo scelto (no lookahead)
+[btcClose, btcEma] = request.security(btcSymbol, "D",
+     [close, ta.ema(close, regimeLen)], lookahead=barmerge.lookahead_off)
+isBtcChart = syminfo.basecurrency == "BTC"
+btcOk      = not useBtcFilter or isBtcChart or btcClose > btcEma
+
+inDate   = time >= startDate and time <= endDate
+inRegime = close > ema200 and (not useAlignment or ema50 > ema200)
+breakout = close > chHigh
+
+// filtro volatilita': niente ingressi con ATR% oltre l'85° pctile annuale
+atrPerc = atrVal / close
+volThr  = ta.percentile_linear_interpolation(atrPerc, 365, 85)[1]
+volOk   = not useVolCap or na(volThr) or atrPerc <= volThr
+
+plot(ema200,  "EMA 200",    color=color.orange, linewidth=2)
+plot(emaExit, "EMA uscita", color=color.teal)
+bgcolor(useBtcFilter and not btcOk ? color.new(color.red, 92) : na,
+     title="Regime BTC off")
+
+// ── Ingresso con sizing a rischio ──────────────────────────────────
+stopDistPerc = trailMult * atrVal / close * 100
+frac = math.min(maxFracPerc / 100, riskPerc / stopDistPerc)
+
+// cooldown: blocca i rientri per N barre dopo un trade chiuso in perdita
+var int lastLossBar = -100000
+if strategy.closedtrades > nz(strategy.closedtrades[1]) and
+   strategy.closedtrades.profit(strategy.closedtrades - 1) < 0
+    lastLossBar := bar_index
+cooldownOk = bar_index - lastLossBar > cooldownBars
+
+longCond = inDate and inRegime and btcOk and breakout and volOk and cooldownOk and strategy.position_size == 0
+if longCond
+    strategy.entry("Long", strategy.long, qty=strategy.equity * frac * levMult / close,
+         alert_message='{"action":"buy","ticker":"{{ticker}}","price":{{close}},"strategy":"APEX_v2"}')
+
+// ── Uscite ─────────────────────────────────────────────────────────
+var float trailStop = na
+var float hhClose   = na
+if strategy.position_size > 0
+    hhClose := na(hhClose) ? close : math.max(hhClose, close)
+    base = useChand ? hhClose : close
+    // profit-lock: trailing stretto quando il trade e' molto in profitto
+    locked = (hhClose / strategy.position_avg_price - 1) * 100 > lockTrig
+    effMult = locked ? lockMult : trailMult
+    lvl = base - effMult * atrVal
+    trailStop := na(trailStop) ? lvl : math.max(trailStop, lvl)
+else
+    trailStop := na
+    hhClose := na
+
+hardStop = strategy.position_size > 0 ? strategy.position_avg_price * (1 - slPerc / 100) : na
+effStop  = strategy.position_size > 0 ? math.max(nz(trailStop, hardStop), hardStop) : na
+
+if strategy.position_size > 0
+    strategy.exit("Trail/SL", "Long", stop=effStop,
+         alert_message='{"action":"sell","ticker":"{{ticker}}","price":{{close}},"reason":"stop","strategy":"APEX_v2"}')
+
+if strategy.position_size > 0 and close < emaExit
+    strategy.close("Long", comment="Sotto EMA20",
+         alert_message='{"action":"sell","ticker":"{{ticker}}","price":{{close}},"reason":"ema_exit","strategy":"APEX_v2"}')
+
+plot(strategy.position_size > 0 ? effStop : na, "Stop effettivo",
+     color=color.red, style=plot.style_linebr)
+
+// ── Tabella statistiche live sul grafico ───────────────────────────
+var table stats = table.new(position.top_right, 2, 6, border_width=1,
+     bgcolor=color.new(color.black, 80))
+if barstate.islastconfirmedhistory
+    netPct   = strategy.netprofit / strategy.initial_capital * 100
+    ddPct    = strategy.max_drawdown / strategy.initial_capital * 100
+    pf       = strategy.grossloss > 0 ? strategy.grossprofit / strategy.grossloss : na
+    winRate  = strategy.closedtrades > 0 ? strategy.wintrades / strategy.closedtrades * 100 : na
+    table.cell(stats, 0, 0, "APEX v2",        text_color=color.white, text_size=size.small)
+    table.cell(stats, 1, 0, "",               text_color=color.white, text_size=size.small)
+    table.cell(stats, 0, 1, "Profitto netto", text_color=color.white, text_size=size.small)
+    table.cell(stats, 1, 1, str.tostring(netPct, "#.#") + "%",
+         text_color=netPct >= 0 ? color.lime : color.red, text_size=size.small)
+    table.cell(stats, 0, 2, "Max drawdown",   text_color=color.white, text_size=size.small)
+    table.cell(stats, 1, 2, str.tostring(ddPct, "#.#") + "%", text_color=color.orange, text_size=size.small)
+    table.cell(stats, 0, 3, "Profit factor",  text_color=color.white, text_size=size.small)
+    table.cell(stats, 1, 3, str.tostring(pf, "#.##"), text_color=color.white, text_size=size.small)
+    table.cell(stats, 0, 4, "Win rate",       text_color=color.white, text_size=size.small)
+    table.cell(stats, 1, 4, str.tostring(winRate, "#.#") + "%", text_color=color.white, text_size=size.small)
+    table.cell(stats, 0, 5, "Trade chiusi",   text_color=color.white, text_size=size.small)
+    table.cell(stats, 1, 5, str.tostring(strategy.closedtrades), text_color=color.white, text_size=size.small)
