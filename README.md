@@ -207,6 +207,42 @@ cambio di nessuna finestra negativa e leva che si sgonfia da sola nel chop.
 debolezza 2025-26 — il suo vero out-of-sample inizia oggi. Le scelte
 strutturali restano validate da walk-forward ancorato e test freddo.
 
+## 🔬 APEX-V2: il drawdown curato con la diagnosi, non con le manopole
+
+Richiesta: abbassare il DD. Invece di girare manopole a caso ho **diagnosticato
+l'episodio di max drawdown** di V (-36.6%): non un crash, ma un'emorragia di
+772 giorni (set 2021 → ott 2023) con due meccanismi precisi:
+
+1. **Stop ripetuti nel chop**: AVAX stoppata 5 volte a -12% in due mesi
+   (set-nov 2021) — il sistema rientrava sul breakout 3 giorni dopo ogni stop.
+2. **Restituzione dai top parabolici**: il trailing largo 5×ATR ridava
+   indietro troppo dal picco di trade come SOL +308%.
+
+Due cure chirurgiche (testate anche singolarmente, vedi storia git):
+- **Cooldown 15 giorni** dopo un'uscita in perdita sulla stessa coin
+- **Profit-lock**: oltre +50% di profitto il trailing si stringe a 3×ATR
+
+| | V | **V2** |
+|---|---|---|
+| CAGR full | 112% | **128%** |
+| MaxDD full | -36.6% | **-33.9%** |
+| Calmar | 3.07 | **3.79** |
+| Peggior DD walk-forward | -34.8% | **-22.3%** |
+| WF 2025-26 | 0.0% | **+14.9%** |
+| Test freddo (coin mai tunate) | PF 2.36 | **PF 2.63** |
+
+Per anno (V2): 2021 +1346% · 2022 -4.9% · 2023 +176% · 2024 +80% · 2025 **+22%**.
+
+È il raro caso in cui rendimento E rischio migliorano insieme: succede solo
+quando curi un difetto reale invece di ottimizzare un parametro. Bocciati nel
+percorso (e documentati): freno DD su picco storico (lock-out permanente),
+freno su picco rolling (blocca i recuperi), cooldown da solo (peggiorava il
+DD senza il profit-lock).
+
+I due fix sono anche nel Pine (`apex_trend_strategy.pine`): input
+"Profit-lock" e "Cooldown dopo perdita". **APEX-V2 è la configurazione
+consigliata del repo.**
+
 ## Struttura del repo
 
 ```

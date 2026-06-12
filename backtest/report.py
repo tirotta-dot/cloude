@@ -34,6 +34,16 @@ APEX_X2 = ApexParams(use_btc_filter=True, use_alignment=True,
 # cross-sezionale (5 coin mai usate per il tuning: PF 2.4).
 APEX_V = replace(APEX_X2, vol_target=0.60, vol_floor=1.0)
 
+# APEX-V2: V + le due cure chirurgiche trovate diagnosticando l'episodio di
+# max drawdown (emorragia lenta set 2021 -> ott 2023):
+#  - cooldown 15g dopo un'uscita in perdita (stop al tritacarne nel chop:
+#    AVAX veniva stoppata 5 volte a -12% in due mesi)
+#  - profit-lock: oltre +50% il trailing si stringe a 3xATR (restituisce
+#    meno dai top parabolici tipo SOL +308%)
+# Risultato: CAGR 128% (da 112), DD -33.9% (da -36.6), worst WF DD -22.3%
+# (da -34.8), WF 2025-26 +14.9% (da 0). Confermata sul test freddo.
+APEX_V2 = replace(APEX_V, cooldown=15, lock_trigger=0.5, lock_mult=3.0)
+
 
 def anchored_walk_forward(data, p: ApexParams):
     """3 finestre out-of-sample consecutive con parametri sempre congelati:

@@ -60,6 +60,10 @@ class ApexParams:
     def_lev: float = 1.0
     vol_target: float | None = None  # vol annua target del portafoglio (es. 0.50)
     vol_floor: float = 0.3           # leva minima del vol-targeting (1.0 = taglia solo la leva)
+    dd_brake: float | None = None    # stop ai nuovi ingressi se DD portafoglio oltre soglia (es. 0.20)
+    cooldown: int = 0                # giorni di attesa prima di rientrare su una coin stoppata in perdita
+    lock_trigger: float | None = None  # profitto (es. 0.5 = +50%) oltre cui il trailing si stringe
+    lock_mult: float = 3.0             # multiplo ATR del trailing "stretto" post-trigger
     trade_only: tuple | None = None  # se impostato, opera solo questi simboli
 
 
@@ -122,6 +126,8 @@ def run_portfolio(data: dict[str, pd.DataFrame], p: ApexParams,
     exposure = np.empty(len(dates))
     eq_ema = initial          # EMA50 dell'equity (protezione equity-curve)
     eq_prev = initial
+    eq_peak = initial         # massimo storico dell'equity (per il freno DD)
+    last_loss_i = {s: -10**9 for s in syms}  # ultima uscita in perdita per coin
     EQ_ALPHA = 2 / 51
 
     def mark_equity(i: int, price_key: str) -> float:
@@ -137,6 +143,8 @@ def run_portfolio(data: dict[str, pd.DataFrame], p: ApexParams,
         fill = raw_px * (1 - cost)
         cash += ps["qty"] * fill
         ret = (fill - ps["entry_px"]) / ps["entry_px"] * 100
+        if ret <= 0:
+            last_loss_i[s] = i
         trades.append(Trade(dates[ps["entry_i"]], dates[i], ps["entry_px"],
                             fill, f"long:{s}", ret, reason))
         pos[s] = None
@@ -179,6 +187,14 @@ def run_portfolio(data: dict[str, pd.DataFrame], p: ApexParams,
             elif breadth < p.breadth_hi:    # regime fragile: modalita' difensiva
                 risk_today, cap_today = p.def_risk, p.def_frac
                 topk_today, lev_today = p.def_topk, p.def_lev
+        # freno DD: il portafoglio e' sotto del X% dal massimo degli ultimi
+        # 90 giorni -> niente nuovi rischi finche' non si risale. Il picco
+        # rolling (non storico) evita il lock-out permanente dopo un grande
+        # bull: il riferimento "invecchia" e il sistema puo' ripartire.
+        if p.dd_brake is not None and i > 0:
+            roll_peak = float(np.max(equity[max(0, i - 90):i]))
+            if eq_prev < roll_peak * (1 - p.dd_brake):
+                entries_on = False
         # vol-targeting: la leva disponibile scala sull'inverso della
         # volatilita' realizzata del portafoglio (30 gg, annualizzata)
         if p.vol_target is not None and i > 31:
@@ -188,7 +204,8 @@ def run_portfolio(data: dict[str, pd.DataFrame], p: ApexParams,
             if rv > 1e-6:
                 lev_today = min(lev_today, max(p.vol_floor, p.vol_target / rv))
 
-        candidates = [s for s in syms if pend_in[s] and pos[s] is None] if entries_on else []
+        candidates = [s for s in syms if pend_in[s] and pos[s] is None
+                      and i - last_loss_i[s] > p.cooldown] if entries_on else []
         candidates.sort(key=lambda s: sig[s]["mom"][i], reverse=True)
         # rotazione: solo le prime k coin per momentum sono eleggibili
         if topk_today is not None:
@@ -257,7 +274,13 @@ def run_portfolio(data: dict[str, pd.DataFrame], p: ApexParams,
             if ps and not np.isnan(sig[s]["atr"][i]):
                 ps["hh"] = max(ps["hh"], arr[s]["close"][i])
                 base = ps["hh"] if p.chandelier else arr[s]["close"][i]
-                lvl = base - p.trail_mult * sig[s]["atr"][i]
+                mult = p.trail_mult
+                # profit-lock: oltre il trigger di profitto il trailing si
+                # stringe -> restituisce meno dai top parabolici
+                if (p.lock_trigger is not None
+                        and ps["hh"] / ps["entry_px"] - 1 > p.lock_trigger):
+                    mult = p.lock_mult
+                lvl = base - mult * sig[s]["atr"][i]
                 ps["trail"] = max(ps["trail"], lvl)
 
         # 5) segnali di fine giornata per domani
@@ -282,6 +305,7 @@ def run_portfolio(data: dict[str, pd.DataFrame], p: ApexParams,
         equity[i] = mark_equity(i, "close")
         exposure[i] = (equity[i] - cash) / equity[i] if equity[i] > 0 else 0
         eq_prev = equity[i]
+        eq_peak = max(eq_peak, equity[i])
         eq_ema = eq_ema + EQ_ALPHA * (equity[i] - eq_ema)
         if equity[i] <= 0:  # conto azzerato: liquidazione forzata, fine
             for s in syms:

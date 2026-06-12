@@ -33,6 +33,11 @@ useChand     = input.bool(true, "Trailing chandelier",        group="Uscita",
 atrLen       = input.int(14,    "Lunghezza ATR",              group="Uscita")
 trailMult    = input.float(4.0, "Trailing ATR x",             group="Uscita", step=0.25)
 slPerc       = input.float(12.0,"Stop emergenza %",           group="Uscita", step=0.5)
+lockTrig     = input.float(50.0,"Profit-lock: oltre questo profitto %", group="Uscita", step=5,
+     tooltip="Quando il massimo profitto del trade supera questa soglia, il trailing si stringe al multiplo qui sotto: restituisce meno dai top parabolici. Backtest: CAGR su E drawdown giu'.")
+lockMult     = input.float(3.0, "Trailing ATR x post-lock",   group="Uscita", step=0.25)
+cooldownBars = input.int(15,    "Cooldown dopo perdita (barre)", group="Ingresso", minval=0,
+     tooltip="Dopo un trade chiuso in perdita su questa coin, niente rientro per N barre: elimina gli stop ripetuti nel chop (nel backtest AVAX veniva stoppata 5 volte in 2 mesi).")
 riskPerc     = input.float(10.0,"Rischio per trade % equity", group="Money management",
      tooltip="La posizione e' dimensionata in modo che la distanza del trailing stop costi questa % dell'equity.")
 maxFracPerc  = input.float(30.0,"Cap posizione % equity",     group="Money management",
@@ -74,7 +79,14 @@ bgcolor(useBtcFilter and not btcOk ? color.new(color.red, 92) : na,
 stopDistPerc = trailMult * atrVal / close * 100
 frac = math.min(maxFracPerc / 100, riskPerc / stopDistPerc)
 
-longCond = inDate and inRegime and btcOk and breakout and volOk and strategy.position_size == 0
+// cooldown: blocca i rientri per N barre dopo un trade chiuso in perdita
+var int lastLossBar = -100000
+if strategy.closedtrades > nz(strategy.closedtrades[1]) and
+   strategy.closedtrades.profit(strategy.closedtrades - 1) < 0
+    lastLossBar := bar_index
+cooldownOk = bar_index - lastLossBar > cooldownBars
+
+longCond = inDate and inRegime and btcOk and breakout and volOk and cooldownOk and strategy.position_size == 0
 if longCond
     strategy.entry("Long", strategy.long, qty=strategy.equity * frac * levMult / close,
          alert_message='{"action":"buy","ticker":"{{ticker}}","price":{{close}},"strategy":"APEX_v2"}')
@@ -85,7 +97,10 @@ var float hhClose   = na
 if strategy.position_size > 0
     hhClose := na(hhClose) ? close : math.max(hhClose, close)
     base = useChand ? hhClose : close
-    lvl = base - trailMult * atrVal
+    // profit-lock: trailing stretto quando il trade e' molto in profitto
+    locked = (hhClose / strategy.position_avg_price - 1) * 100 > lockTrig
+    effMult = locked ? lockMult : trailMult
+    lvl = base - effMult * atrVal
     trailStop := na(trailStop) ? lvl : math.max(trailStop, lvl)
 else
     trailStop := na
