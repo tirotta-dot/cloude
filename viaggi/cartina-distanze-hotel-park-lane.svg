@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 1020" font-family="system-ui,-apple-system,Segoe UI,sans-serif">
+<rect width="760" height="1020" fill="#fcfcfb" rx="8"/>
+<path d="M377.1,471.6 L392.5,502.5 L398.7,567.7 L380.2,681.6 L364.8,787.5 L340.1,909.6 L327.8,974.7" fill="none" stroke="#c9d6e0" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" opacity="1.0"/>
+<path d="M377.1,471.6 L327.8,494.4 L303.1,502.5 L260.0,486.3 L223.0,453.7" fill="none" stroke="#c9d6e0" stroke-width="2.0" stroke-linejoin="round" stroke-linecap="round" opacity="1.0"/>
+<path d="M383.3,396.7 L420.3,396.7 L518.9,380.4 L617.6,372.3 L722.4,356.0 L814.9,347.9" fill="none" stroke="#c9d6e0" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" opacity="1.0"/>
+<path d="M420.3,5.9 L426.5,144.3 L377.1,250.2 L371.0,290.9" fill="none" stroke="#dfe7ee" stroke-width="2.0" stroke-linejoin="round" stroke-linecap="round" opacity="1.0"/>
+<text x="494" y="820" font-size="15" fill="#898781" text-anchor="start" font-style="italic">Oceano Atlantico</text>
+<text x="618" y="319" font-size="13" fill="#898781" text-anchor="start" font-style="italic">Long Island</text>
+<text x="124" y="633" font-size="13" fill="#898781" text-anchor="start" font-style="italic">New Jersey</text>
+<circle cx="398.3" cy="237.4" r="182.8" fill="none" stroke="#e1e0d9" stroke-width="1.2" stroke-dasharray="5 5"/>
+<text x="528" y="367" font-size="12" fill="#898781" text-anchor="middle" dy="-4" transform="rotate(45 528 367)">25 km</text>
+<circle cx="398.3" cy="237.4" r="365.7" fill="none" stroke="#e1e0d9" stroke-width="1.2" stroke-dasharray="5 5"/>
+<text x="657" y="496" font-size="12" fill="#898781" text-anchor="middle" dy="-4" transform="rotate(45 657 496)">50 km</text>
+<circle cx="398.3" cy="237.4" r="548.5" fill="none" stroke="#e1e0d9" stroke-width="1.2" stroke-dasharray="5 5"/>
+<text x="786" y="625" font-size="12" fill="#898781" text-anchor="middle" dy="-4" transform="rotate(45 786 625)">75 km</text>
+<circle cx="398.3" cy="237.4" r="731.3" fill="none" stroke="#e1e0d9" stroke-width="1.2" stroke-dasharray="5 5"/>
+<text x="915" y="755" font-size="12" fill="#898781" text-anchor="middle" dy="-4" transform="rotate(45 915 755)">100 km</text>
+<line x1="398.3" y1="237.4" x2="341.9" y2="202.1" stroke="#2a78d6" stroke-width="1.6" opacity="0.55"/>
+<line x1="398.3" y1="237.4" x2="396.6" y2="393.9" stroke="#2a78d6" stroke-width="1.6" opacity="0.55"/>
+<line x1="398.3" y1="237.4" x2="585.5" y2="73.5" stroke="#1baf7a" stroke-width="1.6" opacity="0.55"/>
+<line x1="398.3" y1="237.4" x2="743.1" y2="256.7" stroke="#1baf7a" stroke-width="1.6" opacity="0.55"/>
+<line x1="398.3" y1="237.4" x2="303.8" y2="496.8" stroke="#eda100" stroke-width="1.6" opacity="0.55"/>
+<line x1="398.3" y1="237.4" x2="202.6" y2="630.9" stroke="#eda100" stroke-width="1.6" opacity="0.55"/>
+<line x1="398.3" y1="237.4" x2="353.7" y2="786.0" stroke="#eda100" stroke-width="1.6" opacity="0.55"/>
+<line x1="398.3" y1="237.4" x2="338.8" y2="905.7" stroke="#eda100" stroke-width="1.6" opacity="0.55"/>
+<circle cx="341.9" cy="202.1" r="7" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"/>
+<text x="332" y="188" font-size="13.5" font-weight="600" fill="#0b0b0b" text-anchor="end">Nickelodeon Universe — American Dream</text>
+<text x="332" y="203" font-size="12.5" fill="#52514e" text-anchor="end">9 km &#183; strada ~13 km (20–30 min)</text>
+<circle cx="396.6" cy="393.9" r="7" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"/>
+<text x="409" y="408" font-size="13.5" font-weight="600" fill="#0b0b0b" text-anchor="start">Deno's Wonder Wheel — Coney Island</text>
+<text x="409" y="423" font-size="12.5" fill="#52514e" text-anchor="start">21 km &#183; strada ~25 km (40–60 min)</text>
+<circle cx="585.5" cy="73.5" r="7" fill="#1baf7a" stroke="#fcfcfb" stroke-width="2"/>
+<text x="573" y="68" font-size="13.5" font-weight="600" fill="#0b0b0b" text-anchor="end">Playland — Rye</text>
+<text x="573" y="83" font-size="12.5" fill="#52514e" text-anchor="end">34 km &#183; strada ~42 km (40–50 min)</text>
+<circle cx="743.1" cy="256.7" r="7" fill="#1baf7a" stroke="#fcfcfb" stroke-width="2"/>
+<text x="737" y="283" font-size="13.5" font-weight="600" fill="#0b0b0b" text-anchor="end">Adventureland — Farmingdale</text>
+<text x="737" y="298" font-size="12.5" fill="#52514e" text-anchor="end">47 km &#183; strada ~58 km (50–75 min)</text>
+<circle cx="303.8" cy="496.8" r="7" fill="#eda100" stroke="#fcfcfb" stroke-width="2"/>
+<text x="316" y="483" font-size="13.5" font-weight="600" fill="#0b0b0b" text-anchor="start">Keansburg Amusement Park</text>
+<text x="316" y="498" font-size="12.5" fill="#52514e" text-anchor="start">38 km &#183; strada ~62 km (55–75 min)</text>
+<circle cx="202.6" cy="630.9" r="7" fill="#eda100" stroke="#fcfcfb" stroke-width="2"/>
+<text x="217" y="631" font-size="13.5" font-weight="600" fill="#0b0b0b" text-anchor="start">iPlay America — Freehold</text>
+<text x="217" y="646" font-size="12.5" fill="#52514e" text-anchor="start">60 km &#183; strada ~88 km (70–90 min)</text>
+<circle cx="353.7" cy="786.0" r="7" fill="#eda100" stroke="#fcfcfb" stroke-width="2"/>
+<text x="368" y="790" font-size="13.5" font-weight="600" fill="#0b0b0b" text-anchor="start">Jenkinson's Boardwalk (bonus)</text>
+<text x="368" y="805" font-size="12.5" fill="#52514e" text-anchor="start">75 km &#183; strada ~105 km (1h20–1h40)</text>
+<circle cx="338.8" cy="905.7" r="7" fill="#eda100" stroke="#fcfcfb" stroke-width="2"/>
+<text x="325" y="908" font-size="13.5" font-weight="600" fill="#0b0b0b" text-anchor="end">Casino Pier — Seaside Heights</text>
+<text x="325" y="923" font-size="12.5" fill="#52514e" text-anchor="end">92 km &#183; strada ~115 km (1h30–1h50)</text>
+<g transform="translate(398.3,237.4)"><path d="M0,-11 L3.2,-3.8 11,-3.4 5,1.6 7,9 0,4.8 -7,9 -5,1.6 -11,-3.4 -3.2,-3.8 Z" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="1.5"/></g>
+<text x="412" y="229" font-size="15" font-weight="700" fill="#0b0b0b">Hotel Park Lane</text>
+<text x="412" y="245" font-size="12.5" fill="#52514e">36 Central Park South, Manhattan</text>
+<rect x="522" y="870" width="220" height="132" rx="8" fill="#fcfcfb" stroke="#e1e0d9"/>
+<text x="536" y="896" font-size="13.5" font-weight="700" fill="#0b0b0b">Itinerario</text>
+<circle cx="544" cy="916" r="7" fill="#2a78d6"/>
+<text x="560" y="920" font-size="12.5" fill="#0b0b0b">Giorno 1 — NYC / Meadowlands</text>
+<circle cx="544" cy="940" r="7" fill="#1baf7a"/>
+<text x="560" y="944" font-size="12.5" fill="#0b0b0b">Giorno 2 — Rye + Long Island</text>
+<circle cx="544" cy="964" r="7" fill="#eda100"/>
+<text x="560" y="968" font-size="12.5" fill="#0b0b0b">Giorno 3 — Jersey Shore</text>
+<text x="536" y="992" font-size="11" fill="#898781">Anelli: km in linea d'aria dall'hotel</text>
+<g transform="translate(714,52)"><circle r="17" fill="none" stroke="#e1e0d9"/><path d="M0,-13 L4,6 0,2 -4,6 Z" fill="#52514e"/><text y="-22" font-size="12" font-weight="700" fill="#52514e" text-anchor="middle">N</text></g>
+</svg>
