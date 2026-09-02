@@ -9,12 +9,14 @@
 //  in fretta che sul daily -> molti piu' ingressi.
 //  NB: questo preset NON e' backtestato sullo storico intraday
 //  (non disponibile in questo ambiente). Verifica nel backtester
-//  di TradingView prima di operare. Preset FUTURES leva 2; per
-//  spot metti Leva=1.
+//  di TradingView prima di operare. Coin scelta dalla top-5 del
+//  backtest daily della config V2 (single_coin_ranking.csv), che
+//  NON e' un backtest di questo preset 4H. La 'Leva max' e' solo
+//  un limite di margine: non moltiplica la size.
 // ════════════════════════════════════════════════════════════════
 strategy("APEX-V2 4H ADA", overlay=true,
      initial_capital=10000, commission_type=strategy.commission.percent,
-     commission_value=0.1, slippage=2)
+     commission_value=0.15, slippage=0)
 
 // ── Input ──────────────────────────────────────────────────────────
 regimeLen    = input.int(200,   "EMA regime",                 group="Regime")
@@ -39,9 +41,9 @@ riskPerc     = input.float(15.0,"Rischio per trade % equity", group="Money manag
      tooltip="La posizione e' dimensionata in modo che la distanza del trailing stop costi questa % dell'equity.")
 maxFracPerc  = input.float(50.0,"Cap posizione % equity",     group="Money management",
      tooltip="Limite massimo di capitale per singola posizione. Nel portafoglio a 5 cripto il 30% e' la config validata; su chart singolo puoi alzarlo (piu' rendimento, piu' drawdown).")
-levMult      = input.float(2.0, "Leva (1 = spot)",            group="Money management",
+levMult      = input.float(1.0, "Leva max (limite margine)",  group="Money management",
      minval=1.0, maxval=3.0, step=0.25,
-     tooltip="PRESET APEX-X (5 coin, top-3): rischio 15, cap 50, leva 2, trailing 5, canale 30. PRESET APEX-X2 (10 coin, top-5, piu' trade): uguale ma canale 20. Backtest X2: CAGR ~165% full ma con DD -42%, Monte Carlo p95 -72%, e finestra 2025-26 NEGATIVA (-8%). Solo futures, solo se accetti questo rischio. Il funding dei perpetual NON e' simulato da TradingView.")
+     tooltip="Limite di esposizione in multipli dell'equity, come il buying power del backtest Python: NON moltiplica la size, che resta dimensionata da rischio e cap. Su un chart singolo con cap <= 100% non cambia i risultati. Nelle config di portafoglio APEX-X/X2 la leva 2 e' esposizione AGGREGATA su piu' posizioni contemporanee: non e' replicabile su un solo chart. Il funding dei perpetual NON e' simulato da TradingView.")
 startDate    = input.time(timestamp("2021-01-01"), "Inizio backtest", group="Periodo")
 endDate      = input.time(timestamp("2030-01-01"), "Fine backtest",   group="Periodo")
 
@@ -73,8 +75,10 @@ bgcolor(useBtcFilter and not btcOk ? color.new(color.red, 92) : na,
      title="Regime BTC off")
 
 // ── Ingresso con sizing a rischio ──────────────────────────────────
+// la leva NON moltiplica la size: e' solo un tetto di esposizione,
+// come min(frac*equity, leverage*equity) del motore Python
 stopDistPerc = trailMult * atrVal / close * 100
-frac = math.min(maxFracPerc / 100, riskPerc / stopDistPerc)
+frac = math.min(math.min(maxFracPerc / 100, riskPerc / stopDistPerc), levMult)
 
 // cooldown: blocca i rientri per N barre dopo un trade chiuso in perdita
 var int lastLossBar = -100000
@@ -85,7 +89,7 @@ cooldownOk = bar_index - lastLossBar > cooldownBars
 
 longCond = inDate and inRegime and btcOk and breakout and volOk and cooldownOk and strategy.position_size == 0
 if longCond
-    strategy.entry("Long", strategy.long, qty=strategy.equity * frac * levMult / close,
+    strategy.entry("Long", strategy.long, qty=strategy.equity * frac / close,
          alert_message='{"action":"buy","ticker":"{{ticker}}","price":{{close}},"strategy":"APEX_v2"}')
 
 // ── Uscite ─────────────────────────────────────────────────────────

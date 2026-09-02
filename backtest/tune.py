@@ -2,6 +2,12 @@
 
 Obiettivo: trovare una configurazione robusta (non il singolo massimo)
 con buon CAGR medio e drawdown contenuto su tutte e 5 le cripto.
+
+ATTENZIONE: lo sweep gira sull'INTERO storico disponibile (nessun cutoff),
+quindi la tabella e' IN-SAMPLE: una config scelta qui ha "visto" anche il
+periodo 2024-26 e la sua performance su quel periodo NON e' out-of-sample.
+L'unica validazione OOS del progetto e' il walk-forward di validate.py
+(ottimizza su 2021-23, verifica 2024-26 a parametri congelati).
 """
 
 import os
@@ -53,6 +59,9 @@ def main():
     out = out.sort_values("score", ascending=False)
     out.to_csv(os.path.join(HERE, "sweep_results.csv"), index=False)
     print(out.head(20).to_string(index=False))
+    print("\nATTENZIONE: tabella IN-SAMPLE (sweep sull'intero periodo, 2024-26")
+    print("inclusi). Non usarla come stima out-of-sample: l'unica validazione")
+    print("OOS e' il walk-forward di validate.py a parametri congelati.")
 
 
 if __name__ == "__main__":

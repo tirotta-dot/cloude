@@ -10,14 +10,14 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, os.path.dirname(__file__))
-from engine import compute_metrics  # noqa: E402
+from engine import compute_metrics, period_returns  # noqa: E402
 from portfolio import ApexParams, load_universe, run_portfolio  # noqa: E402
 from validate import monte_carlo  # noqa: E402
 
 HERE = os.path.dirname(__file__)
 
 # ── APEX-X2: configurazione finale (vedi improvements.py) ──────────────────
-# Universo 10 coin, rotazione top-4, canale 20gg, vol-cap 85°, chandelier,
+# Universo 10 coin, rotazione top-5, canale 20gg, vol-cap 85°, chandelier,
 # protezione equity-curve. Definita qui per import da altri moduli.
 SYMBOLS_X2 = ["BTCUSD", "ETHUSD", "SOLUSD", "BNBUSD", "XRPUSD",
               "ADAUSD", "DOGEUSD", "LINKUSD", "AVAXUSD", "DOTUSD"]
@@ -66,7 +66,7 @@ def anchored_walk_forward(data, p: ApexParams):
 
 
 def monthly_table(eq: pd.Series) -> pd.DataFrame:
-    m = (eq.resample("ME").last() / eq.resample("ME").first() - 1) * 100
+    m = period_returns(eq, "ME")
     tab = pd.DataFrame({"anno": m.index.year, "mese": m.index.month, "ret": m.values})
     piv = tab.pivot(index="anno", columns="mese", values="ret").round(1)
     piv.columns = ["Gen", "Feb", "Mar", "Apr", "Mag", "Giu", "Lug", "Ago",
@@ -112,7 +112,7 @@ def main():
     res = run_portfolio(data, APEX_X2)
     m = res.metrics
 
-    yearly = (res.equity.resample("YE").last() / res.equity.resample("YE").first() - 1) * 100
+    yearly = period_returns(res.equity, "YE")
     wf = anchored_walk_forward(data, APEX_X2)
     mc = monte_carlo(res.equity)
     piv = monthly_table(res.equity)
