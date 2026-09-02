@@ -2,67 +2,67 @@
 ESPERIMENTI FILTRI (portafoglio reale, capitale condiviso)
  ================================================================================
                      config  CAGR%  MaxDD%  Sharpe  Sortino  Calmar  trades  win%   PF  exp%
-    E0 base (nessun filtro)  54.16  -38.44    1.18     1.29    1.41      95  47.4 4.68  32.9
-     E1 + filtro regime BTC  60.98  -30.87    1.30     1.37    1.98      85  52.9 6.40  31.3
-E2 + allineamento EMA50>200  72.68  -33.33    1.47     1.56    2.18      79  49.4 6.82  29.4
-               E3 = E1 + E2  74.06  -33.33    1.49     1.57    2.22      77  50.6 7.25  28.7
-   E4 = E3, max 3 posizioni  72.33  -33.33    1.47     1.55    2.17      76  48.7 6.88  28.7
-       E5 = E3, rischio 12%  74.53  -35.84    1.43     1.55    2.08      71  46.5 5.80  29.8
-        E6 = E3, rischio 8%  71.37  -32.06    1.51     1.52    2.23      86  46.5 6.42  27.6
+    E0 base (nessun filtro)   9.21  -42.68    0.44     0.66    0.22      84  45.2 1.42  28.9
+     E1 + filtro regime BTC  12.92  -32.19    0.57     0.85    0.40      75  50.7 1.77  27.2
+E2 + allineamento EMA50>200  20.65  -34.54    0.81     1.28    0.60      66  45.5 2.03  25.0
+               E3 = E1 + E2  21.08  -34.54    0.83     1.31    0.61      65  46.2 2.10  24.3
+   E4 = E3, max 3 posizioni  21.08  -34.54    0.83     1.31    0.61      65  46.2 2.10  24.3
+       E5 = E3, rischio 12%  19.76  -37.10    0.78     1.24    0.53      60  43.3 2.02  25.2
+        E6 = E3, rischio 8%  24.29  -33.22    0.91     1.43    0.73      75  42.7 2.26  23.3
 
  ================================================================================ 
 WALK-FORWARD: ottimizzato 2021-2023, congelato, verificato 2024-2026
  ================================================================================
 Top 5 configurazioni in-sample (2021-2023):
  ch  trail  exit  is_cagr  is_dd  score
- 30    3.0    20   159.82 -24.81  6.442
- 30    4.0    20   159.35 -24.85  6.412
- 20    4.0    20   161.01 -29.21  5.512
- 20    3.0    20   160.71 -30.65  5.243
- 30    5.0    20   137.33 -27.46  5.001
+ 30    3.0    20    47.50 -27.20  1.746
+ 30    4.0    20    46.68 -27.30  1.710
+ 30    5.0    20    43.09 -25.80  1.670
+ 40    3.0    20    45.24 -30.50  1.483
+ 40    4.0    20    44.61 -30.33  1.471
 
 Migliore in-sample: ch=30 trail=3.0 exit=20
 Out-of-sample 2024-2026 (parametri congelati dalla migliore IS):
         config  CAGR%  MaxDD%  Sharpe  Sortino  Calmar  trades  win%   PF exp%
-best IS -> OOS  15.61  -19.69    0.69     0.55    0.79      58  46.6 2.82    -
+best IS -> OOS  10.95   -21.3    0.54     0.77    0.51      58  46.6 2.03    -
 Out-of-sample 2024-2026 della config FINALE (30/4.0/20):
        config  CAGR%  MaxDD%  Sharpe  Sortino  Calmar  trades  win%   PF exp%
-finale -> OOS  19.14  -22.15    0.79     0.64    0.86      54  44.4 3.61    -
+finale -> OOS  13.86  -23.76    0.64     0.91    0.58      54  44.4 2.34    -
 
  ================================================================================ 
 MONTE CARLO block-bootstrap (2000 simulazioni, blocchi 20gg)
  ================================================================================
- dd_mediano  dd_p95  dd_p99  cagr_mediano  prob_anno_negativo_pct
-      -31.8   -47.7   -56.9          83.1                     0.1
+ dd_mediano  dd_p95  dd_p99  cagr_mediano  prob_periodo_negativo_pct
+      -31.9   -50.8   -59.6          31.0                        1.8
 
  ================================================================================ 
 STRESS TEST
  ================================================================================
                                      config  CAGR% MaxDD% Sharpe Sortino Calmar  trades  win%   PF  exp%
-                costi standard (0.15%/lato)   84.7 -24.85   1.71    1.71   3.41      99  48.5 6.92  24.8
-                   costi DOPPI (0.30%/lato)  81.75 -26.21   1.67    1.67   3.12      99  47.5 6.49  24.8
-senza i 5 trade migliori (solo stat. trade)      -      -      -       -      -      94  45.7 2.92     -
+                costi standard (0.15%/lato)  31.42  -27.3   1.15    1.82   1.15      88  45.5 2.88  20.4
+                   costi DOPPI (0.30%/lato)   29.6 -28.61   1.09    1.73   1.03      88  44.3 2.66  20.4
+senza i 5 trade migliori (solo stat. trade)      -      -      -       -      -      83  42.2 1.39     -
 
  ================================================================================ 
 CONFIG FINALE - dettaglio
  ================================================================================
      config  CAGR%  MaxDD%  Sharpe  Sortino  Calmar  trades  win%   PF  exp%
-APEX finale   84.7  -24.85    1.71     1.71    3.41      99  48.5 6.92  24.8
+APEX finale  31.42   -27.3    1.15     1.82    1.15      88  45.5 2.88  20.4
 
 Rendimenti per anno:
  anno  rendimento%
- 2021        938.5
+ 2021         94.6
  2022          0.0
- 2023         67.4
- 2024         40.3
- 2025          9.9
+ 2023         62.0
+ 2024         39.7
+ 2025          6.6
  2026          0.0
 
 Contributo per cripto:
         trades  win_rate  avg_ret
 symbol                           
-BNBUSD      25      32.0    18.46
-BTCUSD      22      54.5     4.20
-ETHUSD      19      52.6     4.49
-SOLUSD      16      81.2    55.69
-XRPUSD      17      29.4    16.94
+BNBUSD      23      26.1     0.97
+BTCUSD      20      55.0     4.91
+ETHUSD      16      50.0     3.75
+SOLUSD      14      78.6    37.41
+XRPUSD      15      26.7    12.60

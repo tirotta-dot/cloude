@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, os.path.dirname(__file__))
-from engine import compute_metrics  # noqa: E402
+from engine import compute_metrics, period_returns  # noqa: E402
 from portfolio import ApexParams, load_all, run_portfolio  # noqa: E402
 
 HERE = os.path.dirname(__file__)
@@ -84,7 +84,9 @@ def monte_carlo(eq: pd.Series, n_sims=2000, block=20):
     n = len(rets)
     dds, finals = [], []
     for _ in range(n_sims):
-        idx = RNG.integers(0, n - block, size=n // block + 1)
+        # n - block + 1: anche il blocco che termina sull'ultimo rendimento
+        # deve essere campionabile (l'estremo superiore e' esclusivo)
+        idx = RNG.integers(0, n - block + 1, size=n // block + 1)
         sim = np.concatenate([rets[j:j + block] for j in idx])[:n]
         curve = np.cumprod(1 + sim)
         peak = np.maximum.accumulate(curve)
@@ -96,7 +98,9 @@ def monte_carlo(eq: pd.Series, n_sims=2000, block=20):
         "dd_p95": round(float(np.percentile(dds, 5)), 1),   # 95° percentile peggiore
         "dd_p99": round(float(np.percentile(dds, 1)), 1),
         "cagr_mediano": round(float(np.median(finals)), 1),
-        "prob_anno_negativo_pct": round(float((finals < 0).mean() * 100), 1),
+        # frazione di percorsi ricampionati (interi ~5 anni) con CAGR < 0:
+        # NON e' la probabilita' di un singolo anno negativo (molto piu' alta)
+        "prob_periodo_negativo_pct": round(float((finals < 0).mean() * 100), 1),
     }
 
 
@@ -106,8 +110,9 @@ def stress(data, p: ApexParams):
     rows.append(brief("costi standard (0.15%/lato)", res.metrics))
     rows.append(brief("costi DOPPI (0.30%/lato)",
                       run_portfolio(data, replace(p, fee_pct=0.20, slippage_pct=0.10)).metrics))
-    # rimozione dei 5 trade migliori: l'edge sopravvive senza i fuoriclasse?
-    no_best = sorted(res.trades, key=lambda t: t.ret_pct, reverse=True)[5:]
+    # rimozione dei 5 trade migliori (per P&L in denaro, non per ret_pct):
+    # l'edge sopravvive senza i fuoriclasse?
+    no_best = sorted(res.trades, key=lambda t: t.pnl_cash, reverse=True)[5:]
     eq_proxy = res.equity  # equity reale; ricalcolo solo le metriche dei trade
     m = compute_metrics(eq_proxy, no_best, 10_000)
     rows.append({"config": "senza i 5 trade migliori (solo stat. trade)",
@@ -158,8 +163,7 @@ def main():
 
     log("\n", "=" * 80, "\nCONFIG FINALE - dettaglio\n", "=" * 80)
     log(pd.DataFrame([brief("APEX finale", res_final.metrics)]).to_string(index=False))
-    yearly = (res_final.equity.resample("YE").last() /
-              res_final.equity.resample("YE").first() - 1) * 100
+    yearly = period_returns(res_final.equity, "YE")
     log("\nRendimenti per anno:")
     log(pd.DataFrame({"anno": [d.year for d in yearly.index],
                       "rendimento%": yearly.round(1).values}).to_string(index=False))
@@ -214,7 +218,7 @@ def charts(data, res):
     fig.savefig(os.path.join(HERE, "charts", "equity_drawdown.png"), dpi=130)
 
     fig2, ax = plt.subplots(figsize=(10, 5))
-    yearly = (eq.resample("YE").last() / eq.resample("YE").first() - 1) * 100
+    yearly = period_returns(eq, "YE")
     years = [d.year for d in yearly.index]
     colors = ["#2e7d32" if v >= 0 else "#c62828" for v in yearly.values]
     ax.bar([str(y) for y in years], yearly.values, color=colors)

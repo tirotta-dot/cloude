@@ -5,9 +5,9 @@ Parametri congelati al 2026-06-09; finestra OOS: 2026-06-10 -> 2026-08-31. Nessu
 ## Full period (riferimento, dati estesi)
 
               sistema  CAGR%  MaxDD%   PF  trades
-APEX-V2 (consigliata) 120.94  -33.92 5.07     138
-               APEX-V 105.92  -36.61 4.72     137
-              APEX-X2 154.60  -42.35 5.32     157
+APEX-V2 (consigliata)  46.69  -38.35 2.29      88
+               APEX-V  37.75  -39.77 2.01     101
+              APEX-X2  53.08  -47.04 1.87     118
 
 ## Finestra out-of-sample vera (mai vista da nessuna scelta)
 

@@ -41,10 +41,12 @@ def main():
     # report markdown
     cols = ["symbol", "total_return_pct", "cagr_pct", "max_drawdown_pct",
             "sharpe", "n_trades", "win_rate_pct", "profit_factor"]
-    lines = ["# Risultati backtest (daily, 2021 → giu 2026)", "",
+    lines = ["# Risultati backtest (daily, 2021 → ago 2026)", "",
              "Commissioni 0.10% + slippage 0.05% per lato. Esecuzione "
              "all'apertura della barra successiva al segnale. Capitale "
-             "iniziale 10.000 USD, 100% reinvestito a ogni trade.", ""]
+             "iniziale 10.000 USD; 100% reinvestito a ogni trade per le "
+             "repliche Coinrule, sizing a rischio (~10% dell'equity per "
+             "trade) per APEX Trend (finale).", ""]
 
     buyhold = []
     for sym, df in data.items():
@@ -68,9 +70,9 @@ def main():
     apex_name = "APEX Trend (finale)"
     eqs = pd.concat([equities[(apex_name, s)] / 10_000 for s in SYMBOLS], axis=1)
     port = eqs.mean(axis=1) * 10_000
-    from engine import compute_metrics
+    from engine import compute_metrics, period_returns
     pm = compute_metrics(port, [], 10_000)
-    yearly = (port.resample("YE").last() / port.resample("YE").first() - 1) * 100
+    yearly = period_returns(port, "YE")
     ytab = [{"anno": d.year, "rendimento_pct": round(v, 1)} for d, v in yearly.items()]
     lines += ["## Portafoglio APEX (capitale diviso sulle 5 cripto)", "",
               fmt_table([{"symbol": "PORTAFOGLIO", **{k: pm[k] for k in
