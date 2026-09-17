@@ -60,10 +60,19 @@ def main():
         if not buoni or ORD.get(conf, 0) < ORD[a.min]:
             scartati.append((f.get('fornitore'), conf, len(f.get('termini', [])), len(buoni)))
             continue
-        buoni.sort(key=lambda t: t.get('data') or '', reverse=True)
+        # preferisce il termine USABILE (giorni e base noti) piu' recente; a parita', il piu' recente
+        def punteggio(t):
+            gg, base = normalizza(t)
+            usabile = gg is not None and base in ('df', 'dffm', 'consegna')
+            parziale = gg is not None or base not in ('non specificato', 'altro')
+            return (2 if usabile else 1 if parziale else 0, t.get('data') or '')
+        buoni.sort(key=punteggio, reverse=True)
         t = buoni[0]
         gg, base = normalizza(t)
-        corr = (t.get('verifica') or {}).get('correzione') or ''
+        corr = ((t.get('verifica') or {}).get('correzione') or '').strip()
+        fonte = f"{t.get('mittente', '')} · {t.get('data', '')} · {t.get('oggetto', '')} · thread {t.get('threadId', '')}"
+        if corr:
+            fonte += ' · nota verifica: ' + (corr[:220] + '…' if len(corr) > 220 else corr)
         out[f['fornitore']] = {
             'testo': t.get('testo', ''),
             'tipo': t.get('tipo', ''),
@@ -71,7 +80,7 @@ def main():
             'base': base,
             'rate': t.get('rate', ''),
             'direzione': t.get('direzione', ''),
-            'fonte': f"{t.get('mittente', '')} · {t.get('data', '')} · {t.get('oggetto', '')} · thread {t.get('threadId', '')}",
+            'fonte': fonte,
             'citazione': t.get('citazione', ''),
             'conf': conf,
             'correzione': corr,
