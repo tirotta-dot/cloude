@@ -92,6 +92,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     + '<a class="chip arch" href="https://claude.ai/code/artifact/8f94fd99-c93f-4ac7-a20b-7b0fccb074ec" target="_blank" rel="noopener" '
     + 'title="Note vocali su Telegram: come collegare il bot che trascrive i vocali">'
     + 'Note vocali \u2197</a>'
+    + '<button class="chip ask" id="chiedi" hidden title="Fai una domanda sui dati di questa pagina" aria-haspopup="dialog">Chiedi</button>'
     + '<button class="chip help" id="sbhelp" title="Come funziona" aria-haspopup="dialog">?</button>'
     + '<span class="status" id="status"></span>'
     /* R17: Aggiorna, ultimo elemento della barra: in alto a destra. */
@@ -110,6 +111,13 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     + '<dt>Note</dt><dd>ogni riga ha \u201cscrivi una nota per Claude\u201d: le leggo a ogni sincronizzazione (alle 8 e alle 13, riepilogo il venerd\u00ec alle 13). Fra un giro e l\'altro decidi tu: il tasto <em>Aggiorna</em> in Oggi.</dd>'
     + '<dt>Ricerca</dt><dd>premi <em>/</em> ovunque e cerchi in tutto: task, commesse, viaggi, incassi, fornitori.</dd>'
     + '</dl><button class="btn" id="hclose">Ho capito</button></div></div>'
+    + '<div class="hmask" id="askm" hidden><div class="hbox askbox" role="dialog" aria-modal="true" aria-label="Chiedi al Second Brain">'
+    + '<h3>Chiedi al Second Brain</h3>'
+    + '<p class="srcline">Rispondo solo con quello che c\'\u00e8 in questa pagina: task, commesse, scadenze, incassi, ordini. Ogni domanda usa il tuo account Claude.</p>'
+    + '<textarea id="ask-q" rows="3" placeholder="Es. quali commesse Can Gio hanno incassi scaduti? cosa scade questa settimana? chi ha pi\u00f9 task fermi?"></textarea>'
+    + '<div class="askrow"><button class="btn" id="ask-go">Chiedi</button><button class="chip" id="ask-stop" hidden>Ferma</button><span class="cm-hint" id="ask-st"></span></div>'
+    + '<div id="ask-out" class="askout"></div>'
+    + '<button class="chip" id="ask-close" style="margin-top:12px">Chiudi</button></div></div>'
     + '<main><div class="wrap"><div id="robanner"></div><div id="stage"></div></div></main>'
     + '<footer><div class="wrap"><div class="strip">'
     + '<div class="shot s1"><b>Coaster</b></div><div class="shot s2"><b>Officina</b></div>'
@@ -1121,6 +1129,10 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
         + 'acquisti@prestonbarbieri.com con l’elenco degli scaduti.</p></div>';
     }
     var sett = ordiniSettimana(), scad = ordiniScaduti();
+    if (ordQ){
+      var fq = ordQ.toLowerCase(), ff = function(v){ return String(v.f || '').toLowerCase().indexOf(fq) >= 0; };
+      sett = sett.filter(ff); scad = scad.filter(ff);
+    }
     var l = lunediDi(new Date());
     var h = '<div class="cm-kpis">'
       + '<div class="cm-kpi' + (sett.length ? ' hot' : '') + '"><b>' + sett.length + '</b>'
@@ -1147,6 +1159,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
         + '<th>Descrizione</th><th>Commessa</th><th>Consegna prevista</th><th>Quando</th>'
         + '<th>Stato</th></tr></thead><tbody>' + ordRighe(list, bad) + '</tbody></table></div></section>';
     }
+    if (ordQ) h += '<div class="fbar">Solo il fornitore <b>' + esc(ordQ) + '</b> <button class="chip" id="ord-clear">× tutti i fornitori</button></div>';
     h += tabella('Scaduti', scad.length + ' ordini oltre la data prevista · sollecito automatico ad acquisti ogni lunedì', scad, true);
     h += tabella('In consegna questa settimana', 'dal lunedì alla domenica della settimana in corso', sett, false);
     h += pagellaFornitori();
@@ -1317,7 +1330,9 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
       + (ordiniScaduti().length ? ' · ' + ordiniScaduti().length + ' scad.' : '') + '</button>'
       + '<button id="cm-cash" aria-pressed="' + (cmode === 'cash') + '">Cash flow</button>'
       + '<button id="cm-scad" aria-pressed="' + (cmode === 'scad') + '">Scadenze'
-      + (scadCount() ? ' · ' + scadCount() : '') + '</button></div>'
+      + (scadCount() ? ' · ' + scadCount() : '') + '</button>'
+      + '<button id="cm-cli" aria-pressed="' + (cmode === 'clienti') + '">Clienti</button>'
+      + '<button id="cm-ctr" aria-pressed="' + (cmode === 'ctr') + '">Contratti</button></div>'
       + '<input class="sel" id="cq" type="search" placeholder="Cerca codice, cliente, paese…" '
       + 'value="' + esc(cq) + '" aria-label="Cerca commessa" style="min-width:230px">'
       + '<select class="sel" id="cfilt" aria-label="Filtro">' + opts + '</select>'
@@ -1354,12 +1369,15 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     h += kpiBar(pool, nsel);
     if (cmode === 'ordini') h += ordiniHtml();
     else if (cmode === 'gantt') h += ganttHtml(nsel ? selected() : list);
+    else if (cmode === 'clienti') h += clientiHtml(nsel ? selected() : list);
+    else if (cmode === 'ctr') h += contrattiHtml(nsel ? selected() : list);
     else if (cmode === 'cash') h += cashHtml(nsel ? selected() : list, nsel);
     else if (cmode === 'scad') h += scadHtml(nsel ? selected() : list);
     else h += nsel ? cmCards(selected()) : cmTable(list);
     stage.innerHTML = h;
     if (cmode === 'cash') wireCash();
     if (cmode === 'scad') wireScad();
+    if (cmode === 'ordini'){ var oc = document.getElementById('ord-clear'); if (oc) oc.addEventListener('click', function(){ ordQ = ''; dashboard(); }); }
 
     document.querySelectorAll('#pgz button').forEach(function(b){
       b.addEventListener('click', function(){ pgZoom = b.getAttribute('data-pgz'); dashboard(); });
@@ -1377,6 +1395,10 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
       cmode = 'cash'; dashboard(); });
     document.getElementById('cm-scad').addEventListener('click', function(){
       cmode = 'scad'; dashboard(); });
+    document.getElementById('cm-cli').addEventListener('click', function(){
+      cmode = 'clienti'; dashboard(); });
+    document.getElementById('cm-ctr').addEventListener('click', function(){
+      cmode = 'ctr'; dashboard(); });
     document.getElementById('cv-att').addEventListener('click', function(){
       cview = 'attive'; dashboard(); head(); });
     document.getElementById('cv-sp').addEventListener('click', function(){
@@ -2069,9 +2091,10 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
       + (vfocus ? '<button class="chip" id="v-clearfocus" aria-pressed="true">' + esc(vfocus) + ' ×</button>' : '')
       + '<button class="chip" id="v-goform">+ Nuovo viaggio</button>'
       + '<span class="cm-hint">storico ricostruito dalle email dell\'agenzia</span></div>';
-    h += vElenco() + vWish() + vForm() + vPref();
+    h += vRichiesteHtml() + vElenco() + vWish() + vForm() + vPref();
     stage.innerHTML = h;
     vWire();
+    vRichWire();
   }
 
   function vWire(){
@@ -2395,6 +2418,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
         + '</div><span class="ogwhen' + (gg > 14 ? ' bad' : '') + '">' + gg + ' gg'
         + (a.tid ? ' <a class="gml" href="https://mail.google.com/mail/#all/' + esc(a.tid)
            + '" target="_blank" rel="noopener" title="Apri il thread in Gmail">Gmail \u2197</a>' : '')
+        + (a.dm ? ' <a class="gml bz" href="' + drUrl(a) + '" target="_blank" rel="noopener" title="Bozza di risposta gi\u00e0 preparata: aprila, controlla e manda">bozza pronta \u2197</a>' : '')
         + '</span></div>';
     });
     h += '</section></div>';
@@ -2911,6 +2935,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
         + 'tutti i calcoli di margine e gli alert. Cambiale qui e si aggiorna tutto.</p></div>';
     }
 
+    if (denF === 'flusso') h += cassaHtml(cm);
     stage.innerHTML = h;
     document.querySelectorAll('#denseg button').forEach(function(b){
       b.addEventListener('click', function(){ denF = b.getAttribute('data-den'); denaro(); });
@@ -3025,24 +3050,10 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
       });
       h += '</div><p class="srcline" style="margin-top:12px">Le ore compaiono appena carichi il file ore '
         + 'settimanale: da lì vedo in anticipo dove il carico fa saltare una data.</p>';
+      h += delegheHtml();
     }
 
-    if (perF === 'forn'){
-      var SEM = {ok:'ok', warn:'warn', late:'late'};
-      h += '<div class="cards3">';
-      (S.forn || []).forEach(function(f){
-        h += '<div class="pcard f-' + esc(f.sem) + '"><b>' + esc(f.n)
-          + ' <span class="pill ' + SEM[f.sem] + '">'
-          + (f.sem === 'late' ? 'problemi aperti' : f.sem === 'warn' ? 'da presidiare' : 'regolare')
-          + '</span></b>'
-          + '<p class="pw">' + esc(f.cosa) + '</p>'
-          + '<p>' + esc(f.note) + '</p>'
-          + '<div class="pcm">' + (f.cm || []).map(function(c){
-              return '<span class="tag" data-cm="' + esc(c) + '">' + esc(c) + '</span>'; }).join('')
-          + '</div></div>';
-      });
-      h += '</div>';
-    }
+    if (perF === 'forn'){ h += fornitoriHtml(); }
 
     if (perF === 'enti'){
       h += '<div class="cards2">';
@@ -3058,6 +3069,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     }
 
     stage.innerHTML = h;
+    if (perF === 'forn') wireForn();
     document.querySelectorAll('#perseg button').forEach(function(b){
       b.addEventListener('click', function(){ perF = b.getAttribute('data-per'); persone(); });
     });
@@ -3444,6 +3456,399 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
       S.scadenze = (S.scadenze || []).filter(function(x){ return x.id !== id; });
       salvaSubito('scadenza eliminata'); dashboard();
     }); });
+  }
+
+  /* ---------- R23 (18/09/2026): FORNITORI — ordini dal gestionale, termini dalle email, note di Danilo ---------- */
+  var fornQ = '', fornF = 'tutti', ordQ = '';
+  function fornIndice(){
+    var per = {}, t = today();
+    ((S.ordf && S.ordf.voci) || []).forEach(function(v){
+      var f = v.f || 'Fornitore non indicato';
+      var x = per[f] = per[f] || {f:f, righe:0, ordini:{}, imp:0, scad:0, gg:0, cms:{}, ultimo:null};
+      x.righe++; x.ordini[v.n] = 1; x.imp += +v.imp || 0;
+      if (v.cm) x.cms[v.cm] = 1;
+      if (v.dp){
+        var d = days(t, v.dp);
+        if (d < 0){ x.scad++; x.gg += -d; }
+        if (!x.ultimo || v.dp > x.ultimo) x.ultimo = v.dp;
+      }
+    });
+    var note = (S.forn || []);
+    return Object.keys(per).map(function(k){
+      var x = per[k], lk = k.toLowerCase(), prima = lk.split(/[\s.]+/)[0];
+      x.nOrd = Object.keys(x.ordini).length;
+      x.ggMedio = x.scad ? Math.round(x.gg / x.scad) : 0;
+      x.t = termineDi(k);
+      x.nota = note.filter(function(f){
+        var n = String(f.n || '').toLowerCase();
+        return n && (lk.indexOf(n) >= 0 || (prima.length > 3 && n.indexOf(prima) >= 0));
+      })[0] || null;
+      x.sem = x.nota && x.nota.sem ? x.nota.sem : (x.scad ? (x.ggMedio > 60 ? 'late' : 'warn') : 'ok');
+      return x;
+    });
+  }
+  function fornitoriHtml(){
+    var all = fornIndice(), q = fornQ.toLowerCase();
+    var vis = all.filter(function(x){
+      if (q && x.f.toLowerCase().indexOf(q) < 0
+          && !Object.keys(x.cms).some(function(c){ return c.toLowerCase().indexOf(q) >= 0; })) return false;
+      if (fornF === 'scaduti') return x.scad > 0;
+      if (fornF === 'termini') return !!(x.t && x.t.gg != null);
+      if (fornF === 'senza') return !(x.t && x.t.gg != null);
+      if (fornF === 'note') return !!x.nota;
+      return true;
+    }).sort(function(a, b){ return b.imp - a.imp; });
+    var nScad = all.filter(function(x){ return x.scad; }).length,
+        nTerm = all.filter(function(x){ return x.t && x.t.gg != null; }).length,
+        tot = all.reduce(function(s, x){ return s + x.imp; }, 0);
+    var h = '<div class="cm-kpis">'
+      + '<div class="cm-kpi"><b>' + all.length + '</b><span>fornitori con ordini aperti</span><small>' + esc(eur(Math.round(tot))) + ' impegnati nel gestionale</small></div>'
+      + '<div class="cm-kpi' + (nScad ? ' hot' : '') + '"><b>' + nScad + '</b><span>con consegne scadute</span><small>ordini oltre la data prevista</small></div>'
+      + '<div class="cm-kpi"><b>' + nTerm + '</b><span>con termini di pagamento noti</span><small>trovati nelle email e verificati</small></div></div>';
+    h += '<div class="cm-tools"><div class="seg sub">'
+      + [['tutti','Tutti'],['scaduti','Con scaduti'],['termini','Termini noti'],['senza','Termini da confermare'],['note','Con note']].map(function(f){
+          return '<button data-ff="' + f[0] + '" aria-pressed="' + (fornF === f[0]) + '">' + f[1] + '</button>'; }).join('')
+      + '</div><input class="sel" id="forn-q" type="search" placeholder="Cerca fornitore o commessa…" value="' + esc(fornQ) + '" style="min-width:200px">'
+      + '<span class="cm-hint">' + vis.length + ' fornitori · ordini dal gestionale, termini dalle email, note dalle tue schede</span></div>';
+    if (!vis.length) return h + '<p class="ogempty">Nessun fornitore con questo filtro.</p>';
+    h += '<div class="cards3">';
+    vis.forEach(function(x){
+      var SEM = {ok:'ok', warn:'warn', late:'late'}, t = x.t, noto = !!(t && t.gg != null);
+      h += '<div class="pcard f-' + esc(x.sem) + '"><b>' + esc(x.f) + ' <span class="pill ' + (SEM[x.sem] || 'ok') + '">'
+        + (x.sem === 'late' ? 'problemi aperti' : x.sem === 'warn' ? 'da presidiare' : 'regolare') + '</span></b>'
+        + '<div class="pnums"><span><b>' + x.nOrd + '</b>ordini</span><span><b>' + esc(eur(Math.round(x.imp))) + '</b>aperto</span>'
+        + '<span><b' + (x.scad ? ' class="late"' : '') + '>' + x.scad + '</b>scaduti</span><span><b>' + (x.scad ? x.ggMedio + ' gg' : '—') + '</b>ritardo medio</span></div>'
+        + (x.nota ? '<p class="pw">' + esc(x.nota.cosa || '') + '</p><p>' + esc(x.nota.note || '') + '</p>' : '')
+        + '<p class="ftermini' + (noto ? '' : ' da') + '"><b>Pagamento:</b> '
+        + (t ? esc(t.testo || '') + (t.rate ? ' · ' + esc(t.rate) : '') + ' <i class="osrc" title="' + esc(t.fonte || '') + '">' + esc(t.conf || 'fonte') + '</i>'
+             : 'termini da confermare (non trovati nelle email)') + '</p>'
+        + '<div class="pcm">' + Object.keys(x.cms).sort().map(function(c){ return '<span class="tag" data-cm="' + esc(c) + '">' + esc(c) + '</span>'; }).join('') + '</div>'
+        + '<div class="fazioni"><button class="chip" data-solf="' + esc(x.f) + '"' + (x.scad ? '' : ' disabled title="nessun ordine scaduto"') + '>Bozza sollecito</button>'
+        + '<button class="chip" data-ordf="' + esc(x.f) + '">Vedi gli ordini</button></div></div>';
+    });
+    return h + '</div>';
+  }
+  function testoSollecito(f){
+    var t = today(), per = {};
+    ((S.ordf && S.ordf.voci) || []).filter(function(v){ return v.f === f && v.dp && d0(v.dp) < t; })
+      .sort(function(a, b){ return d0(a.dp) - d0(b.dp); })
+      .forEach(function(v){
+        var k = v.n + ' · ' + (v.cm || '—');
+        per[k] = per[k] || {n:v.n, cm:v.cm, dp:v.dp, d:[]};
+        per[k].d.push(v.d);
+      });
+    var corpo = '— Messaggio preparato dal Danilo Second Brain per conto di Danilo Tirotta —\n\nBuongiorno,\n\n'
+      + 'risultano ancora aperti i seguenti ordini con data di consegna prevista superata:\n\n'
+      + Object.keys(per).map(function(k){ var o = per[k];
+          return '• Ordine ' + o.n + (o.cm ? ' (commessa ' + o.cm + ')' : '') + ' · consegna prevista ' + itFull(o.dp) + ' · '
+            + o.d.slice(0, 3).join('; ') + (o.d.length > 3 ? ' e altre ' + (o.d.length - 3) + ' righe' : ''); }).join('\n')
+      + '\n\nVi chiedo cortesemente di confermare per ciascuno se la merce è già stata spedita o di indicarci una nuova data di consegna.\n\n'
+      + 'Grazie, cordiali saluti\n\nDanilo Tirotta, Program Manager, Preston & Barbieri Srl';
+    return {oggetto:'Sollecito ordini in ritardo — ' + f, corpo:corpo, n:Object.keys(per).length};
+  }
+  function wireForn(){
+    document.querySelectorAll('[data-ff]').forEach(function(b){ b.addEventListener('click', function(){ fornF = b.getAttribute('data-ff'); persone(); }); });
+    var q = document.getElementById('forn-q');
+    if (q) q.addEventListener('input', function(){
+      fornQ = q.value; var pos = q.selectionStart; persone();
+      var q2 = document.getElementById('forn-q'); if (q2){ q2.focus(); try{ q2.setSelectionRange(pos, pos); }catch(e){} }
+    });
+    document.querySelectorAll('[data-ordf]').forEach(function(b){ b.addEventListener('click', function(){
+      ordQ = b.getAttribute('data-ordf'); view = 'dash'; cmode = 'ordini'; setView(); render();
+      try{ window.scrollTo(0, 0); }catch(e){}
+    }); });
+    document.querySelectorAll('[data-solf]').forEach(function(b){ b.addEventListener('click', function(){
+      var f = b.getAttribute('data-solf'), m = testoSollecito(f);
+      b.disabled = true; b.textContent = 'preparo…';
+      bozzaGmail(m.oggetto, m.corpo).then(function(r){
+        b.textContent = r.modo === 'gmail' ? 'bozza salvata in Gmail ✓' : 'testo copiato: incollalo in Gmail';
+        if (r.link && !b.parentNode.querySelector('a')){
+          var a = document.createElement('a'); a.href = r.link; a.target = '_blank'; a.rel = 'noopener'; a.className = 'chip'; a.textContent = 'apri le bozze';
+          b.parentNode.appendChild(a);
+        }
+      }).catch(function(err){ b.textContent = 'non riuscito' + (err && err.code ? ' (' + err.code + ')' : ''); })
+      .then(function(){ setTimeout(function(){ b.disabled = false; }, 5000); });
+    }); });
+  }
+
+  /* ---------- R23: PAGINA ↔ CONNETTORI (capability mcp): solo bozze, mai invii ---------- */
+  var MCP = null, MCPpronto = false;
+  function mcpInit(){
+    if (!(window.claude && window.claude.use)){ MCPpronto = true; return; }
+    window.claude.use('mcp').then(function(m){ MCP = m || null; MCPpronto = true; }, function(){ MCPpronto = true; });
+  }
+  function copiaTesto(oggetto, corpo){
+    var txt = 'Oggetto: ' + oggetto + '\n\n' + corpo;
+    return new Promise(function(res){
+      var p = null; try { p = navigator.clipboard.writeText(txt); } catch(e){}
+      if (p) p.then(function(){ res({modo:'copia'}); }, function(){ window.prompt('Copia questo testo:', txt); res({modo:'copia'}); });
+      else { window.prompt('Copia questo testo:', txt); res({modo:'copia'}); }
+    });
+  }
+  function bozzaGmail(oggetto, corpo){
+    if (!MCP) return copiaTesto(oggetto, corpo);
+    return MCP.callTool('Gmail', 'create_draft', {subject: oggetto, body: corpo}).then(function(){
+      return {modo:'gmail', link:'https://mail.google.com/mail/u/0/#drafts'};
+    }).catch(function(err){
+      var c = err && err.code;
+      if (c === 'not_in_manifest' || c === 'server_not_connected' || c === 'needs_reauth' || c === 'not_granted'
+          || c === 'capability_disabled' || c === 'capability_removed' || c === 'selection_required' || c === 'blocked_by_policy')
+        return copiaTesto(oggetto, corpo);
+      throw err;
+    });
+  }
+
+  /* ---------- R23: DELEGHE PER COLLEGA (Persone → Carico) ---------- */
+  function delegheHtml(){
+    var per = {}, t = today();
+    tuttiTask().forEach(function(x){
+      var tk = x.t; if (!tk.dg) return;
+      var p = per[tk.dg] = per[tk.dg] || {aperti:0, chiusi:0, vecchio:null, soll:0, fermi:0};
+      if (tk.d) p.chiusi++;
+      else {
+        p.aperti++;
+        if (tk.dgd){
+          if (!p.vecchio || tk.dgd < p.vecchio) p.vecchio = tk.dgd;
+          if (days(d0(tk.dgd), t) > 5) p.fermi++;
+        }
+      }
+      p.soll += (tk.sl || []).length;
+    });
+    var ks = Object.keys(per).sort(function(a, b){ return per[b].aperti - per[a].aperti; });
+    if (!ks.length) return '';
+    var h = '<h3 class="ptit">Deleghe per collega<em class="oghint">quanti task ha in mano ciascuno, da quanto, e quanti solleciti sono partiti</em></h3>'
+      + '<div class="otab"><table><thead><tr><th>Collega</th><th class="num">Aperti</th><th class="num">Chiusi</th><th>Delega più vecchia</th><th class="num">Fermi da oltre 5 gg</th><th class="num">Solleciti</th></tr></thead><tbody>';
+    ks.forEach(function(k){ var p = per[k];
+      h += '<tr' + (p.fermi ? ' class="warn"' : '') + '><td><b>' + esc(k) + '</b></td><td class="num mono">' + p.aperti + '</td><td class="num mono">' + p.chiusi + '</td>'
+        + '<td class="mono">' + (p.vecchio ? esc(itFull(p.vecchio)) + ' · ' + days(d0(p.vecchio), t) + ' gg' : '—') + '</td>'
+        + '<td class="num mono">' + p.fermi + '</td><td class="num mono">' + p.soll + '</td></tr>';
+    });
+    return h + '</tbody></table></div>';
+  }
+
+  /* ---------- R23: CLIENTI (Commesse → Clienti) ---------- */
+  function clienteGruppo(c){
+    var n = String(c.cliente || 'senza cliente');
+    if (/vinhomes|can gio|quang ninh|vinpearl/i.test(n)) return 'Vinhomes · Can Gio · Quang Ninh';
+    return n;
+  }
+  function clientiHtml(list){
+    var t = today(), per = {}, taskPer = {};
+    tuttiTask().forEach(function(x){ if (!x.t.d) taskPer[x.g.code] = (taskPer[x.g.code] || 0) + 1; });
+    list.forEach(function(c){
+      var k = clienteGruppo(c);
+      var p = per[k] = per[k] || {k:k, cms:[], val:0, att:0, scad:0, inc:0, task:0, next:null, last:null, paesi:{}, clienti:{}};
+      p.cms.push(c); p.val += (c.eco && c.eco.valore) || 0;
+      if (c.cliente) p.clienti[c.cliente] = 1;
+      if (c.paese) p.paesi[c.paese] = 1;
+      ((c.pag && c.pag.voci) || []).forEach(function(v){
+        if (v.st === 'incassato') p.inc += +v.imp || 0;
+        else { p.att += +v.imp || 0; if (v.att && d0(v.att) < t) p.scad += +v.imp || 0; }
+      });
+      p.task += taskPer[c.code] || 0;
+      var tg = target(c); if (tg && (!p.next || d0(tg) < d0(p.next))) p.next = tg;
+      if (c.last && (!p.last || c.last > p.last)) p.last = c.last;
+    });
+    var ks = Object.keys(per).sort(function(a, b){ return per[b].cms.length - per[a].cms.length || per[b].val - per[a].val; });
+    var h = '<div class="ore-wait" style="margin-bottom:14px">Le commesse raggruppate per cliente: valore, incassi ancora da ricevere e già scaduti, task aperti, prossima consegna e ultima email. Vinhomes, Can Gio e Quang Ninh sono lo stesso cliente finale.</div><div class="cards2">';
+    ks.forEach(function(k){ var p = per[k];
+      h += '<div class="pcard' + (p.scad ? ' f-late' : ' f-ok') + '"><b>' + esc(k) + ' <span class="pill ' + (p.scad ? 'late' : 'ok') + '">' + p.cms.length + (p.cms.length === 1 ? ' commessa' : ' commesse') + '</span></b>'
+        + '<p class="pw">' + esc(Object.keys(p.paesi).join(', ')) + (Object.keys(p.clienti).length > 1 ? ' · ' + esc(Object.keys(p.clienti).join(' / ')) : '') + '</p>'
+        + '<div class="pnums"><span><b>' + (p.val ? esc(eur(p.val)) : '—') + '</b>valore</span><span><b>' + (p.att ? esc(eur(Math.round(p.att))) : '—') + '</b>da incassare</span>'
+        + '<span><b' + (p.scad ? ' class="late"' : '') + '>' + (p.scad ? esc(eur(Math.round(p.scad))) : '—') + '</b>scaduto</span><span><b>' + p.task + '</b>task aperti</span></div>'
+        + '<p>' + (p.next ? 'prossima consegna il ' + esc(itFull(p.next)) : 'nessuna consegna fissata') + (p.last ? ' · ultima email ' + esc(itFull(p.last)) : '') + '</p>'
+        + '<div class="pcm">' + p.cms.slice().sort(function(a, b){ return a.code.localeCompare(b.code); }).map(function(c){
+            return '<span class="tag" data-cm="' + esc(c.code) + '" title="' + esc(c.desc || '') + '">' + esc(c.code) + '</span>'; }).join('') + '</div></div>';
+    });
+    return h + '</div>';
+  }
+
+  /* ---------- R23: CONTRATTI (Commesse → Contratti) ---------- */
+  function contrattiHtml(list){
+    var t = today(), rows = list.slice().sort(function(a, b){ return a.code.localeCompare(b.code); });
+    var senza = rows.filter(function(c){ return !c.ctr || !c.ctr.n; }).length;
+    var h = '<div class="cm-kpis"><div class="cm-kpi"><b>' + (rows.length - senza) + '</b><span>contratti agli atti</span><small>dai PDF letti: numero, revisione, incoterm, consegna, garanzia, penali, foro</small></div>'
+      + '<div class="cm-kpi' + (senza ? ' hot' : '') + '"><b>' + senza + '</b><span>senza contratto caricato</span><small>manca il file oppure non è ancora stato letto</small></div></div>';
+    h += '<div class="otab"><table><thead><tr><th>Commessa</th><th>Contratto</th><th>Incoterm</th><th>Consegna contrattuale</th><th>Garanzia</th><th>Penali</th><th>Foro / legge</th><th>Da verificare</th></tr></thead><tbody>';
+    rows.forEach(function(c){
+      var k = c.ctr || {}, gg = k.cons ? days(t, k.cons) : null;
+      var att = Array.isArray(k.att) ? k.att : (k.att ? [String(k.att)] : []);
+      h += '<tr' + (!k.n ? ' class="warn"' : (gg != null && gg < 0 && !c.ev) ? ' class="bad"' : '') + '>'
+        + '<td class="mono"><b>' + esc(c.code) + '</b><span class="osub">' + esc(c.cliente || '') + '</span></td>'
+        + '<td>' + (k.n ? esc(k.n) + (k.rev ? ' · ' + esc(k.rev) : '') + (k.data ? '<span class="osub">' + esc(itFull(k.data)) + (k.file ? ' · ' + esc(k.file) : '') + '</span>' : '') : '<i>non caricato</i>') + '</td>'
+        + '<td class="ctrtxt">' + esc(k.inco || '—') + '</td>'
+        + '<td class="mono">' + (k.cons ? esc(itFull(k.cons)) + '<span class="osub">' + (gg < 0 ? Math.abs(gg) + ' gg fa' : gg === 0 ? 'oggi' : 'tra ' + gg + ' gg') + '</span>' : '—') + '</td>'
+        + '<td class="ctrtxt" title="' + esc(k.gar || '') + '">' + esc(String(k.gar || '—').slice(0, 90)) + '</td>'
+        + '<td class="ctrtxt" title="' + esc(k.pen || '') + '">' + esc(String(k.pen || '—').slice(0, 90)) + '</td>'
+        + '<td class="ctrtxt" title="' + esc(k.foro || '') + '">' + esc(String(k.foro || '—').slice(0, 70)) + '</td>'
+        + '<td>' + (att.length ? '<details><summary>' + att.length + (att.length === 1 ? ' punto' : ' punti') + '</summary><ul class="plain">' + att.map(function(x){ return '<li>' + esc(x) + '</li>'; }).join('') + '</ul></details>' : '—') + '</td></tr>';
+    });
+    return h + '</tbody></table></div>';
+  }
+
+  /* ---------- R23: CASSA 12 MESI (Denaro) ---------- */
+  function cassaHtml(cm){
+    var MA = cashAggrega(cm.map(cashModello));
+    var t = today(), k0 = ymKey(t), keys = [], y = t.getFullYear(), m = t.getMonth() + 1;
+    for (var i = 0; i < 12; i++){ keys.push(y + '-' + ('0' + m).slice(-2)); m++; if (m > 12){ m = 1; y++; } }
+    var inc = ['acconto','sped_parz','sped','saldo','altro'];
+    function entrate(k){ var v = 0; inc.forEach(function(r){ v += MA.righe[r][k] || 0; }); return v; }
+    function uscite(k){ return (MA.righe.forn[k] || 0) + (MA.righe.fornDa[k] || 0); }
+    var neg = 0, prog = 0, arretrati = 0;
+    Object.keys(MA.righe).forEach(function(r){ Object.keys(MA.righe[r]).forEach(function(k){
+      if (k < k0) arretrati += (inc.indexOf(r) >= 0 ? 1 : -1) * MA.righe[r][k]; }); });
+    keys.forEach(function(k){ if (entrate(k) - uscite(k) < 0) neg++; });
+    var h = '<section class="og"><h3 class="cfh"><i class="dt cy"></i>Cassa nei prossimi 12 mesi<em class="oghint">incassi previsti dai contratti meno pagamenti ai fornitori (data di consegna più termini), su tutte le commesse in corso</em></h3>';
+    h += '<div class="otab cf"><table><thead><tr><th>' + (neg ? '<span class="late">' + neg + (neg === 1 ? ' mese in negativo' : ' mesi in negativo') + '</span>' : 'nessun mese in negativo') + '</th>'
+      + keys.map(function(k){ return '<th class="num">' + ymLabel(k) + '</th>'; }).join('') + '</tr></thead><tbody>';
+    h += '<tr><td>Incassi previsti</td>' + keys.map(function(k){ var v = entrate(k); return '<td class="num mono">' + (v ? eur(Math.round(v)) : '') + '</td>'; }).join('') + '</tr>';
+    h += '<tr><td>Pagamenti fornitori · termini noti</td>' + keys.map(function(k){ var v = MA.righe.forn[k] || 0; return '<td class="num mono">' + (v ? '−' + eur(Math.round(v)) : '') + '</td>'; }).join('') + '</tr>';
+    h += '<tr class="bad"><td>Pagamenti fornitori · termini da confermare</td>' + keys.map(function(k){ var v = MA.righe.fornDa[k] || 0; return '<td class="num mono">' + (v ? '−' + eur(Math.round(v)) : '') + '</td>'; }).join('') + '</tr>';
+    h += '<tr class="tot"><td>Saldo del mese</td>' + keys.map(function(k){ var v = entrate(k) - uscite(k); return '<td class="num mono' + (v < 0 ? ' late' : '') + '">' + eur(Math.round(v)) + '</td>'; }).join('') + '</tr>';
+    h += '<tr class="tot"><td>Progressivo</td>' + keys.map(function(k){ prog += entrate(k) - uscite(k); return '<td class="num mono' + (prog < 0 ? ' late' : '') + '">' + eur(Math.round(prog)) + '</td>'; }).join('') + '</tr>';
+    h += '</tbody></table></div><p class="srcline">'
+      + (arretrati ? 'Voci con data già passata e non chiuse: saldo ' + esc(eur(Math.round(arretrati))) + ' (incassi attesi non ancora incassati e pagamenti non confermati). ' : '')
+      + 'Il dettaglio per commessa è in Commesse → Cash flow.</p></section>';
+    return h;
+  }
+
+  /* ---------- R23: VIAGGI — richiesta voli e hotel, evasa dalla routine con Kiwi.com e Booking.com ---------- */
+  var VR = [], VRsig = '';
+  function vRichInit(){
+    var cl = (window.claude && window.claude.use) ? window.claude : null; if (!cl) return;
+    cl.use('db').then(function(db){
+      if (!db) return;
+      try {
+        db.collection('richieste').orderBy('creata', 'desc').limit(60).onSnapshot(function(qs){
+          VR = qs.docs.map(function(d){ var o = Object.assign({}, d.data()); o.id = d.id; return o; })
+            .filter(function(r){ return r.tipo === 'viaggio'; });
+          var sig = JSON.stringify(VR.map(function(r){ return [r.id, r.stato, (r.opzioni && r.opzioni.voli || []).length]; }));
+          if (sig !== VRsig){ VRsig = sig; if (view === 'trip') viaggi(); }
+        });
+      } catch(e){}
+    }).catch(function(){});
+  }
+  function vRichiesteHtml(){
+    var pref = VG().pref || {};
+    var h = '<section class="og" id="vrich"><h3 class="cfh"><i class="dt cy"></i>Voli e hotel per una trasferta<em class="oghint">compili qui; la ricerca parte al giro successivo (Kiwi.com per i voli, Booking.com per gli hotel) e le opzioni compaiono qui sotto</em></h3>'
+      + '<div class="scadf"><input class="sel" id="vr-da" type="text" value="Bologna" placeholder="Da" style="width:130px" aria-label="Partenza">'
+      + '<input class="sel" id="vr-a" type="text" placeholder="A (città o aeroporto)" style="width:190px" aria-label="Destinazione">'
+      + '<input class="sel" id="vr-dal" type="date" aria-label="Andata"><input class="sel" id="vr-al" type="date" aria-label="Ritorno">'
+      + '<select class="sel" id="vr-n" aria-label="Persone"><option value="1">1 persona</option><option value="2">2 persone</option><option value="3">3 persone</option></select>'
+      + '<label class="chip"><input type="checkbox" id="vr-hotel" checked> anche hotel</label>'
+      + '<input class="sel" id="vr-note" type="text" placeholder="Note (commessa, orari, zona hotel…)" style="flex:1;min-width:200px">'
+      + '<button class="btn" id="vr-go">Cerca</button><span class="cm-hint" id="vr-st"></span></div>'
+      + '<p class="srcline">Preferenze: ' + esc(pref.alleanza || '—') + (pref.partenze ? ' · partenze da ' + esc(pref.partenze) : '') + '</p>';
+    if (VR.length){
+      h += '<div class="vrlist">';
+      VR.slice(0, 6).forEach(function(r){
+        var o = r.opzioni || {}, st = r.stato || 'aperta';
+        var cls = st === 'pronta' ? 'ok' : st === 'errore' ? 'late' : 'warn';
+        h += '<div class="pcard f-' + cls + '"><b>' + esc(r.da || '') + ' → ' + esc(r.a || '') + ' · ' + (r.dal ? esc(itFull(r.dal)) : '') + (r.al ? ' – ' + esc(itFull(r.al)) : '')
+          + ' <span class="pill ' + cls + '">' + esc(st === 'aperta' ? 'in coda' : st) + '</span></b>'
+          + (r.note ? '<p class="pw">' + esc(r.note) + '</p>' : '');
+        if (o.voli && o.voli.length) h += '<p><b>Voli</b></p><ul class="plain">' + o.voli.slice(0, 6).map(function(v){
+          return '<li>' + esc(v.rotta || '') + ' · ' + esc(v.orari || '') + ' · <b>' + esc(v.prezzo || '') + '</b>' + (v.compagnia ? ' · ' + esc(v.compagnia) : '')
+            + (v.url ? ' · <a href="' + esc(v.url) + '" target="_blank" rel="noopener">prenota</a>' : '') + '</li>'; }).join('') + '</ul>';
+        if (o.hotel && o.hotel.length) h += '<p><b>Hotel</b></p><ul class="plain">' + o.hotel.slice(0, 6).map(function(x){
+          return '<li>' + esc(x.nome || '') + ' · <b>' + esc(x.prezzo || '') + '</b>' + (x.voto ? ' · ' + esc(x.voto) : '') + (x.zona ? ' · ' + esc(x.zona) : '')
+            + (x.url ? ' · <a href="' + esc(x.url) + '" target="_blank" rel="noopener">vedi</a>' : '') + '</li>'; }).join('') + '</ul>';
+        if (r.errore) h += '<p class="late">' + esc(r.errore) + '</p>';
+        if (r.nota) h += '<p class="srcline">' + esc(r.nota) + '</p>';
+        h += '<div class="fazioni"><button class="chip" data-vrdel="' + esc(r.id) + '">Ritira</button></div></div>';
+      });
+      h += '</div>';
+    }
+    return h + '</section>';
+  }
+  function vRichWire(){
+    var go = document.getElementById('vr-go'); if (!go) return;
+    go.addEventListener('click', function(){
+      var st = document.getElementById('vr-st');
+      var a = document.getElementById('vr-a').value.trim(), dal = document.getElementById('vr-dal').value;
+      if (!a || !dal){ st.textContent = 'servono almeno la destinazione e la data di andata'; return; }
+      var cl = (window.claude && window.claude.use) ? window.claude : null;
+      if (!cl){ st.textContent = 'database non disponibile in questa vista'; return; }
+      st.textContent = 'registro la richiesta…';
+      cl.use('db').then(function(db){
+        if (!db){ st.textContent = 'database non disponibile'; return; }
+        var id = 'viaggio-' + Date.now().toString(36);
+        return db.doc('richieste/' + id).set({
+          tipo:'viaggio', stato:'aperta', creata:new Date().toISOString(),
+          da:document.getElementById('vr-da').value.trim() || 'Bologna', a:a, dal:dal,
+          al:document.getElementById('vr-al').value || null,
+          persone:parseInt(document.getElementById('vr-n').value, 10) || 1,
+          hotel:document.getElementById('vr-hotel').checked,
+          note:document.getElementById('vr-note').value.trim(), pref:VG().pref || null,
+          contesto:'Creata dalla scheda Viaggi del Second Brain'
+        }).then(function(){ st.textContent = '✓ richiesta registrata: le opzioni arrivano qui al prossimo giro'; });
+      }).catch(function(){ st.textContent = 'non sono riuscito a registrarla, riprova'; });
+    });
+    document.querySelectorAll('[data-vrdel]').forEach(function(b){ b.addEventListener('click', function(){
+      var cl = (window.claude && window.claude.use) ? window.claude : null; if (!cl) return;
+      cl.use('db').then(function(db){ if (db) return db.doc('richieste/' + b.getAttribute('data-vrdel')).delete(); }).catch(function(){});
+    }); });
+  }
+
+  /* ---------- R23: CHIEDI AL SECOND BRAIN (capability sample): risponde solo con i dati della pagina ---------- */
+  var SAMPLE = null;
+  function isoOggi(){ var t = today(); return t.getFullYear() + '-' + ('0' + (t.getMonth() + 1)).slice(-2) + '-' + ('0' + t.getDate()).slice(-2); }
+  function contestoPerClaude(){
+    var t = today();
+    var open = tuttiTask().filter(function(x){ return !x.t.d; }).map(function(x){
+      return {cm:x.g.code, t:x.t.t, due:x.t.due || null, dg:x.t.dg || null, p:x.t.p || null}; });
+    open.sort(function(a, b){ return (a.due || '9') < (b.due || '9') ? -1 : 1; });
+    var cms = CM().filter(function(c){ return !c.ev; }).map(function(c){
+      var m = margine(c), sc = ordiniPer(c.code).filter(function(v){ return v.dp && d0(v.dp) < t; }).length;
+      return {code:c.code, cliente:c.cliente, capo:c.capo, desc:c.desc, consegna:target(c), valore:(c.eco && c.eco.valore) || null,
+        margine_pct:m.pct, crit:(c.crit || []).slice(0, 3), sospesa:!!c.sp, ordini_fornitore_scaduti:sc,
+        incassi:((c.pag && c.pag.voci) || []).map(function(v){ return {c:String(v.c || '').slice(0, 60), imp:v.imp, att:v.att || null, inc:v.inc || null, st:v.st || null}; })};
+    });
+    var scad = scadItems(CM().filter(function(c){ return !c.ev; })).filter(function(x){ return !x.done && x.d && days(t, x.d) <= 120; })
+      .map(function(x){ return {d:x.d, cm:x.cm, t:x.t}; });
+    var att = (S.attese || []).map(function(a){ return {chi:a.chi, az:a.az, cm:a.cm, data:a.data, chiede:String(a.chiede || '').slice(0, 120)}; });
+    var ctx = 'Sei l\'assistente di Danilo Tirotta (Program Manager di Preston & Barbieri, costruttore di giostre). Rispondi in italiano, breve e concreto, SOLO con i dati qui sotto (JSON). Se il dato non c\'è, dillo chiaramente. Cita sempre i codici commessa. Non inventare mai date, importi o nomi. Oggi è ' + isoOggi() + '.\n\nDATI:\n';
+    var dati = {task_aperti:open.slice(0, 120), commesse:cms, scadenze_entro_120_giorni:scad, aspettano_una_risposta:att, ordini_fornitore_scaduti_totale:ordiniScaduti().length};
+    var s = JSON.stringify(dati);
+    if (s.length > 52000){ dati.task_aperti = open.slice(0, 60); dati.commesse.forEach(function(c){ delete c.incassi; delete c.crit; }); s = JSON.stringify(dati); }
+    if (s.length > 52000) s = s.slice(0, 52000);
+    return ctx + s;
+  }
+  function copiaErrore(c){
+    return c === 'cancelled' ? 'fermato'
+      : (c === 'not_granted' || c === 'sampling_disabled' || c === 'not_declared' || c === 'capability_disabled') ? 'non disponibile su questo account'
+      : c === 'rate_limited' ? 'troppe richieste: riprova tra poco'
+      : c === 'prompt_too_large' ? 'troppi dati: chiedi una cosa più mirata'
+      : c === 'session_expired' ? 'sessione scaduta: ricarica la pagina'
+      : c === 'refused' ? 'non posso rispondere a questa domanda' : 'non ha risposto: riprova';
+  }
+  function chiediInit(){
+    if (!(window.claude && window.claude.use)) return;
+    window.claude.use('sample').then(function(s){
+      if (!s) return;
+      SAMPLE = s;
+      var chip = document.getElementById('chiedi'), m = document.getElementById('askm');
+      if (!chip || !m) return;
+      chip.hidden = false;
+      var ctl = null;
+      chip.addEventListener('click', function(){ m.hidden = false; setTimeout(function(){ var q = document.getElementById('ask-q'); if (q) q.focus(); }, 50); });
+      document.getElementById('ask-close').addEventListener('click', function(){ m.hidden = true; });
+      m.addEventListener('click', function(e){ if (e.target === m) m.hidden = true; });
+      document.getElementById('ask-stop').addEventListener('click', function(){ if (ctl) ctl.abort(); });
+      function chiedi(){
+        var q = document.getElementById('ask-q').value.trim(), out = document.getElementById('ask-out'),
+            st = document.getElementById('ask-st'), go = document.getElementById('ask-go'), stop = document.getElementById('ask-stop');
+        if (!q) return;
+        ctl = new AbortController(); go.disabled = true; stop.hidden = false; st.textContent = 'ci penso…'; out.textContent = '';
+        SAMPLE(contestoPerClaude() + '\n\nDOMANDA DI DANILO: ' + q, {signal: ctl.signal, cache: false,
+            onText: function(u){ out.textContent = u.text; st.textContent = ''; }})
+          .then(function(r){ out.textContent = r.text; if (r.truncated) st.textContent = 'risposta tagliata: chiedi una cosa più piccola'; })
+          .catch(function(e){ if (e && e.text) out.textContent = e.text; st.textContent = copiaErrore(e && e.code); })
+          .then(function(){ go.disabled = false; stop.hidden = true; });
+      }
+      document.getElementById('ask-go').addEventListener('click', chiedi);
+      document.getElementById('ask-q').addEventListener('keydown', function(e){ if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) chiedi(); });
+    }, function(){});
   }
 
   /* ---------- salvataggio ----------
@@ -4167,6 +4572,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     m.addEventListener('click', function(e){ if (e.target === m) m.hidden = true; });
     document.addEventListener('keydown', function(e){ if (e.key === 'Escape') m.hidden = true; });
   })();
+  chiediInit(); mcpInit(); vRichInit();
   ['oggi','cal','pers'].forEach(function(v){
     document.getElementById('v-' + v).addEventListener('click', function(){
       view = v; setView(); render(); });

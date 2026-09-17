@@ -1903,3 +1903,18 @@ body[data-view="v-offerte"] .bar-in > .seg button[aria-pressed="true"]{backgroun
 .cm-tools{flex-wrap:wrap}
 .cm-tools .seg.sub{flex:0 0 auto;flex-wrap:wrap;max-width:100%}
 .cm-tools input#cq{flex:1 1 200px;min-width:160px!important;width:auto}
+
+/* R23 (18/09/2026): fornitori, clienti, contratti, deleghe, cassa, viaggi, chiedi */
+.ftermini{font-size:12.5px;color:var(--ink-2);margin:6px 0 0}
+.ftermini.da{color:var(--warn)}
+.fazioni{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.fazioni .chip{font-size:11px;padding:3px 9px}
+.pnums b.late{color:var(--late)}
+.ptit{margin:22px 0 10px;font-family:"Barlow Condensed",sans-serif;font-size:19px;font-weight:700;display:flex;align-items:center;gap:10px;flex-wrap:wrap;color:var(--ink)}
+.ptit .oghint{font:400 12.5px/1.4 "IBM Plex Sans",sans-serif;color:var(--muted);text-transform:none;letter-spacing:0}
+.ctrtxt{font-size:12px;color:var(--ink-2);max-width:220px}
+.askbox textarea{width:100%;box-sizing:border-box;font:inherit;font-size:14px;padding:10px;border:1px solid var(--line-2);border-radius:6px;resize:vertical;background:var(--panel-2);color:var(--ink)}
+.askrow{display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap}
+.askout{white-space:pre-wrap;margin-top:14px;font-size:13.5px;line-height:1.55;color:var(--ink);min-height:20px}
+.vrlist{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));margin-top:12px}
+.chip.ask{border-color:var(--cy);color:var(--cy)}
