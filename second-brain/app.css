@@ -1918,3 +1918,41 @@ body[data-view="v-offerte"] .bar-in > .seg button[aria-pressed="true"]{backgroun
 .askout{white-space:pre-wrap;margin-top:14px;font-size:13.5px;line-height:1.55;color:var(--ink);min-height:20px}
 .vrlist{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));margin-top:12px}
 .chip.ask{border-color:var(--cy);color:var(--cy)}
+
+/* R24 (18/09/2026): Budget e consuntivo per nodo */
+.bdgt table{min-width:980px}
+.bdgt td.nodo b{display:block;color:var(--ink)}
+.bdgt td.nodo .osub{white-space:normal;max-width:360px}
+.bdgt tr.tot td{font-weight:600;border-top:2px solid var(--line-2);background:rgba(255,255,255,.025)}
+.bdgt tr.extra td.nodo b::after{content:" \00b7 non a budget";font-size:10.5px;color:var(--warn);font-weight:400}
+.bdgt tr.bad td.pct,.bdgt td.mono.bad{color:var(--late);font-weight:600}
+.bdgt tr.warn td.pct{color:var(--warn);font-weight:600}
+.bdgt tr.ok td.pct{color:var(--done)}
+.bdgt tr[data-bdgcm]{cursor:pointer}
+.bdgt tr[data-bdgcm]:hover td{background:rgba(255,255,255,.04)}
+.bdgbar{height:7px;background:var(--line);border-radius:4px;overflow:hidden;margin-top:5px;min-width:90px}
+.bdgbar i{display:block;height:100%;background:var(--done)}
+.bdgt tr.warn .bdgbar i{background:var(--warn)}
+.bdgt tr.bad .bdgbar i{background:var(--late)}
+.bdgprop{border:1px solid rgba(176,124,6,.38);background:rgba(176,124,6,.09);border-radius:8px;padding:12px 14px;margin:0 0 12px;font-size:13px;line-height:1.5}
+.bdgprop b{color:var(--ink)}
+.bdgprop .actions,.bdged .actions,.bdgpar .actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.bdged{margin-top:12px}
+.bdged summary,.bdgpar summary{cursor:pointer;font-family:"Barlow Condensed",sans-serif;letter-spacing:.06em;text-transform:uppercase;font-size:12px;color:var(--ink-2)}
+.bdged table{width:100%;border-collapse:collapse;margin:8px 0 10px}
+.bdged th{font-size:11px;text-align:left;color:var(--muted);padding:4px 6px;font-weight:500}
+.bdged td{padding:3px 4px}
+.bdged input.sel{width:100%;box-sizing:border-box;min-width:70px}
+.bdged input.num,.bdgpar input.num{text-align:right;font-family:"IBM Plex Mono",monospace}
+.bdged td:nth-child(3),.bdged td:nth-child(4),.bdged td:nth-child(5){width:110px}
+.bdged td:last-child{width:34px}
+.bdgpar{margin:0 0 14px;border:1px solid var(--line);border-radius:8px;padding:10px 14px;background:var(--panel)}
+.bdgpar .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:6px 8px;margin:10px 0}
+.bdgpar label{font-size:10.5px;color:var(--muted);display:block;margin-bottom:2px}
+.bdgpar input.sel,.bdgpar select.sel{width:100%;box-sizing:border-box}
+.bdgk .cm-kpi b{font-size:20px}
+@media (max-width:760px){.bdged table{min-width:640px;display:block;overflow-x:auto}}
+
+/* R25: budget proposto (non ancora confermato) */
+.bdgt td.prop{color:#b45309;font-style:italic}
+.bdgprop select.sel{max-width:420px;margin-left:6px}

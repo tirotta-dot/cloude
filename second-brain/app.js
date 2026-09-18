@@ -1332,7 +1332,9 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
       + '<button id="cm-scad" aria-pressed="' + (cmode === 'scad') + '">Scadenze'
       + (scadCount() ? ' · ' + scadCount() : '') + '</button>'
       + '<button id="cm-cli" aria-pressed="' + (cmode === 'clienti') + '">Clienti</button>'
-      + '<button id="cm-ctr" aria-pressed="' + (cmode === 'ctr') + '">Contratti</button></div>'
+      + '<button id="cm-ctr" aria-pressed="' + (cmode === 'ctr') + '">Contratti</button>'
+      + '<button id="cm-bdg" aria-pressed="' + (cmode === 'bdg') + '">Budget'
+      + (bdgDaConfermare().length ? ' \u00b7 ' + bdgDaConfermare().length + ' da conf.' : '') + '</button></div>'
       + '<input class="sel" id="cq" type="search" placeholder="Cerca codice, cliente, paese…" '
       + 'value="' + esc(cq) + '" aria-label="Cerca commessa" style="min-width:230px">'
       + '<select class="sel" id="cfilt" aria-label="Filtro">' + opts + '</select>'
@@ -1372,10 +1374,12 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     else if (cmode === 'clienti') h += clientiHtml(nsel ? selected() : list);
     else if (cmode === 'ctr') h += contrattiHtml(nsel ? selected() : list);
     else if (cmode === 'cash') h += cashHtml(nsel ? selected() : list, nsel);
+    else if (cmode === 'bdg') h += bdgHtml(nsel ? selected() : list, nsel);
     else if (cmode === 'scad') h += scadHtml(nsel ? selected() : list);
     else h += nsel ? cmCards(selected()) : cmTable(list);
     stage.innerHTML = h;
     if (cmode === 'cash') wireCash();
+    if (cmode === 'bdg') wireBdg();
     if (cmode === 'scad') wireScad();
     if (cmode === 'ordini'){ var oc = document.getElementById('ord-clear'); if (oc) oc.addEventListener('click', function(){ ordQ = ''; dashboard(); }); }
 
@@ -1399,6 +1403,8 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
       cmode = 'clienti'; dashboard(); });
     document.getElementById('cm-ctr').addEventListener('click', function(){
       cmode = 'ctr'; dashboard(); });
+    document.getElementById('cm-bdg').addEventListener('click', function(){
+      cmode = 'bdg'; dashboard(); });
     document.getElementById('cv-att').addEventListener('click', function(){
       cview = 'attive'; dashboard(); head(); });
     document.getElementById('cv-sp').addEventListener('click', function(){
@@ -2943,7 +2949,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     var ts = document.getElementById('t-save');
     if (ts) ts.addEventListener('click', function(){
       var g = function(i){ return parseFloat(document.getElementById(i).value) || 0; };
-      S.cfg = {tUff:g('t-uff'), tOff:g('t-off'), soglia:g('t-sog')};
+      S.cfg = Object.assign({}, S.cfg || {}, {tUff:g('t-uff'), tOff:g('t-off'), soglia:g('t-sog')});
       save();
       var m = document.getElementById('t-msg');
       if (m){ m.className = 'msg'; m.textContent = 'Salvato: ricalcolo tutto.'; }
@@ -3724,6 +3730,9 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
             .filter(function(r){ return r.tipo === 'viaggio'; });
           var sig = JSON.stringify(VR.map(function(r){ return [r.id, r.stato, (r.opzioni && r.opzioni.voli || []).length]; }));
           if (sig !== VRsig){ VRsig = sig; if (view === 'trip') viaggi(); }
+          var xs = qs.docs.map(function(d){ var o = Object.assign({}, d.data()); o.id = d.id; return o; }).filter(function(r){ return r.tipo === 'export'; });
+          var xsig = JSON.stringify(xs.map(function(r){ return [r.id, r.stato, r.url || '']; }));
+          if (xsig !== XPsig){ XPsig = xsig; XP = xs; if (view === 'dash' && cmode === 'bdg') bdgRirender(); }
         });
       } catch(e){}
     }).catch(function(){});
@@ -3849,6 +3858,589 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
       document.getElementById('ask-go').addEventListener('click', chiedi);
       document.getElementById('ask-q').addEventListener('keydown', function(e){ if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) chiedi(); });
     }, function(){});
+  }
+
+  /* ---------- R24 (18/09/2026): BUDGET E CONSUNTIVO PER NODO (Commesse → Budget) ----------
+     Richiesta di Danilo del 18/09/2026: per ogni commessa i nodi (dal contratto, dal gestionale o
+     scritti da lui in pagina), il budget per nodo (costi esterni + ore ufficio e produzione), il
+     consuntivo dal gestionale (fatturato, contabilizzato, consegnato, ordinato) con lo scostamento,
+     il costo indicizzato all'anno corrente e al successivo con il prezzo di vendita a margine, il
+     prezzo di vendita della commessa e l'utile. Una commessa senza budget mostra i nodi proposti e
+     chiede conferma. Dati: S.cons (tools/consuntivo.py), c.bdg, S.cfg.idx (indici annui %),
+     S.cfg.marg / margTipo. Le ore del gestionale non hanno il nodo: per le ore il confronto è per
+     commessa.
+     R25 (18/09/2026, sera): «l'utile va calcolato anche in base al budget che ti devo inserire, tu puoi
+     prendere un budget che ti devo confermare dalle commesse precedenti simili, l'utile mettilo solo nelle
+     commesse chiuse dove non consideri più il budget ma i costi consuntivi». Quindi: per una commessa in
+     corso senza budget, nodi e importi vengono proposti dalle commesse chiuse della stessa famiglia
+     (prefisso del codice: SBC, GB, FS…, solo codici XXX-nn-aa, non riparazioni o fiere): per ogni nodo la
+     somma dei costi consuntivi indicizzati all'anno corrente divisa per il numero di commesse di
+     riferimento, così il totale proposto è la media dei loro totali; Danilo conferma o modifica. L'utile è:
+     a budget per le commesse in corso (prezzo − budget), consuntivo per le evase (prezzo − costi
+     consuntivi). Le ore possono essere a budget anche per l'intera commessa (c.bdg.hu / c.bdg.ho).
+     Revisione del 18/09 sera: decimali con la virgola negli input, modifiche non salvate conservate
+     al ridisegno, indicizzazione per anno anche nella colonna Y+1, ore delle ditte esterne nel
+     consuntivo, nodo del gestionale uguale al codice commessa trattato come "senza nodo". */
+  var bdgVista = 'scost', BDG_CACHE = {}, BDG_RIF = {}, BDG_PEND = {}, BDG_DIRTY = {}, XP = [], XPsig = '';
+  var NN_CACHE = {}, CIN_CACHE = {}, CONS_OK = {};
+  function idxDefault(){ return {"2013":1.2,"2014":0.2,"2015":0.1,"2016":-0.1,"2017":1.2,"2018":1.2,"2019":0.6,"2020":-0.2,"2021":1.9,"2022":8.1,"2023":5.7,"2024":1.0,"2025":1.7,"2026":1.8,"2027":1.9}; }
+  function bcfg(){
+    var c = cfg();
+    if (!c.idx || typeof c.idx !== 'object') c.idx = idxDefault();
+    if (c.marg == null || isNaN(Number(c.marg))) c.marg = 30;
+    if (c.margTipo !== 'ricarico') c.margTipo = 'prezzo';
+    return c;
+  }
+  function annoCorr(){ return new Date().getFullYear(); }
+  function fattoreIdx(da, a){
+    var c = bcfg(), f = 1, y;
+    for (y = da + 1; y <= a; y++){ var i = c.idx[String(y)]; f *= 1 + (i == null ? 0 : (Number(i) || 0)) / 100; }
+    return f;
+  }
+  function prezzoVendita(costo){
+    var c = bcfg(), m = (Number(c.marg) || 0) / 100;
+    if (c.margTipo === 'ricarico') return costo * (1 + m);
+    return m >= 1 ? costo : costo / (1 - m);
+  }
+  function normNodo(s){
+    var k = String(s || '');
+    if (NN_CACHE[k] !== undefined) return NN_CACHE[k];
+    var v = k.toUpperCase().replace(/[À-Ä]/g, 'A').replace(/[È-Ë]/g, 'E').replace(/[Ì-Ï]/g, 'I')
+      .replace(/[Ò-Ö]/g, 'O').replace(/[Ù-Ü]/g, 'U').replace(/[^A-Z0-9]+/g, ' ').trim();
+    NN_CACHE[k] = v; return v;
+  }
+  /* numeri scritti all'italiana ("1.500,50", "380,5") o con il punto decimale ("380.5"): il punto è
+     separatore delle migliaia solo se c'è anche la virgola o se è seguito da tre cifre esatte */
+  function numIt(v){
+    if (v == null) return null;
+    var s = String(v).trim().replace(/\s+/g, '').replace('€', '');
+    if (s === '') return null;
+    if (s.indexOf(',') >= 0) s = s.replace(/\./g, '').replace(',', '.');
+    else if (/^-?\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, '');
+    var n = Number(s); return isNaN(n) ? null : n;
+  }
+  function numEd(v){ return (v == null || v === '') ? '' : String(v).replace('.', ','); }
+  function titolo(s){ return String(s || '').toLowerCase().replace(/(^|[\s(\/-])[a-zà-ù]/g, function(m){ return m.toUpperCase(); }); }
+  /* Un nodo del gestionale con lo stesso nome della commessa è "senza nodo": lo unisco a '-' una volta sola */
+  function consCm(code){
+    var cc = S.cons && S.cons.cm && S.cons.cm[code]; if (!cc) return null;
+    var agg = (S.cons.agg || '') + '|' + (S.cons.gen || '');
+    if (CONS_OK[code] !== agg){
+      CONS_OK[code] = agg;
+      var k = normNodo(code), nd = cc.nd || {};
+      Object.keys(nd).forEach(function(n){
+        if (n === '-' || normNodo(n) !== k) return;
+        var dest = nd['-'] = nd['-'] || {};
+        Object.keys(nd[n]).forEach(function(y){ var a = nd[n][y] || {}, d = dest[y] = dest[y] || {n: 0};
+          Object.keys(a).forEach(function(s){ d[s] = (Number(d[s]) || 0) + (Number(a[s]) || 0); }); });
+        delete nd[n];
+      });
+    }
+    return cc;
+  }
+  function consNodi(code){ var c = consCm(code); return c ? Object.keys(c.nd || {}) : []; }
+  function nodoLabel(nd){ return nd === '-' ? 'Senza nodo' : titolo(nd); }
+  function oreTxt(h){ return new Intl.NumberFormat('it-IT', {maximumFractionDigits: 1}).format(h) + ' h'; }
+  function pctTxt(p){ return p == null ? '—' : (p > 1 ? '+' : '') + Math.round((p - 1) * 100) + '%'; }
+  function eurR(n){ return n == null ? '—' : eur(Math.round(n)); }
+  function bdgDaConfermare(l){ return (l || CM()).filter(function(c){ return !c.ev && !c.sp && !(c.bdg && c.bdg.conf); }); }
+  function famCm(code){ var m = /^([A-Za-z]+)-/.exec(String(code || '')); return m ? m[1].toUpperCase() : null; }
+  function cmStd(code){ return /^[A-Za-z]+-\d+-\d{2}$/.test(String(code || '')); }
+  /* fiere, ricambi, progetti interni importati dal gestionale: non sono commesse */
+  function cmAltro(c){ return !!(c.gest && c.gest.tipo && c.gest.tipo !== 'commessa' && c.gest.tipo !== 'variante'); }
+  function annoCm(c){
+    var m = /^[A-Za-z]+-\d+-(\d{2})$/.exec(String(c.code || '')); if (m) return 2000 + Number(m[1]);
+    var cc = consCm(c.code), y = 0; if (cc) Object.keys(cc.nd || {}).forEach(function(nd){ Object.keys(cc.nd[nd]).forEach(function(a){ if (Number(a) > y) y = Number(a); }); });
+    return y || null;
+  }
+  /* costi consuntivi di una commessa per nodo (nome del gestionale), indicizzati all'anno Y */
+  function costiIdxNodi(code, Y){
+    var key = code + '|' + Y + '|' + ((S.cons && S.cons.agg) || '') + '|' + JSON.stringify(bcfg().idx);
+    if (CIN_CACHE[key]) return CIN_CACHE[key];
+    var cc = consCm(code), out = {}, tot = 0;
+    if (cc) Object.keys(cc.nd || {}).forEach(function(nd){ var s = 0; Object.keys(cc.nd[nd]).forEach(function(y){ var a = cc.nd[nd][y] || {}, v = 0;
+      ['fat', 'con', 'ddt', 'ord', 'alt'].forEach(function(k){ v += Number(a[k]) || 0; }); s += v * fattoreIdx(Number(y), Y); });
+      if (s) { out[nd] = s; tot += s; } });
+    return (CIN_CACHE[key] = {nodi: out, tot: tot});
+  }
+  /* commesse chiuse della stessa famiglia con costi nel gestionale (max 3): solo codici standard
+     XXX-nn-aa (niente riparazioni, ricambi, fiere) e non quelle che sembrano ancora in corso
+     (gest.attn). Vengono prima quelle che usano gli stessi nodi della commessa (contratto e
+     gestionale): così le medie per nodo confrontano cose omogenee; a parità, le più recenti. */
+  function bdgSimili(c){
+    var fam = famCm(c.code), Y = annoCorr(); if (!fam) return [];
+    var miei = {}; (c.nodi || []).forEach(function(n){ var k = normNodo(n.n); if (k) miei[k] = 1; });
+    consNodi(c.code).forEach(function(nd){ var k = normNodo(nd); if (k) miei[k] = 1; });
+    var nMiei = Object.keys(miei).length;
+    var cand = CM().filter(function(x){ return x.code !== c.code && x.ev && famCm(x.code) === fam && cmStd(x.code) && !cmAltro(x) && !(x.gest && x.gest.attn); })
+      .map(function(x){ var k = costiIdxNodi(x.code, Y), ov = 0; if (nMiei) Object.keys(k.nodi).forEach(function(nd){ if (miei[normNodo(nd)]) ov++; });
+        return {c: x, code: x.code, tot: k.tot, nodi: k.nodi, anno: annoCm(x), ov: nMiei ? ov / nMiei : 0}; })
+      .filter(function(x){ return x.tot > 0; })
+      .sort(function(a, b){ return (b.ov >= 0.3 ? 1 : 0) - (a.ov >= 0.3 ? 1 : 0) || (b.anno || 0) - (a.anno || 0) || b.tot - a.tot; });
+    /* se qualche commessa usa i miei stessi nodi, la media si fa solo tra quelle */
+    var aff = cand.filter(function(x){ return x.ov >= 0.3; });
+    return (aff.length ? aff : cand).slice(0, 3);
+  }
+
+  /* nodi e budget proposti: nodi dal contratto (c.nodi), dal gestionale della commessa e dalle commesse
+     simili chiuse; importo di un nodo = somma dei costi consuntivi indicizzati di quel nodo nelle commesse
+     di riferimento ÷ numero di riferimenti (un riferimento senza quel nodo conta zero), così il totale
+     proposto è la media dei totali. Riferimento singolo scelto in pagina: BDG_RIF[code]. I costi senza
+     nodo dei riferimenti vanno nel nodo "Varie (senza nodo)", che ha l'alias '-' e raccoglie anche i
+     costi senza nodo della commessa stessa. Per una commessa evasa non si propone nessun budget. */
+  function bdgProposta(c){
+    var out = [], seen = {}, simili = c.ev ? [] : bdgSimili(c), mode = BDG_RIF[c.code] || 'media';
+    var rif = mode === 'media' ? simili : simili.filter(function(s){ return s.code === mode; });
+    if (!rif.length){ rif = simili; mode = 'media'; }
+    function trova(nome){
+      var k = normNodo(nome), hit = null; if (!k) return null;
+      out.forEach(function(o){ if (hit) return; if (normNodo(o.n) === k || (o.al || []).map(normNodo).indexOf(k) >= 0) hit = o; });
+      if (!hit) out.forEach(function(o){ if (hit) return; var ko = normNodo(o.n);
+        if (ko.length >= 4 && k.length >= 4 && (ko.indexOf(k) === 0 || k.indexOf(ko) === 0)) hit = o; });
+      return hit;
+    }
+    function agg(nome, d, al){
+      var k = normNodo(nome); if (!k || seen[k]) return null; seen[k] = 1;
+      var o = {id: 'b' + (out.length + 1), n: nome, d: d || '', al: al || [], ext: null, hu: null, ho: null, note: '', prop: {}};
+      out.push(o); return o;
+    }
+    function varie(){
+      var v = null; out.forEach(function(o){ if (!v && (o.al || []).indexOf('-') >= 0) v = o; });
+      if (!v){ v = agg('Varie (senza nodo)', 'costi registrati nel gestionale senza nodo', ['-']); if (v && v.al.indexOf('-') < 0) v.al.push('-'); }
+      return v;
+    }
+    function aggGest(nd, val, ref){
+      var hit;
+      if (nd === '-'){ if (!(val > 0)) return; hit = varie(); }
+      else {
+        hit = trova(nd);
+        if (hit){ if (normNodo(hit.n) !== normNodo(nd) && hit.al.indexOf(nd) < 0) hit.al.push(nd); }
+        else hit = agg(titolo(nd), '', []);
+      }
+      if (!hit) return;
+      if (val != null && ref) hit.prop[ref] = (hit.prop[ref] || 0) + val;
+    }
+    (c.nodi || []).forEach(function(n){ agg(n.n, n.d); });
+    consNodi(c.code).forEach(function(nd){ if (nd !== '-') aggGest(nd, null, null); });
+    rif.forEach(function(s){ Object.keys(s.nodi).forEach(function(nd){ aggGest(nd, s.nodi[nd], s.code); }); });
+    var tot = 0;
+    out.forEach(function(o){
+      var refs = Object.keys(o.prop);
+      if (refs.length){ var m = 0; refs.forEach(function(r){ m += o.prop[r]; }); o.ext = Math.round(m / rif.length / 100) * 100; o.nrif = refs.length; tot += o.ext; }
+      delete o.prop;
+    });
+    /* ore: media delle ore consuntive dei riferimenti che le hanno nel file ore */
+    var hu = null, ho = null, nO = 0, sU = 0, sO = 0;
+    rif.forEach(function(s){ var o = s.c.ore || {}; if (o.uff != null || o.off != null){ nO++; sU += Number(o.uff) || 0; sO += Number(o.off) || 0; } });
+    if (nO){ hu = Math.round(sU / nO); ho = Math.round(sO / nO); }
+    return {nodi: out, rif: rif, simili: simili, mode: mode, tot: tot, hu: hu, ho: ho, nOre: nO};
+  }
+  /* nodo del gestionale → id del nodo a budget: '-' solo tramite l'alias esplicito '-' */
+  function bdgMappa(c, nodi){
+    var m = {}, norm = nodi.map(function(b){ return {id: b.id, n: normNodo(b.n), al: (b.al || []).map(normNodo).filter(Boolean), meno: (b.al || []).indexOf('-') >= 0}; });
+    consNodi(c.code).forEach(function(nd){
+      if (nd === '-'){ norm.forEach(function(b){ if (!m[nd] && b.meno) m[nd] = b.id; }); return; }
+      var k = normNodo(nd); if (!k) return;
+      norm.forEach(function(b){ if (m[nd]) return; if (b.n === k || b.al.indexOf(k) >= 0) m[nd] = b.id; });
+    });
+    return m;
+  }
+  var BDG_MONEY = ['ext', 'fat', 'con', 'ddt', 'ord', 'alt', 'sost', 'imp', 'bOre', 'bTot', 'idxY', 'idxY1', 'przY', 'przY1'];
+  function bdgModello(c){
+    var cf = bcfg(), Y = annoCorr(), tU = Number(cf.tUff) || 0, tO = Number(cf.tOff) || 0;
+    var salvati = !!(c.bdg && c.bdg.nodi), nodi = salvati ? c.bdg.nodi : null, proposta = !salvati, P = null;
+    if (proposta){ P = bdgProposta(c); nodi = P.nodi; }
+    var hCm = {u: (c.bdg && c.bdg.hu != null) ? Number(c.bdg.hu) || 0 : (P ? (P.hu || 0) : 0),
+               o: (c.bdg && c.bdg.ho != null) ? Number(c.bdg.ho) || 0 : (P ? (P.ho || 0) : 0)};
+    var cc = consCm(c.code) || {nd: {}, ric: {}}, mappa = bdgMappa(c, nodi);
+    function vuota(id, n){ return {id: id, n: n, d: '', al: [], gest: [], ext: 0, hu: 0, ho: 0, note: '', fat: 0, con: 0, ddt: 0, ord: 0, alt: 0, anni: {}, bOre: 0, bTot: 0}; }
+    var righe = nodi.map(function(b){
+      var r = vuota(b.id, b.n); r.d = b.d || ''; r.al = b.al || []; r.ext = Number(b.ext) || 0; r.hu = Number(b.hu) || 0; r.ho = Number(b.ho) || 0; r.note = b.note || ''; r.nrif = b.nrif || 0; return r;
+    });
+    var byId = {}; righe.forEach(function(r){ byId[r.id] = r; });
+    var extra = [];
+    Object.keys(cc.nd || {}).forEach(function(nd){
+      var r = byId[mappa[nd]];
+      if (!r){ r = vuota('g:' + nd, nodoLabel(nd)); r.extra = true; extra.push(r); byId[r.id] = r; }
+      r.gest.push(nd);
+      var anni = cc.nd[nd] || {};
+      Object.keys(anni).forEach(function(y){
+        var a = anni[y] || {}, imp = 0;
+        ['fat', 'con', 'ddt', 'ord', 'alt'].forEach(function(k){ var v = Number(a[k]) || 0; r[k] += v; imp += v; });
+        r.anni[y] = (r.anni[y] || 0) + imp;
+      });
+    });
+    extra.sort(function(a, b){ if (a.id === 'g:-') return 1; if (b.id === 'g:-') return -1; return (b.fat + b.con + b.ddt + b.ord + b.alt) - (a.fat + a.con + a.ddt + a.ord + a.alt); });
+    var tutte = righe.concat(extra), tot = vuota('tot', 'Totale');
+    ['sost', 'imp', 'idxY', 'idxY1', 'przY', 'przY1'].forEach(function(k){ tot[k] = 0; });
+    tutte.forEach(function(r){
+      r.sost = r.fat + r.con + r.ddt + r.alt; r.imp = r.sost + r.ord;
+      r.bOre = r.hu * tU + r.ho * tO; r.bTot = r.ext + r.bOre;
+      r.sc = r.imp - r.ext; r.pct = r.ext > 0 ? r.imp / r.ext : null;
+      var iy = 0, iy1 = 0; Object.keys(r.anni).forEach(function(y){ iy += r.anni[y] * fattoreIdx(Number(y), Y); iy1 += r.anni[y] * fattoreIdx(Number(y), Y + 1); });
+      r.idxY = iy; r.idxY1 = iy1; r.przY = prezzoVendita(r.idxY); r.przY1 = prezzoVendita(r.idxY1);
+      r.stato = r.ext > 0 ? (r.pct > 1 ? 'bad' : r.pct > 0.9 ? 'warn' : 'ok') : (r.imp ? (r.extra ? 'extra' : 'nob') : 'vuoto');
+      /* i totali sommano i valori arrotondati che si vedono in tabella, così la colonna torna */
+      BDG_MONEY.forEach(function(k){ tot[k] += Math.round(r[k]); });
+      tot.hu += r.hu; tot.ho += r.ho;
+    });
+    tot.sc = tot.imp - tot.ext; tot.pct = tot.ext > 0 ? tot.imp / tot.ext : null;
+    tot.stato = tot.ext > 0 ? (tot.pct > 1 ? 'bad' : tot.pct > 0.9 ? 'warn' : 'ok') : 'nob';
+    var ore = c.ore || {}, cU = Number(ore.uff) || 0, cO = Number(ore.off) || 0, cE = Number(ore.est) || 0, cEeur = Number(ore.estEur) || 0;
+    var oreCons = cU * tU + cO * tO + cEeur;
+    var bU = tot.hu + hCm.u, bO = tot.ho + hCm.o, oreBdg = bU * tU + bO * tO;
+    var valore = (c.eco && c.eco.valore) ? Number(c.eco.valore) : null, oc = (cc.ric && cc.ric.oc) ? Number(cc.ric.oc) : null, fatCli = (cc.ric && cc.ric.fat) ? Number(cc.ric.fat) : null;
+    var prezzo, prezzoFonte;
+    if (valore != null){ prezzo = valore; prezzoFonte = 'contratto'; }
+    else if (c.ev && fatCli != null && fatCli > 0){ prezzo = fatCli; prezzoFonte = 'fatture al cliente nel gestionale'; }
+    else if (oc != null){ prezzo = oc; prezzoFonte = 'ordine cliente nel gestionale'; }
+    else { prezzo = null; prezzoFonte = null; }
+    var haBudget = tot.ext > 0 || bU > 0 || bO > 0;
+    var m = {c: c, nodi: nodi, proposta: proposta, conf: !!(c.bdg && c.bdg.conf), righe: tutte, tot: tot, Y: Y, tU: tU, tO: tO,
+      rif: P ? P.rif : [], simili: P ? P.simili : [], rifMode: P ? P.mode : null, propTot: P ? P.tot : 0, nOre: P ? P.nOre : 0,
+      ore: {bU: bU, bO: bO, cU: cU, cO: cO, cE: cE, cEeur: cEeur, bEur: oreBdg, cEur: oreCons, hCm: hCm},
+      prezzo: prezzo, prezzoFonte: prezzoFonte, oc: oc, valore: valore, fatCli: fatCli, haBudget: haBudget, chiusa: !!c.ev,
+      budgetTot: tot.ext + oreBdg, costoOggi: tot.imp + oreCons};
+    /* utile: a budget per le commesse in corso, consuntivo per le evase (R25) */
+    m.utileB = (prezzo != null && haBudget) ? prezzo - m.budgetTot : null;
+    m.utileO = prezzo != null ? prezzo - m.costoOggi : null;
+    if (c.ev){ m.utile = m.utileO; m.utileTipo = m.utile != null ? 'consuntivo' : null; }
+    else { m.utile = m.utileB; m.utileTipo = m.utile != null ? (proposta && m.rif.length ? 'budget proposto' : 'budget') : null; }
+    m.marg = (m.utile != null && prezzo) ? m.utile / prezzo : null;
+    m.margB = (m.utileB != null && prezzo) ? m.utileB / prezzo : null;
+    m.margO = (m.utileO != null && prezzo) ? m.utileO / prezzo : null;
+    return m;
+  }
+
+  /* ---- tabelle ---- */
+  function bdgBarra(r){
+    if (r.pct == null) return '';
+    var w = Math.min(r.pct, 1.5) / 1.5 * 100;
+    return '<div class="bdgbar"><i style="width:' + w.toFixed(1) + '%"></i></div>';
+  }
+  function bdgTabella(M){
+    var Y = M.Y, prop = M.proposta && M.rif.length, h = '<div class="otab cf bdgt"><table><thead><tr><th>Nodo</th>';
+    if (bdgVista === 'listino'){
+      h += '<th class="num">Impegnato a oggi</th><th>Per anno</th><th class="num">Indicizzato ' + Y + '</th><th class="num">Prezzo ' + Y + '</th><th class="num">Indicizzato ' + (Y + 1) + '</th><th class="num">Prezzo ' + (Y + 1) + '</th>';
+    } else {
+      h += '<th class="num">' + (prop ? 'Budget proposto' : 'Budget esterno') + '</th><th class="num">Fatturato</th><th class="num">Consegnato</th><th class="num">Ordinato</th><th class="num">Impegnato</th><th class="num">Scost. €</th><th class="num">Scost. %</th>';
+    }
+    h += '</tr></thead><tbody>';
+    M.righe.concat([M.tot]).forEach(function(r){
+      var tot = r.id === 'tot';
+      var sub = tot ? '' : ((r.gest.length && !(r.gest.length === 1 && nodoLabel(r.gest[0]) === r.n) ? 'gestionale: ' + r.gest.map(nodoLabel).join(', ') : '')
+        + (r.note ? (r.gest.length ? ' · ' : '') + r.note : '') + (r.d && !r.note ? (r.gest.length ? ' · ' : '') + r.d : '')
+        + (prop && r.nrif && M.rif.length > 1 ? (r.gest.length || r.note || r.d ? ' · ' : '') + 'in ' + r.nrif + ' su ' + M.rif.length + ' simili' : ''));
+      h += '<tr class="' + (tot ? 'tot ' : '') + (r.extra ? 'extra ' : '') + esc(r.stato || '') + '"><td class="nodo"><b>' + esc(r.n) + '</b>' + (sub ? '<span class="osub">' + esc(sub) + '</span>' : '') + '</td>';
+      if (bdgVista === 'listino'){
+        var anni = Object.keys(r.anni || {}).sort().map(function(y){ return y + ': ' + eurR(r.anni[y]); }).join(' · ');
+        h += '<td class="num mono">' + eurR(r.imp) + '</td><td class="osub" style="white-space:nowrap">' + esc(tot ? '' : anni) + '</td>'
+          + '<td class="num mono">' + eurR(r.idxY) + '</td><td class="num mono"><b>' + eurR(r.przY) + '</b></td>'
+          + '<td class="num mono">' + eurR(r.idxY1) + '</td><td class="num mono"><b>' + eurR(r.przY1) + '</b></td>';
+      } else {
+        h += '<td class="num mono' + (prop && r.ext ? ' prop' : '') + '">' + (r.ext ? eurR(r.ext) : '<span class="osub">' + (M.chiusa ? '—' : r.extra ? 'non a budget' : 'da inserire') + '</span>') + '</td>'
+          + '<td class="num mono">' + eurR(r.fat + r.con + r.alt) + '</td><td class="num mono">' + eurR(r.ddt) + '</td><td class="num mono">' + eurR(r.ord) + '</td>'
+          + '<td class="num mono"><b>' + eurR(r.imp) + '</b></td>'
+          + '<td class="num mono' + (r.ext > 0 && r.sc > 0 ? ' bad' : '') + '">' + (r.ext > 0 ? (r.sc > 0 ? '+' : '') + eurR(r.sc) : '—') + '</td>'
+          + '<td class="num mono pct">' + pctTxt(r.pct) + bdgBarra(r) + '</td>';
+      }
+      h += '</tr>';
+    });
+    return h + '</tbody></table></div>';
+  }
+  function bdgOreHtml(M){
+    var o = M.ore, prop = M.proposta && M.nOre > 0;
+    function riga(nome, bh, ch, ce, t, soloCons){
+      var be = bh * t, sc = ce - be, pct = be > 0 ? ce / be : null;
+      return '<tr class="' + (be > 0 ? (pct > 1 ? 'bad' : pct > 0.9 ? 'warn' : 'ok') : '') + '"><td class="nodo"><b>' + nome + '</b><span class="osub">' + (soloCons ? 'costo dal file ore' : t + ' €/h') + '</span></td>'
+        + '<td class="num mono' + (prop && bh ? ' prop' : '') + '">' + (soloCons ? '<span class="osub">nei costi esterni</span>' : bh ? oreTxt(bh) : '<span class="osub">' + (M.chiusa ? '—' : 'da inserire') + '</span>') + '</td><td class="num mono">' + (soloCons ? '—' : eurR(be)) + '</td>'
+        + '<td class="num mono">' + (ch ? oreTxt(ch) : '—') + '</td><td class="num mono"><b>' + eurR(ce) + '</b></td>'
+        + '<td class="num mono' + (be > 0 && sc > 0 ? ' bad' : '') + '">' + (be > 0 ? (sc > 0 ? '+' : '') + eurR(sc) : '—') + '</td><td class="num mono pct">' + pctTxt(pct) + '</td></tr>';
+    }
+    var h = '<details class="cfforn" open><summary>Ore interne · budget per nodo (somma)' + (o.hCm.u || o.hCm.o ? ' + ore ' + (prop ? 'proposte ' : '') + 'per l\'intera commessa (' + oreTxt(o.hCm.u) + ' ufficio, ' + oreTxt(o.hCm.o) + ' produzione)' : '') + ' e consuntivo del gestionale per commessa'
+      + (M.c.ore && M.c.ore.last ? ' · ore aggiornate a ' + esc(M.c.ore.last) : '') + '</summary>'
+      + '<div class="otab cf bdgt"><table><thead><tr><th></th><th class="num">Budget h</th><th class="num">Budget €</th><th class="num">Consuntivo h</th><th class="num">Consuntivo €</th><th class="num">Scost. €</th><th class="num">Scost. %</th></tr></thead><tbody>'
+      + riga('Ufficio', o.bU, o.cU, o.cU * M.tU, M.tU, false) + riga('Produzione', o.bO, o.cO, o.cO * M.tO, M.tO, false)
+      + (o.cE || o.cEeur ? riga('Ditte esterne', 0, o.cE, o.cEeur, 0, true) : '')
+      + '<tr class="tot"><td class="nodo"><b>Totale ore</b></td><td class="num mono">' + (o.bU + o.bO ? oreTxt(o.bU + o.bO) : '—') + '</td><td class="num mono">' + eurR(o.bEur) + '</td>'
+      + '<td class="num mono">' + (o.cU + o.cO + o.cE ? oreTxt(o.cU + o.cO + o.cE) : '—') + '</td><td class="num mono"><b>' + eurR(o.cEur) + '</b></td>'
+      + '<td class="num mono">' + (o.bEur > 0 ? (o.cEur - o.bEur > 0 ? '+' : '') + eurR(o.cEur - o.bEur) : '—') + '</td><td class="num mono pct">' + pctTxt(o.bEur > 0 ? o.cEur / o.bEur : null) + '</td></tr>'
+      + '</tbody></table></div><p class="srcline">Il file ore del gestionale non riporta il nodo: le ore si confrontano per commessa. Le ore delle ditte esterne valgono il costo registrato nel file ore. Tariffe in Denaro → Tariffe.</p></details>';
+    return h;
+  }
+  function bdgKpi(M){
+    var p = M.prezzo, prop = M.proposta && M.rif.length, k = '<div class="cm-kpis bdgk">';
+    var pInfo = M.prezzoFonte ? 'da ' + esc(M.prezzoFonte) : 'non trovato: né contratto né ordine cliente';
+    if (M.valore != null && M.oc != null && Math.abs(M.valore - M.oc) > 1) pInfo += ' · ordine cliente ' + eurR(M.oc);
+    if (M.fatCli != null && M.fatCli > 0 && M.prezzoFonte !== 'fatture al cliente nel gestionale' && (p == null || Math.abs(M.fatCli - p) > 1)) pInfo += ' · fatturato al cliente ' + eurR(M.fatCli);
+    if (M.prezzoFonte === 'fatture al cliente nel gestionale' && M.oc != null && Math.abs(M.oc - p) / p > 0.3) pInfo += ' · attenzione: ordine cliente ' + eurR(M.oc);
+    k += '<div class="cm-kpi"><b>' + (p != null ? eurR(p) : '—') + '</b><span>prezzo di vendita</span><small>' + pInfo + '</small></div>';
+    k += '<div class="cm-kpi"><b>' + (M.haBudget ? eurR(M.budgetTot) : '—') + '</b><span>' + (prop ? 'budget proposto' : 'budget totale') + '</span><small>' + (M.haBudget ? 'esterni ' + eurR(M.tot.ext) + ' + ore ' + eurR(M.ore.bEur) + (prop ? ' · da confermare' : '') : (M.chiusa ? 'commessa evasa: contano i costi consuntivi' : 'nessun budget inserito')) + '</small></div>';
+    k += '<div class="cm-kpi' + (M.tot.stato === 'bad' ? ' hot' : '') + '"><b>' + eurR(M.costoOggi) + '</b><span>' + (M.chiusa ? 'costi consuntivi' : 'costi a oggi') + '</span><small>impegnato ' + eurR(M.tot.imp) + ' + ore ' + eurR(M.ore.cEur) + '</small></div>';
+    k += '<div class="cm-kpi' + (M.tot.stato === 'bad' ? ' hot' : '') + '"><b>' + (M.tot.ext > 0 ? (M.tot.sc > 0 ? '+' : '') + eurR(M.tot.sc) : '—') + '</b><span>scostamento esterni</span><small>' + (M.tot.ext > 0 ? pctTxt(M.tot.pct) + ' sul budget esterno' + (prop ? ' proposto' : '') : M.chiusa ? 'commessa evasa: nessun budget da confrontare' : 'serve il budget per nodo') + '</small></div>';
+    k += '<div class="cm-kpi' + (M.utile != null && M.utile < 0 ? ' hot' : '') + '"><b>' + (M.utile != null ? eurR(M.utile) : '—') + '</b><span>' + (M.chiusa ? 'utile consuntivo' : 'utile a budget') + '</span><small>'
+      + (M.utile != null ? 'margine ' + Math.round(M.marg * 100) + '% sul prezzo' + (M.chiusa ? ' · prezzo − costi consuntivi (impegnato + ore)' : (prop ? ' · sul budget proposto, da confermare' : '') + ' · con i soli costi a oggi ' + eurR(M.utileO) + ' (' + Math.round(M.margO * 100) + '%)')
+        : (M.prezzo == null ? 'manca il prezzo di vendita' : M.chiusa ? '—' : 'serve il budget: inseriscilo o conferma quello proposto')) + '</small></div>';
+    return k + '</div>';
+  }
+  function bdgPropostaHtml(M){
+    if (M.chiusa || (!M.proposta && M.conf)) return '';
+    var nomi = M.nodi.map(function(n){ return esc(n.n); }).join(', '), code = esc(M.c.code), h = '<div class="bdgprop">';
+    if (M.proposta){
+      h += '<b>Nodi proposti per ' + code + '</b> (dal contratto, dal gestionale' + (M.rif.length ? ' e dalle commesse simili chiuse' : '') + '): ' + (nomi || '<i>nessuno trovato: inseriscili tu qui sotto</i>') + '.';
+      if (M.rif.length){
+        var nS = M.simili.length;
+        h += '<br><b>Budget esterno proposto: ' + eurR(M.propTot) + '</b> = ' + (M.rif.length > 1 ? 'media dei costi consuntivi di ' : 'costi consuntivi di ')
+          + M.rif.map(function(s){ return esc(s.code); }).join(', ') + ', per nodo, indicizzati al ' + M.Y + '.'
+          + (M.ore.hCm.u || M.ore.hCm.o ? ' Ore proposte: ' + oreTxt(M.ore.hCm.u) + ' ufficio, ' + oreTxt(M.ore.hCm.o) + ' produzione (' + (M.nOre > 1 ? 'media di ' + M.nOre + ' commesse con ore nel file' : 'dall\'unica commessa con ore nel file') + ').' : '')
+          + ' <label class="cm-hint">Riferimento: <select class="sel" data-bdgrif="' + code + '">' + (nS > 1 ? '<option value="media"' + (M.rifMode === 'media' ? ' selected' : '') + '>media delle ' + nS + ' commesse simili</option>' : '')
+          + M.simili.map(function(s){ return '<option value="' + esc(s.code) + '"' + (M.rifMode === s.code || nS === 1 ? ' selected' : '') + '>' + esc(s.code) + (s.anno ? ' (' + s.anno + ')' : '') + ' · ' + eurR(s.tot) + ' · ' + esc(s.c.desc || s.c.cliente || '') + '</option>'; }).join('') + '</select></label>';
+      } else h += ' <b>Nessuna commessa simile chiusa con costi nel gestionale</b>' + (famCm(M.c.code) ? ' (famiglia ' + esc(famCm(M.c.code)) + ')' : '') + ': il budget per nodo lo inserisci tu qui sotto.';
+      h += ' <b>Vanno bene?</b>';
+    } else h += '<b>Nodi da confermare per ' + code + '</b>' + (M.c.bdg && M.c.bdg.fonte ? ' (' + esc(M.c.bdg.fonte) + ')' : '') + ': ' + (nomi || '<i>nessun nodo</i>') + '. <b>Confermi?</b>';
+    return h + '<div class="actions" style="margin-top:8px"><button class="btn" data-bdgconf="' + code + '">' + (M.proposta && M.rif.length ? 'Confermo nodi e budget proposto' : 'Confermo questi nodi') + '</button>'
+      + '<button class="chip" data-bdgedit="' + code + '">Li modifico</button></div></div>';
+  }
+  function bdgEditorHtml(M){
+    var code = M.c.code, gest = consNodi(code).filter(function(x){ return x !== '-'; }), pend = BDG_PEND[code] || null;
+    var nodi = pend ? pend.nodi : M.nodi, hu = pend ? pend.ore.hu : (M.ore.hCm.u || ''), ho = pend ? pend.ore.ho : (M.ore.hCm.o || '');
+    var h = '<details class="bdged" id="bdged-' + esc(code) + '"' + (pend || (!M.chiusa && (M.proposta || !M.conf)) ? ' open' : '') + '><summary>Nodi e budget di ' + esc(code) + ' · modifica qui' + (M.chiusa ? ' (commessa evasa: il budget resta solo come memoria)' : '') + '</summary>'
+      + '<table><thead><tr><th>Nodo</th><th>Nel gestionale (alias, separati da virgola)</th><th>Budget esterno €</th><th>Ore ufficio</th><th>Ore produzione</th><th>Note</th><th></th></tr></thead><tbody>';
+    nodi.forEach(function(n){ h += bdgRigaEd(code, n); });
+    h += '</tbody></table><datalist id="bdgdl-' + esc(code) + '">' + gest.map(function(x){ return '<option value="' + esc(x) + '">'; }).join('') + '</datalist>'
+      + '<p class="cm-hint" style="margin:8px 0 4px">Ore per l\'intera commessa, se non le dividi per nodo (si sommano a quelle per nodo): '
+      + 'ufficio <input class="sel num" id="bdg-hu-' + esc(code) + '" value="' + esc(numEd(hu)) + '" inputmode="decimal" placeholder="0" style="width:80px"> h · '
+      + 'produzione <input class="sel num" id="bdg-ho-' + esc(code) + '" value="' + esc(numEd(ho)) + '" inputmode="decimal" placeholder="0" style="width:80px"> h</p>'
+      + '<div class="actions"><button class="chip" data-bdgadd="' + esc(code) + '">+ nodo</button>'
+      + '<button class="chip" data-bdgprop="' + esc(code) + '">Aggiungi i nodi del gestionale mancanti</button>'
+      + '<button class="btn" data-bdgsave="' + esc(code) + '">Salva budget</button>'
+      + (M.conf ? '' : '<button class="btn" data-bdgconf="' + esc(code) + '">Salva e confermo i nodi</button>')
+      + '<span class="cm-hint" id="bdgmsg-' + esc(code) + '">' + (pend ? '<b>modifiche non ancora salvate</b>' : M.c.bdg && M.c.bdg.agg ? 'ultima modifica ' + esc(itFull(M.c.bdg.agg)) + (M.c.bdg.fonte ? ' · ' + esc(M.c.bdg.fonte) : '') : 'budget mai salvato') + '</span></div></details>';
+    return h;
+  }
+  function bdgRigaEd(code, n){
+    function inp(f, v, cls, ph){ return '<td><input class="sel' + (cls ? ' ' + cls : '') + '" data-f="' + f + '" value="' + esc(v == null ? '' : v) + '"' + (ph ? ' placeholder="' + ph + '"' : '') + (cls === 'num' ? ' inputmode="decimal"' : '') + (f === 'al' ? ' list="bdgdl-' + esc(code) + '"' : '') + '></td>'; }
+    return '<tr data-bid="' + esc(n.id || '') + '">' + inp('n', n.n, '', 'nome del nodo') + inp('al', (n.al || []).join(', '), '', 'come nel gestionale')
+      + inp('ext', numEd(n.ext), 'num', '0') + inp('hu', numEd(n.hu), 'num', '0') + inp('ho', numEd(n.ho), 'num', '0') + inp('note', n.note, '', '')
+      + '<td><button class="chip" data-bdgdel title="Togli il nodo">×</button></td></tr>';
+  }
+  function bdgParamHtml(){
+    var c = bcfg(), Y = annoCorr(), y, h = '<details class="bdgpar"><summary>Parametri: indici annui, margine e tariffe (cliccami per modificarli)</summary>'
+      + '<p class="srcline">Indicizzazione: variazione % annua dei prezzi (ISTAT NIC per il 2013-2024; 2025-' + (Y + 1) + ' stime da aggiornare). Un costo dell\'anno A portato all\'anno B vale costo × ∏(1 + indice) per gli anni da A+1 a B. Prezzo di vendita: costo indicizzato con margine ' + esc(c.marg) + '% ' + (c.margTipo === 'ricarico' ? 'come ricarico sul costo' : 'sul prezzo (costo ÷ (1 − margine))') + '.</p><div class="grid">';
+    for (y = 2013; y <= Y + 1; y++) h += '<div><label>' + y + ' %</label><input class="sel num" data-idx="' + y + '" value="' + esc(numEd(c.idx[String(y)])) + '" inputmode="decimal"></div>';
+    h += '<div><label>Margine %</label><input class="sel num" id="bdg-marg" value="' + esc(numEd(c.marg)) + '" inputmode="decimal"></div>'
+      + '<div><label>Margine calcolato</label><select class="sel" id="bdg-margtipo"><option value="prezzo"' + (c.margTipo === 'prezzo' ? ' selected' : '') + '>sul prezzo</option><option value="ricarico"' + (c.margTipo === 'ricarico' ? ' selected' : '') + '>ricarico sul costo</option></select></div>'
+      + '<div><label>Ufficio €/h</label><input class="sel num" id="bdg-tuff" value="' + esc(numEd(c.tUff)) + '" inputmode="decimal"></div><div><label>Produzione €/h</label><input class="sel num" id="bdg-toff" value="' + esc(numEd(c.tOff)) + '" inputmode="decimal"></div>'
+      + '</div><div class="actions"><button class="btn" id="bdg-parsave">Salva parametri</button><span class="cm-hint" id="bdg-parmsg"></span></div></details>';
+    return h;
+  }
+  function bdgExportHtml(){
+    if (!XP.length) return '';
+    return '<p class="srcline">Excel su Drive: ' + XP.slice(0, 4).map(function(x){
+      var q = x.cm && x.cm.length ? (x.cm[0] === '*' ? 'tutte' : x.cm.join(', ')) : '';
+      return (x.stato === 'pronta' && linkOk(x.url) ? '<a href="' + esc(x.url) + '" target="_blank" rel="noopener">' + esc(x.nome || q || 'file') + ' ↗</a>'
+        : x.stato === 'pronta' ? esc(x.nome || q || 'file') + ' (pronto su Drive)'
+        : esc(q) + ' · ' + (x.stato === 'errore' ? 'errore: ' + esc(x.errore || '') : 'in coda, arriva al prossimo giro della routine'));
+    }).join(' · ') + '</p>';
+  }
+  function bdgRiepilogo(list){
+    var altre = list.filter(cmAltro), cms = list.filter(function(c){ return !cmAltro(c); });
+    var righe = cms.map(bdgModello), tB = 0, tI = 0, tP = 0, tU = 0, tPU = 0, nB = 0, nProp = 0, nP = 0, nU = 0, nCh = 0, nAp = 0, nDc = 0;
+    righe.forEach(function(M){
+      if (M.haBudget){ tB += M.budgetTot; if (M.proposta && M.rif.length) nProp++; else nB++; }
+      tI += M.costoOggi; if (M.chiusa) nCh++; else if (!M.c.sp){ nAp++; if (!M.conf) nDc++; }
+      if (M.prezzo != null){ tP += M.prezzo; nP++; }
+      if (M.utile != null){ tU += M.utile; nU++; tPU += M.prezzo; }
+    });
+    var tuttoChiuso = nCh === righe.length && righe.length > 0;
+    var tipoU = tuttoChiuso ? 'utile consuntivo' : nCh ? 'utile (a budget / consuntivo)' : 'utile a budget';
+    var h = '<div class="cm-kpis bdgk"><div class="cm-kpi"><b>' + eurR(tP) + '</b><span>prezzo di vendita</span><small>' + nP + ' commesse con prezzo su ' + righe.length + '</small></div>'
+      + '<div class="cm-kpi"><b>' + (tuttoChiuso ? eurR(tI) : eurR(tB)) + '</b><span>' + (tuttoChiuso ? 'costi consuntivi' : 'budget totale' + (nProp ? ' (incluso proposto)' : '')) + '</span><small>' + (tuttoChiuso ? 'impegnato + ore' : nB + ' con budget inserito o confermato · ' + nProp + ' con budget proposto da confermare · ' + (righe.length - nB - nProp) + ' senza') + '</small></div>'
+      + (tuttoChiuso ? '' : '<div class="cm-kpi"><b>' + eurR(tI) + '</b><span>costi a oggi</span><small>esterni impegnati + ore</small></div>')
+      + '<div class="cm-kpi' + (tU < 0 ? ' hot' : '') + '"><b>' + (nU ? eurR(tU) : '—') + '</b><span>' + tipoU + '</span><small>' + (nU ? nU + ' commesse con prezzo e ' + (tuttoChiuso ? 'costi' : 'budget') + (tPU ? ' · margine ' + Math.round(tU / tPU * 100) + '% sul loro prezzo' : '') : 'serve prezzo e budget') + '</small></div>'
+      + (nAp ? '<div class="cm-kpi' + (nDc ? ' hot' : '') + '"><b>' + nDc + '</b><span>nodi da confermare</span><small>commesse in corso senza nodi confermati, su ' + nAp + '</small></div>' : '') + '</div>';
+    h += '<section class="og"><h3 class="cfh"><i class="dt cy"></i>Tutte le commesse in vista<em class="oghint">' + righe.length + ' commesse · seleziona una commessa per i nodi</em>'
+      + '<span class="cfbtn"><button class="chip" data-bdgcopy="*">Copia per Excel</button><button class="chip" data-bdgcsv="*">Scarica .csv</button><button class="chip" data-bdgxls="*">Excel su Drive</button></span></h3>'
+      + '<div class="otab cf bdgt"><table><thead><tr><th>Commessa</th><th>Nodi</th><th class="num">Prezzo di vendita</th><th class="num">' + (tuttoChiuso ? 'Budget (memoria)' : 'Budget totale') + '</th><th class="num">' + (tuttoChiuso ? 'Costi consuntivi' : 'Costi a oggi') + '</th><th class="num">Scost. esterni</th><th class="num">Utile</th><th class="num">Margine</th></tr></thead><tbody>';
+    righe.forEach(function(M){
+      var c = M.c, st = M.tot.stato;
+      h += '<tr class="' + esc(st) + '" data-bdgcm="' + esc(c.code) + '"><td class="nodo"><b>' + esc(c.code) + '</b><span class="osub">' + esc(c.cliente || '') + (c.desc ? ' · ' + esc(c.desc) : '') + '</span></td>'
+        + '<td>' + M.nodi.length + (M.chiusa ? (M.conf ? ' <span class="pill ok">confermati</span>' : '') : M.proposta ? ' <span class="pill warn">proposti' + (M.rif.length ? ' da ' + M.rif.length + ' simil' + (M.rif.length > 1 ? 'i' : 'e') : '') + '</span>' : M.conf ? ' <span class="pill ok">confermati</span>' : ' <span class="pill warn">da confermare</span>') + '</td>'
+        + '<td class="num mono">' + (M.prezzo != null ? eurR(M.prezzo) : '—') + (M.prezzoFonte && M.prezzoFonte !== 'contratto' ? '<span class="osub">' + esc(M.prezzoFonte.replace(' nel gestionale', '')) + '</span>' : '') + '</td>'
+        + '<td class="num mono">' + (M.haBudget ? eurR(M.budgetTot) : '<span class="osub">' + (M.chiusa ? '—' : 'da inserire') + '</span>') + '</td>'
+        + '<td class="num mono"><b>' + eurR(M.costoOggi) + '</b></td>'
+        + '<td class="num mono pct">' + (M.tot.ext > 0 ? (M.tot.sc > 0 ? '+' : '') + eurR(M.tot.sc) + ' (' + pctTxt(M.tot.pct) + ')' : '—') + '</td>'
+        + '<td class="num mono' + (M.utile != null && M.utile < 0 ? ' bad' : '') + '">' + (M.utile != null ? eurR(M.utile) + '<span class="osub">' + esc(M.utileTipo) + '</span>' : '<span class="osub">' + (M.prezzo == null ? 'senza prezzo' : M.chiusa ? '—' : 'senza budget') + '</span>') + '</td>'
+        + '<td class="num mono">' + (M.marg != null ? Math.round(M.marg * 100) + '%' : '—') + '</td></tr>';
+    });
+    h += '</tbody></table></div>';
+    if (altre.length){
+      var cA = 0; altre.forEach(function(c){ var k = costiIdxNodi(c.code, 1900); cA += k.tot; });
+      h += '<p class="srcline">Esclusi dai totali: ' + altre.length + ' progetti del gestionale che non sono commesse (fiere, ricambi, interni), costi registrati ' + eurR(cA) + '. Li vedi selezionandoli dall\'elenco.</p>';
+    }
+    h += '</section>';
+    BDG_CACHE['*'] = righe;
+    return h;
+  }
+  function bdgHtml(list, nsel){
+    BDG_CACHE = {};
+    var h = '<div class="ore-wait" style="margin-bottom:14px"><b>Budget e consuntivo per nodo.</b> Il budget lo scrivi tu qui (costi esterni, ore ufficio e produzione per nodo); per una commessa nuova te lo propongo dalle commesse chiuse della stessa famiglia e lo confermi. Il consuntivo arriva dal gestionale per nodo e anno: <b>fatturato</b> (fatture e costi contabilizzati), <b>consegnato</b> (DDT non ancora fatturati), <b>ordinato</b> (ordini aperti). Impegnato = la somma. <b>Utile</b>: a budget per le commesse in corso (prezzo − budget), consuntivo per le evase (prezzo − costi). '
+      + 'Il <b>listino</b> porta ogni costo all\'anno corrente e al successivo con gli indici qui sotto e applica il margine. '
+      + (S.cons && S.cons.agg ? 'Consuntivo dall\'estrazione del ' + esc(itFull(S.cons.agg)) + '.' : '<b>Consuntivo non ancora caricato.</b>')
+      + ((S.cons && S.cons.note && S.cons.note.length) ? ' <span class="osub">Controlli sull\'estrazione: ' + S.cons.note.map(esc).join('; ') + '.</span>' : '') + '</div>';
+    h += bdgExportHtml() + bdgParamHtml();
+    if (!nsel) return h + bdgRiepilogo(list);
+    h += '<div class="seg sub" style="margin:0 0 12px"><button data-bdgv="scost" aria-pressed="' + (bdgVista === 'scost') + '">Scostamento dal budget</button><button data-bdgv="listino" aria-pressed="' + (bdgVista === 'listino') + '">Listino indicizzato e prezzo</button></div>';
+    list.forEach(function(c){
+      var M = bdgModello(c); BDG_CACHE[c.code] = M;
+      var ctrl = S.cons && S.cons.controlli, avv = [];
+      if (ctrl){ ['ddt_gemelli', 'ordini_con_consegne'].forEach(function(k){ var v = ctrl[k] && ctrl[k].commesse && ctrl[k].commesse[c.code]; if (v) avv.push((k === 'ddt_gemelli' ? 'righe DDT identiche a fatture ' : 'ordini aperti con consegne dello stesso articolo ') + eurR(v)); }); }
+      h += '<section class="og" id="bdg-' + esc(c.code) + '"><h3 class="cfh"><i class="dt cy"></i>' + esc(c.code) + ' · ' + esc(c.cliente || '') + '<em class="oghint">' + esc(c.desc || '') + '</em>'
+        + '<span class="cfbtn"><button class="chip" data-bdgcopy="' + esc(c.code) + '">Copia per Excel</button><button class="chip" data-bdgcsv="' + esc(c.code) + '">Scarica .csv</button><button class="chip" data-bdgxls="' + esc(c.code) + '">Excel su Drive</button></span></h3>';
+      h += bdgPropostaHtml(M) + bdgKpi(M);
+      h += M.righe.length ? bdgTabella(M) : '<p class="ogempty">Nessun nodo: inseriscili qui sotto o conferma i proposti.</p>';
+      if (avv.length) h += '<p class="srcline">Da verificare con Luca nell\'estrazione: ' + avv.join(' · ') + ' (possibili doppioni o consegne parziali; i numeri qui sopra sono quelli del gestionale).</p>';
+      h += bdgOreHtml(M) + bdgEditorHtml(M) + '</section>';
+    });
+    return h;
+  }
+
+  /* ---- export ---- */
+  function oreCsv(h){ return Math.round(h * 10) / 10; }
+  function bdgRighe(M){
+    var Y = M.Y, rows = [['Commessa', M.c.code, M.c.cliente || '', M.c.desc || '', M.chiusa ? 'evasa' : 'in corso'], ['Prezzo di vendita', M.prezzo != null ? Math.round(M.prezzo) : '', M.prezzoFonte || ''],
+      ['Budget totale commessa', M.haBudget ? Math.round(M.budgetTot) : '', 'esterni', Math.round(M.tot.ext), 'ore €', Math.round(M.ore.bEur), M.proposta && M.rif.length ? 'proposto da ' + M.rif.map(function(s){ return s.code; }).join(', ') : ''],
+      ['Costi ' + (M.chiusa ? 'consuntivi' : 'a oggi'), Math.round(M.costoOggi), 'impegnato', Math.round(M.tot.imp), 'ore €', Math.round(M.ore.cEur)],
+      ['Utile ' + (M.utileTipo || ''), M.utile != null ? Math.round(M.utile) : '', 'Utile a budget', M.utileB != null ? Math.round(M.utileB) : '', 'Utile con i costi a oggi', M.utileO != null ? Math.round(M.utileO) : ''], [],
+      ['Nodo', 'Nel gestionale', 'Budget esterno', 'Ore ufficio', 'Ore produzione', 'Budget ore €', 'Budget totale', 'Fatturato', 'Consegnato', 'Ordinato', 'Impegnato', 'Scostamento €', 'Scostamento %', 'Indicizzato ' + Y, 'Prezzo ' + Y, 'Indicizzato ' + (Y + 1), 'Prezzo ' + (Y + 1), 'Note']];
+    M.righe.concat([M.tot]).forEach(function(r){
+      rows.push([r.n, (r.gest || []).join(', '), Math.round(r.ext), oreCsv(r.hu), oreCsv(r.ho), Math.round(r.bOre), Math.round(r.bTot), Math.round(r.fat + r.con + r.alt), Math.round(r.ddt), Math.round(r.ord), Math.round(r.imp),
+        r.ext > 0 ? Math.round(r.sc) : '', r.pct == null ? '' : Math.round((r.pct - 1) * 100), Math.round(r.idxY), Math.round(r.przY), Math.round(r.idxY1), Math.round(r.przY1), r.note || (r.extra ? 'non a budget' : '')]);
+    });
+    var o = M.ore;
+    rows.push([]); rows.push(['Ore', 'Budget h', 'Budget €', 'Consuntivo h', 'Consuntivo €', 'Note']);
+    rows.push(['Ufficio', oreCsv(o.bU), Math.round(o.bU * M.tU), oreCsv(o.cU), Math.round(o.cU * M.tU), o.hCm.u ? 'di cui ' + oreCsv(o.hCm.u) + ' h per l\'intera commessa' : '']);
+    rows.push(['Produzione', oreCsv(o.bO), Math.round(o.bO * M.tO), oreCsv(o.cO), Math.round(o.cO * M.tO), o.hCm.o ? 'di cui ' + oreCsv(o.hCm.o) + ' h per l\'intera commessa' : '']);
+    if (o.cE || o.cEeur) rows.push(['Ditte esterne', '', '', oreCsv(o.cE), Math.round(o.cEeur), 'costo dal file ore']);
+    rows.push(['Totale', oreCsv(o.bU + o.bO), Math.round(o.bEur), oreCsv(o.cU + o.cO + o.cE), Math.round(o.cEur), '']);
+    return rows;
+  }
+  function bdgRigheRiep(righe){
+    var rows = [['Commessa', 'Cliente', 'Descrizione', 'Nodi', 'Stato nodi', 'Prezzo di vendita', 'Fonte prezzo', 'Budget esterno', 'Budget ore €', 'Budget totale', 'Fatturato', 'Consegnato', 'Ordinato', 'Impegnato', 'Ore consuntivo €', 'Costi a oggi', 'Scostamento esterni €', 'Scostamento %', 'Utile', 'Tipo utile', 'Margine %', 'Utile a budget', 'Utile con i costi a oggi']];
+    righe.forEach(function(M){ var t = M.tot;
+      rows.push([M.c.code, M.c.cliente || '', M.c.desc || '', M.nodi.length, M.chiusa ? 'evasa' : M.proposta ? 'proposti' : M.conf ? 'confermati' : 'da confermare', M.prezzo != null ? Math.round(M.prezzo) : '', M.prezzoFonte || '',
+        Math.round(t.ext), Math.round(M.ore.bEur), Math.round(M.budgetTot), Math.round(t.fat + t.con + t.alt), Math.round(t.ddt), Math.round(t.ord), Math.round(t.imp), Math.round(M.ore.cEur), Math.round(M.costoOggi),
+        t.ext > 0 ? Math.round(t.sc) : '', t.pct == null ? '' : Math.round((t.pct - 1) * 100), M.utile != null ? Math.round(M.utile) : '', M.utileTipo || '', M.marg != null ? Math.round(M.marg * 100) : '', M.utileB != null ? Math.round(M.utileB) : '', M.utileO != null ? Math.round(M.utileO) : '']); });
+    return rows;
+  }
+  function bdgFile(code, est){ return 'budget-' + (code === '*' ? 'tutte' : String(code).replace(/[^A-Za-z0-9_-]+/g, '_').slice(0, 40)) + '.' + est; }
+  function bdgRows(key){ var M = BDG_CACHE[key]; if (!M) return null; return key === '*' ? bdgRigheRiep(M) : bdgRighe(M); }
+
+  /* ---- editor: lettura righe e salvataggio ---- */
+  function bdgLeggiEditor(code){
+    var ed = document.getElementById('bdged-' + code); if (!ed) return null;
+    var nodi = [], k = 0;
+    ed.querySelectorAll('tbody tr').forEach(function(tr){
+      var g = function(f){ var i = tr.querySelector('input[data-f="' + f + '"]'); return i ? i.value.trim() : ''; };
+      var nome = g('n'); if (!nome) return;
+      k++;
+      nodi.push({id: tr.getAttribute('data-bid') || ('b' + k), n: nome, d: '', al: g('al').split(',').map(function(x){ return x.trim(); }).filter(function(x){ return x === '-' || normNodo(x); }),
+        ext: numIt(g('ext')), hu: numIt(g('hu')), ho: numIt(g('ho')), note: g('note')});
+    });
+    /* conserva la descrizione da contratto se il nome coincide */
+    var c = findCm(code);
+    if (c) nodi.forEach(function(n){ var src = ((c.bdg && c.bdg.nodi) || []).concat(c.nodi || []).filter(function(x){ return normNodo(x.n) === normNodo(n.n); })[0]; if (src && src.d) n.d = src.d; });
+    /* id univoci */
+    var visti = {}; nodi.forEach(function(n, i){ if (!n.id || visti[n.id]) n.id = 'b' + (i + 1) + '_' + Date.now().toString(36); visti[n.id] = 1; });
+    return nodi;
+  }
+  function bdgLeggiOre(code){
+    var iu = document.getElementById('bdg-hu-' + code), io = document.getElementById('bdg-ho-' + code);
+    return {hu: iu ? numIt(iu.value) : null, ho: io ? numIt(io.value) : null, presente: !!(iu || io)};
+  }
+  /* le modifiche non salvate sopravvivono a un ridisegno della scheda */
+  function bdgCattura(){
+    Object.keys(BDG_DIRTY).forEach(function(code){ var nodi = bdgLeggiEditor(code); if (nodi) BDG_PEND[code] = {nodi: nodi, ore: bdgLeggiOre(code)}; });
+    BDG_DIRTY = {};
+  }
+  function bdgRirender(){ bdgCattura(); dashboard(); }
+  function bdgSalva(code, conferma, msg){
+    var c = findCm(code); if (!c) return;
+    var M = BDG_CACHE[code] || bdgModello(c), nodi = bdgLeggiEditor(code), ore = bdgLeggiOre(code);
+    if (!nodi) nodi = M.nodi.map(function(n){ return {id: n.id, n: n.n, d: n.d || '', al: n.al || [], ext: n.ext, hu: n.hu, ho: n.ho, note: n.note || ''}; });
+    if (!ore.presente && M.ore && M.ore.hCm) ore = {hu: M.ore.hCm.u || null, ho: M.ore.hCm.o || null};
+    var prima = c.bdg || {}, fonte;
+    if (M.proposta && M.rif.length) fonte = 'proposto dalle commesse ' + M.rif.map(function(s){ return s.code; }).join(', ') + ' (indicizzato al ' + M.Y + ')' + (conferma ? ', confermato da Danilo' : ', modificato da Danilo');
+    else fonte = prima.fonte && !conferma ? prima.fonte : 'inserito da Danilo dalla pagina';
+    c.bdg = {nodi: nodi, hu: ore.hu, ho: ore.ho, conf: conferma ? true : !!prima.conf, agg: isoOggi(), fonte: fonte, confd: conferma ? isoOggi() : (prima.confd || null),
+      rif: M.proposta && M.rif.length ? M.rif.map(function(s){ return s.code; }) : (prima.rif || null)};
+    delete BDG_PEND[code]; delete BDG_DIRTY[code];
+    salvaSubito(msg || 'budget salvato'); dashboard();
+    var el = document.getElementById('bdg-' + code); if (el) el.scrollIntoView({block: 'start', behavior: 'smooth'});
+  }
+  function wireBdg(){
+    document.querySelectorAll('[data-bdgv]').forEach(function(b){ b.addEventListener('click', function(){ bdgVista = b.getAttribute('data-bdgv'); bdgRirender(); }); });
+    document.querySelectorAll('[data-bdgrif]').forEach(function(s){ s.addEventListener('change', function(){ BDG_RIF[s.getAttribute('data-bdgrif')] = s.value; bdgRirender(); }); });
+    document.querySelectorAll('[data-bdgcm]').forEach(function(tr){ tr.addEventListener('click', function(){ var code = tr.getAttribute('data-bdgcm'); sel = {}; sel[code] = true; saveSel(); bdgRirender(); }); });
+    document.querySelectorAll('.bdged').forEach(function(ed){ var code = ed.id.replace(/^bdged-/, ''); ed.addEventListener('input', function(){ BDG_DIRTY[code] = 1; var m = document.getElementById('bdgmsg-' + code); if (m && !/non ancora/.test(m.textContent)) m.innerHTML = '<b>modifiche non ancora salvate</b>'; }); });
+    document.querySelectorAll('[data-bdgedit]').forEach(function(b){ b.addEventListener('click', function(){ var ed = document.getElementById('bdged-' + b.getAttribute('data-bdgedit')); if (ed){ ed.open = true; ed.scrollIntoView({block: 'start', behavior: 'smooth'}); var i = ed.querySelector('input'); if (i) i.focus(); } }); });
+    document.querySelectorAll('[data-bdgconf]').forEach(function(b){ b.addEventListener('click', function(){ bdgSalva(b.getAttribute('data-bdgconf'), true, 'nodi confermati e budget salvato'); }); });
+    document.querySelectorAll('[data-bdgsave]').forEach(function(b){ b.addEventListener('click', function(){ bdgSalva(b.getAttribute('data-bdgsave'), false, 'budget salvato'); }); });
+    document.querySelectorAll('[data-bdgadd]').forEach(function(b){ b.addEventListener('click', function(){
+      var code = b.getAttribute('data-bdgadd'), ed = document.getElementById('bdged-' + code), tb = ed && ed.querySelector('tbody'); if (!tb) return;
+      tb.insertAdjacentHTML('beforeend', bdgRigaEd(code, {id: 'b' + (tb.children.length + 1) + '_' + Date.now().toString(36), n: '', al: [], ext: null, hu: null, ho: null, note: ''}));
+      BDG_DIRTY[code] = 1; wireBdgDel(tb); var last = tb.lastElementChild.querySelector('input'); if (last) last.focus();
+    }); });
+    document.querySelectorAll('[data-bdgprop]').forEach(function(b){ b.addEventListener('click', function(){
+      var code = b.getAttribute('data-bdgprop'), ed = document.getElementById('bdged-' + code), tb = ed && ed.querySelector('tbody'), c = findCm(code); if (!tb || !c) return;
+      var attuali = bdgLeggiEditor(code) || [], mappa = bdgMappa(c, attuali), n = 0;
+      consNodi(code).forEach(function(nd){ if (nd === '-' || mappa[nd]) return; n++;
+        tb.insertAdjacentHTML('beforeend', bdgRigaEd(code, {id: 'g' + n + '_' + Date.now().toString(36), n: titolo(nd), al: [nd], ext: null, hu: null, ho: null, note: ''})); });
+      if (n) BDG_DIRTY[code] = 1;
+      wireBdgDel(tb); var m = document.getElementById('bdgmsg-' + code); if (m) m.textContent = n ? n + ' nodi aggiunti dal gestionale: salva per tenerli' : 'tutti i nodi del gestionale sono già coperti';
+    }); });
+    document.querySelectorAll('.bdged tbody').forEach(wireBdgDel);
+    var ps = document.getElementById('bdg-parsave');
+    if (ps) ps.addEventListener('click', function(){
+      var c = bcfg(), idx = {}, msg = document.getElementById('bdg-parmsg');
+      document.querySelectorAll('[data-idx]').forEach(function(i){ var v = numIt(i.value); if (v != null) idx[i.getAttribute('data-idx')] = v; });
+      c.idx = idx;
+      var tipo = document.getElementById('bdg-margtipo').value === 'ricarico' ? 'ricarico' : 'prezzo';
+      var m = numIt(document.getElementById('bdg-marg').value);
+      if (m != null){ if (tipo === 'prezzo' && m >= 100){ if (msg) msg.textContent = 'un margine sul prezzo deve essere sotto il 100%: non salvato'; return; } if (m < 0) m = 0; c.marg = m; }
+      c.margTipo = tipo;
+      var tu = numIt(document.getElementById('bdg-tuff').value), to = numIt(document.getElementById('bdg-toff').value);
+      if (tu != null && tu > 0) c.tUff = tu; if (to != null && to > 0) c.tOff = to;
+      CIN_CACHE = {};
+      salvaSubito('parametri budget salvati'); bdgRirender();
+    });
+    document.querySelectorAll('[data-bdgcopy]').forEach(function(b){ b.addEventListener('click', function(){
+      var rows = bdgRows(b.getAttribute('data-bdgcopy')); if (!rows) return;
+      var txt = tsv(rows), p = null; try { p = navigator.clipboard.writeText(txt); } catch(e){}
+      if (p) p.then(function(){ b.textContent = 'copiato · incolla in Excel'; setTimeout(function(){ b.textContent = 'Copia per Excel'; }, 3000); }, function(){ window.prompt('Copia queste righe e incollale in Excel:', txt); });
+      else window.prompt('Copia queste righe e incollale in Excel:', txt);
+    }); });
+    document.querySelectorAll('[data-bdgcsv]').forEach(function(b){ b.addEventListener('click', function(){
+      var key = b.getAttribute('data-bdgcsv'), rows = bdgRows(key); if (!rows) return;
+      if (!DLc){ b.textContent = DLcPronto ? 'non disponibile qui: usa Copia' : 'un attimo…'; return; }
+      DLc.save({filename: bdgFile(key, 'csv'), data: csvIt(rows)})
+        .then(function(){ b.textContent = 'scaricato'; setTimeout(function(){ b.textContent = 'Scarica .csv'; }, 3000); })
+        .catch(function(err){ b.textContent = (err && err.code === 'declined') ? 'annullato' : 'errore: ' + ((err && err.code) || err); setTimeout(function(){ b.textContent = 'Scarica .csv'; }, 4000); });
+    }); });
+    document.querySelectorAll('[data-bdgxls]').forEach(function(b){ b.addEventListener('click', function(){
+      var key = b.getAttribute('data-bdgxls'), cl = (window.claude && window.claude.use) ? window.claude : null;
+      if (!cl){ b.textContent = 'solo dentro Claude'; return; }
+      b.textContent = 'registro la richiesta…';
+      cl.use('db').then(function(db){
+        if (!db){ b.textContent = 'database non disponibile'; return; }
+        var id = 'export-' + Date.now().toString(36);
+        return db.doc('richieste/' + id).set({tipo: 'export', cosa: 'budget', cm: key === '*' ? ['*'] : [key], stato: 'aperta', creata: new Date().toISOString(), contesto: 'Creata da Commesse → Budget'})
+          .then(function(){ b.textContent = 'richiesto: il file arriva su Drive al prossimo giro'; });
+      }).catch(function(){ b.textContent = 'non sono riuscito a registrarla'; });
+    }); });
+  }
+  function wireBdgDel(tb){
+    tb.querySelectorAll('[data-bdgdel]').forEach(function(b){ if (b.__w) return; b.__w = 1; b.addEventListener('click', function(){ var tr = b.closest('tr'); if (tr){ var ed = tr.closest('.bdged'); if (ed) BDG_DIRTY[ed.id.replace(/^bdged-/, '')] = 1; tr.remove(); } }); });
   }
 
   /* ---------- salvataggio ----------
@@ -4094,7 +4686,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
         e[b.id] = {tipo:'billing', d:!!b.d, dd:b.dd || null, n:b.n || '', nq:b.nq || []};
       });
       var cm = (S.commesse || []).map(function(c){
-        return {code:c.code, ev:!!c.ev, evd:c.evd || null, sp:!!c.sp, spd:c.spd || null};
+        return {code:c.code, ev:!!c.ev, evd:c.evd || null, sp:!!c.sp, spd:c.spd || null, bdg:c.bdg || null};
       });
       localStorage.setItem(LS, JSON.stringify({
         v: 2,
@@ -4181,6 +4773,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
           if (x.ev){ c.ev = true; c.evd = x.evd; } else { delete c.ev; delete c.evd; }
           segna((x.ev ? 'evasa: ' : 'riattivata: ') + c.code);
         }
+        if (x.bdg && (!c.bdg || (x.bdg.agg || '') > (c.bdg.agg || ''))){ c.bdg = x.bdg; segna('budget: ' + c.code); }
         if (!!c.sp !== !!x.sp){
           if (x.sp){ c.sp = true; c.spd = x.spd; } else { delete c.sp; delete c.spd; }
           segna((x.sp ? 'sospesa: ' : 'ripresa: ') + c.code);
@@ -4722,7 +5315,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
           var k = osservati.indexOf(e.target); if (k > -1) osservati.splice(k, 1);
         }
       });
-    }, {threshold: 0.06, rootMargin: '0px 0px -30px 0px'});
+    }, {threshold: [0, 0.06], rootMargin: '0px 0px -30px 0px'});
   }
   function reveal(){
     if (!io) return;
@@ -4740,8 +5333,8 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     els.forEach(function(el){
       if (el.classList.contains('rv')) return;
       var r = el.getBoundingClientRect();
-      if (r.top < window.innerHeight * 0.85){
-        /* già in vista: entra subito, con un filo di cascata */
+      if (r.top < window.innerHeight * 0.85 || r.height * 0.06 > window.innerHeight - 30){
+        /* già in vista (o così alto che il 6 % non entrerebbe mai nella finestra): entra subito, con un filo di cascata */
         el.classList.add('rv');
         el.style.transitionDelay = Math.min(i * 35, 280) + 'ms';
         requestAnimationFrame(function(){ requestAnimationFrame(function(){

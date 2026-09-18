@@ -3,24 +3,34 @@
 
 Produce (o aggiorna in state.json) la chiave `cons`:
 
-  cons = {agg, file, fonte, gen, tipi, cm: {CODICE: {ric: {oc, fat}, nd: {NODO: {ANNO: {fat, con, ddt, ord, int, alt, n}}}}}}
+  cons = {agg, file, fonte, gen, tipi, note, controlli, cm: {CODICE: {ric: {oc, fat}, nd: {NODO: {ANNO: {fat, con, ddt, ord, int, alt, n}}}}}}
 
 Stadi di costo (Tipo di costo "2 - COSTO"):
-  fat  fatture fornitore: Fattura riepilogativa / immediata / accompagnatoria, Nota debito (+), Nota credito (−)
-  con  costi contabilizzati sul progetto ("Gestione contabilità progetti", Cliente/fornitore = Fornitore)
-  ddt  merce o lavorazioni ricevute e non ancora fatturate: Documento di trasporto, Documenti c/lavoro passivo
-  ord  ordini fornitore ancora aperti (F-OA / F-OS / F-OCL)
-  int  righe interne ("Gestione contabilità progetti", Cliente/fornitore = Interno): quasi sempre senza costo
-  alt  qualunque altro tipo di documento con costo
+  fat   fatture fornitore: Fattura riepilogativa / immediata / accompagnatoria, Nota debito, Nota credito (segno come nel gestionale)
+  con   costi contabilizzati sul progetto ("Gestione contabilità progetti", Cliente/fornitore = Fornitore)
+  ddt   merce o lavorazioni ricevute e non ancora fatturate: Documento di trasporto, Documenti c/lavoro passivo
+  ord   ordini fornitore ancora aperti (F-OA / F-OS / F-OCL)
+  int   righe interne ("Gestione contabilità progetti", Cliente/fornitore = Interno): quasi sempre senza costo
+  alt   qualunque altro tipo di documento con costo
+Regola di Luca Tirotta (15/09/2026): una riga d'ordine sparisce dall'estrazione quando diventa DDT o fattura,
+quindi gli stadi non si sovrappongono. I numeri restano quelli del gestionale; lo strumento però segnala in
+cons.controlli i casi sospetti, da verificare con Luca: righe DDT identiche a righe di fattura (stesso
+progetto, fornitore, articolo, quantità e importo) e ordini aperti con consegne o fatture dello stesso
+fornitore e articolo (consegne parziali). Non vengono corretti automaticamente.
 Ricavi (Tipo di costo "1 - RICAVO", lato cliente): oc = Ordine cliente (valore a contratto nel gestionale),
-  fat = fatture al cliente (Nota credito sottratta).
-Il nodo "MANCANTE" (o vuoto) diventa "-" = senza nodo.
+  fat = fatture al cliente (note di credito con il loro segno).
+Regole sui nodi: "MANCANTE", vuoto o uguale al codice del progetto (il gestionale registra così i costi
+  a livello di commessa) diventano "-" = senza nodo.
+Righe senza Anno né Data consegna (ordini di servizi senza data): contate nell'anno dell'estrazione (--agg),
+  non scartate.
+Il codice progetto viene normalizzato con norm_code() (spazi tolti, maiuscolo); la stessa regola la usa
+commesse_gestionale.py, così le chiavi di cons.cm coincidono con commesse[].code.
 
 Sorgenti accettate:
   --pkl  file pickle {hdr: [...], rows: [[...]]} (cache di un'estrazione xlsx)
   --xlsx estrazione Excel del gestionale (foglio Foglio1, intestazione in riga 1)
   --csv  CSV aggregato prodotto dallo script Apps Script `preparaConsuntivo()`:
-         colonne Progetto;Nodo;Anno;Stadio;Costo;Righe  (Stadio già classificato: fat/con/ddt/ord/int/alt/ric_oc/ric_fat)
+         colonne Progetto;Nodo;Anno;Stadio;Costo;Righe  (Stadio già classificato con le stesse regole)
 
 Esempi:
   consuntivo.py --pkl gestionale_full.pkl --state state.json --agg 2026-09-16 --file "Nuovo Foglio 2.xlsx"
@@ -32,14 +42,22 @@ from collections import defaultdict
 
 CAMPI = ['Cliente/fornitore', 'Tipo di costo', 'Cod. documento', 'Progetto', 'Data consegna', 'Anno',
          'Ricavo', 'Costo', 'TipoDocumento', 'Nodo']
+CAMPI_OPZ = ['Cod. fornitore', 'Codice articolo', 'Descrizione', 'Qt. acquistate', 'N° Doc.']
+STADI = ('fat', 'con', 'ddt', 'ord', 'int', 'alt')
 LEGENDA = {
-    'fat': 'fatture fornitore (note credito sottratte)',
+    'fat': 'fatture fornitore (note di credito con il loro segno)',
     'con': 'costi contabilizzati sul progetto (contabilità progetti, fornitore)',
     'ddt': 'consegnato non ancora fatturato (DDT, documenti conto lavoro)',
     'ord': 'ordini fornitore aperti',
     'int': 'righe interne di contabilità progetti (di norma senza costo)',
     'alt': 'altri documenti con costo',
 }
+
+
+def norm_code(p):
+    """Codice progetto canonico: senza spazi ai bordi, maiuscolo. Vuoto se manca o è "MANCANTE"/"#N/A"."""
+    p = str(p or '').strip().upper()
+    return '' if p in ('MANCANTE', '#N/A', 'N/A', 'NONE') else p
 
 
 def num(x):
@@ -60,6 +78,21 @@ def num(x):
         return 0.0
 
 
+def data_di(riga):
+    d = riga.get('Data consegna')
+    if isinstance(d, dt.datetime):
+        return d.date()
+    if isinstance(d, dt.date):
+        return d
+    m = re.match(r'(\d{4})-(\d{2})-(\d{2})', str(d or ''))
+    if m:
+        try:
+            return dt.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except ValueError:
+            return None
+    return None
+
+
 def anno_di(riga):
     a = riga.get('Anno')
     try:
@@ -68,16 +101,18 @@ def anno_di(riga):
             return a
     except (TypeError, ValueError):
         pass
-    d = riga.get('Data consegna')
-    if isinstance(d, (dt.date, dt.datetime)):
+    d = data_di(riga)
+    if d:
         return d.year
-    m = re.match(r'(\d{4})', str(d or ''))
+    m = re.match(r'(\d{4})', str(riga.get('Data consegna') or ''))
     return int(m.group(1)) if m else None
 
 
 def nodo_di(riga):
     n = str(riga.get('Nodo') or '').strip()
     if not n or n.upper() in ('MANCANTE', '#N/A', 'N/A', 'NONE'):
+        return '-'
+    if n.upper() == norm_code(riga.get('Progetto')):
         return '-'
     return n
 
@@ -91,29 +126,31 @@ def stadio(riga):
         r = num(riga.get('Ricavo'))
         if doc == 'Ordine cliente':
             return 'ric_oc', r
-        if doc.startswith('Fattura'):
+        if doc.startswith('Fattura') or doc in ('Nota credito', 'Nota debito'):
             return 'ric_fat', r
-        if doc == 'Nota credito':
-            return 'ric_fat', -abs(r)
-        if doc == 'Nota debito':
-            return 'ric_fat', abs(r)
         return None
     c = num(riga.get('Costo'))
     if doc == 'Ordine fornitore':
         return 'ord', c
     if doc in ('Documento di trasporto', 'Documenti c/lavoro passivo'):
         return 'ddt', c
-    if doc.startswith('Fattura'):
+    if doc.startswith('Fattura') or doc in ('Nota credito', 'Nota debito'):
         return 'fat', c
-    if doc == 'Nota credito':
-        return 'fat', -abs(c)
-    if doc == 'Nota debito':
-        return 'fat', abs(c)
     if doc == 'Gestione contabilità progetti':
         return ('int' if chi == 'Interno' else 'con'), c
     if doc == 'Ordine cliente':
         return None
     return 'alt', c
+
+
+def chiave_articolo(riga):
+    """Fornitore + articolo (codice, altrimenti descrizione normalizzata): serve per riconoscere la stessa
+    merce tra ordine, DDT e fattura."""
+    forn = str(riga.get('Cod. fornitore') or '').strip()
+    art = str(riga.get('Codice articolo') or '').strip().upper()
+    if not art or art in ('#N/A', 'NONE'):
+        art = re.sub(r'\s+', ' ', str(riga.get('Descrizione') or '').strip().upper())[:80]
+    return (forn, art)
 
 
 def righe_da_pkl(path):
@@ -123,8 +160,9 @@ def righe_da_pkl(path):
     manca = [c for c in CAMPI if c not in ix]
     if manca:
         sys.exit('colonne mancanti nel pickle: %s' % manca)
+    campi = CAMPI + [c for c in CAMPI_OPZ if c in ix]
     for r in d['rows']:
-        yield {c: (r[ix[c]] if ix[c] < len(r) else None) for c in CAMPI}
+        yield {c: (r[ix[c]] if ix[c] < len(r) else None) for c in campi}
 
 
 def righe_da_xlsx(path, foglio=None):
@@ -137,18 +175,31 @@ def righe_da_xlsx(path, foglio=None):
     manca = [c for c in CAMPI if c not in ix]
     if manca:
         sys.exit('colonne mancanti nel foglio: %s' % manca)
+    campi = CAMPI + [c for c in CAMPI_OPZ if c in ix]
     for r in it:
         if r is None or all(v is None for v in r):
             continue
-        yield {c: (r[ix[c]] if ix[c] < len(r) else None) for c in CAMPI}
+        yield {c: (r[ix[c]] if ix[c] < len(r) else None) for c in campi}
 
 
-def aggrega(righe):
-    """cm -> {'ric': {oc, fat}, 'nd': {nodo: {anno: {stadio: importo, 'n': righe}}}}"""
+def cella_vuota():
+    d = {k: 0.0 for k in STADI}
+    d['n'] = 0
+    return d
+
+
+def aggrega(righe, anno_agg=None, log=None):
+    """cm -> {'ric': {oc, fat}, 'nd': {nodo: {anno: {stadio: importo, 'n': righe}}}}.
+
+    Due passate: la prima raccoglie le righe classificate, la seconda riconosce (per progetto, fornitore e
+    articolo) i DDT già fatturati e la parte già consegnata degli ordini aperti."""
+    log = log if log is not None else {}
     cm = {}
+    righe_costo = []  # (progetto, nodo, anno, stadio, importo, chiave, qta, data)
+    senza_anno = 0
     for riga in righe:
-        p = str(riga.get('Progetto') or '').strip()
-        if not p or p.upper() in ('MANCANTE', '#N/A'):
+        p = norm_code(riga.get('Progetto'))
+        if not p:
             continue
         st = stadio(riga)
         if st is None:
@@ -160,23 +211,66 @@ def aggrega(righe):
             continue
         a = anno_di(riga)
         if a is None:
-            continue
-        nd = c['nd'].setdefault(nodo_di(riga), {})
-        cella = nd.setdefault(str(a), {'fat': 0.0, 'con': 0.0, 'ddt': 0.0, 'ord': 0.0, 'int': 0.0, 'alt': 0.0, 'n': 0})
+            senza_anno += 1
+            a = anno_agg or dt.date.today().year
+        righe_costo.append([p, nodo_di(riga), a, k, imp, chiave_articolo(riga) if k in ('ddt', 'fat', 'ord') else None,
+                            num(riga.get('Qt. acquistate')), data_di(riga)])
+    log['righe_senza_anno'] = senza_anno
+    # --- controlli (solo segnalazione, i numeri non cambiano)
+    fatture = defaultdict(int)
+    for r in righe_costo:
+        if r[3] == 'fat' and r[5]:
+            fatture[(r[0], r[5], round(r[6], 3), round(r[4], 2))] += 1
+    gemelli = {'righe': 0, 'importo': 0.0, 'commesse': defaultdict(float)}
+    for r in righe_costo:
+        if r[3] == 'ddt' and r[5]:
+            key = (r[0], r[5], round(r[6], 3), round(r[4], 2))
+            if fatture.get(key):
+                fatture[key] -= 1
+                gemelli['righe'] += 1
+                gemelli['importo'] += r[4]
+                gemelli['commesse'][r[0]] += r[4]
+    consegne = set()
+    for r in righe_costo:
+        if r[3] in ('ddt', 'fat') and r[5] and r[4] > 0:
+            consegne.add((r[0], r[5]))
+    parziali = {'righe': 0, 'importo': 0.0, 'commesse': defaultdict(float)}
+    for r in righe_costo:
+        if r[3] == 'ord' and r[5] and r[4] > 0 and (r[0], r[5]) in consegne:
+            parziali['righe'] += 1
+            parziali['importo'] += r[4]
+            parziali['commesse'][r[0]] += r[4]
+    log['ddt_gemelli'] = gemelli
+    log['ordini_con_consegne'] = parziali
+    # --- somma
+    for p, nd, a, k, imp, _k, _q, _d in righe_costo:
+        c = cm[p]
+        cella = c['nd'].setdefault(nd, {}).setdefault(str(a), cella_vuota())
         cella[k] += imp
         cella['n'] += 1
-    # arrotonda e togli gli zeri
+    return finalizza(cm)
+
+
+def finalizza(cm):
+    """Arrotonda, toglie le chiavi a zero e i nodi vuoti: stessa forma per --pkl/--xlsx e per --csv."""
+    out = {}
     for p, c in cm.items():
-        c['ric'] = {k: round(v, 2) for k, v in c['ric'].items() if abs(v) > 0.004}
+        ric = {k: round(v, 2) for k, v in c['ric'].items() if abs(v) > 0.004}
+        nd_out = {}
         for nd, anni in c['nd'].items():
+            anni_out = {}
             for a, cella in anni.items():
-                for k in list(cella.keys()):
-                    if k == 'n':
-                        continue
-                    cella[k] = round(cella[k], 2)
-                    if abs(cella[k]) < 0.005:
-                        del cella[k]
-    return cm
+                cl = {'n': int(cella.get('n', 0))}
+                for k in STADI:
+                    v = round(cella.get(k, 0.0), 2)
+                    if abs(v) >= 0.005:
+                        cl[k] = v
+                if len(cl) > 1 or cl['n']:
+                    anni_out[a] = cl
+            if anni_out:
+                nd_out[nd] = anni_out
+        out[p] = {'ric': ric, 'nd': nd_out}
+    return out
 
 
 def aggrega_csv(path):
@@ -184,25 +278,28 @@ def aggrega_csv(path):
     with open(path, encoding='utf-8-sig', newline='') as f:
         rd = csv.DictReader(f, delimiter=';')
         for r in rd:
-            p = (r.get('Progetto') or '').strip()
+            p = norm_code(r.get('Progetto'))
             k = (r.get('Stadio') or '').strip()
             if not p or not k:
                 continue
             c = cm.setdefault(p, {'ric': {'oc': 0.0, 'fat': 0.0}, 'nd': {}})
             imp = num(r.get('Costo'))
             if k.startswith('ric_'):
-                c['ric'][k[4:]] = round(c['ric'].get(k[4:], 0.0) + imp, 2)
+                c['ric'][k[4:]] = c['ric'].get(k[4:], 0.0) + imp
                 continue
-            nd = (r.get('Nodo') or '-').strip() or '-'
-            if nd.upper() == 'MANCANTE':
-                nd = '-'
-            a = str(int(float(r.get('Anno') or 0)) or '')
-            if not a:
+            if k not in STADI:
                 continue
-            cella = c['nd'].setdefault(nd, {}).setdefault(a, {'n': 0})
-            cella[k] = round(cella.get(k, 0.0) + imp, 2)
+            nd = nodo_di({'Nodo': r.get('Nodo'), 'Progetto': p})
+            try:
+                a = str(int(float(r.get('Anno') or 0)))
+            except ValueError:
+                a = ''
+            if not a or a == '0':
+                continue
+            cella = c['nd'].setdefault(nd, {}).setdefault(a, cella_vuota())
+            cella[k] += imp
             cella['n'] += int(float(r.get('Righe') or 1))
-    return cm
+    return finalizza(cm)
 
 
 def main():
@@ -217,12 +314,18 @@ def main():
     ap.add_argument('--agg', required=True, help='data dell\'estrazione AAAA-MM-GG')
     ap.add_argument('--file', default='', help='nome del file di origine, per la nota')
     ap.add_argument('--all', action='store_true', help='tieni tutti i progetti, non solo le commesse dello stato')
+    ap.add_argument('--quiet', action='store_true')
     a = ap.parse_args()
+    try:
+        anno_agg = int(a.agg[:4])
+    except ValueError:
+        sys.exit('--agg deve essere AAAA-MM-GG')
 
+    log = {}
     if a.pkl:
-        cm = aggrega(righe_da_pkl(a.pkl))
+        cm = aggrega(righe_da_pkl(a.pkl), anno_agg, log)
     elif a.xlsx:
-        cm = aggrega(righe_da_xlsx(a.xlsx, a.foglio))
+        cm = aggrega(righe_da_xlsx(a.xlsx, a.foglio), anno_agg, log)
     else:
         cm = aggrega_csv(a.csv)
 
@@ -230,13 +333,27 @@ def main():
     if a.state:
         stato = json.load(open(a.state, encoding='utf-8'))
         if not a.all:
-            codici = {c.get('code') for c in stato.get('commesse', [])}
+            codici = {norm_code(c.get('code')) for c in stato.get('commesse', [])}
             cm = {k: v for k, v in cm.items() if k in codici}
+    note = []
+    if log.get('righe_senza_anno'):
+        note.append('%d righe senza data contate nell\'anno %d' % (log['righe_senza_anno'], anno_agg))
+    controlli = {}
+    for nome, k in (('ddt_gemelli', 'ddt_gemelli'), ('ordini_con_consegne', 'ordini_con_consegne')):
+        x = log.get(k)
+        if not x or not x['righe']:
+            continue
+        per = {p: round(v, 2) for p, v in x['commesse'].items() if p in cm}
+        controlli[nome] = {'righe': x['righe'], 'importo': round(x['importo'], 2), 'commesse': dict(sorted(per.items(), key=lambda kv: -kv[1])[:40])}
+    if controlli.get('ddt_gemelli'):
+        note.append('%d righe DDT identiche a righe di fattura (%.0f €): possibili doppioni, da verificare con Luca' % (controlli['ddt_gemelli']['righe'], controlli['ddt_gemelli']['importo']))
+    if controlli.get('ordini_con_consegne'):
+        note.append('%d righe d\'ordine aperte con consegne o fatture dello stesso articolo (%.0f €): possibili consegne parziali' % (controlli['ordini_con_consegne']['righe'], controlli['ordini_con_consegne']['importo']))
     cons = {
         'agg': a.agg, 'file': a.file,
         'fonte': 'estrazione completa del gestionale (tutti i tipi di documento), aggregata per commessa, nodo e anno',
         'gen': dt.datetime.now().isoformat(timespec='seconds'),
-        'tipi': LEGENDA,
+        'tipi': LEGENDA, 'note': note, 'controlli': controlli,
         'cm': cm,
     }
     if a.out:
@@ -246,6 +363,10 @@ def main():
         json.dump(stato, open(a.state, 'w', encoding='utf-8'), ensure_ascii=False, separators=(',', ':'))
     tot_nodi = sum(len(c['nd']) for c in cm.values())
     print('commesse: %d · nodi: %d · file: %s' % (len(cm), tot_nodi, a.file or '-'))
+    for n in note:
+        print('  nota: ' + n)
+    if a.quiet:
+        return
     for p in sorted(cm)[:60]:
         c = cm[p]
         somme = defaultdict(float)
@@ -254,8 +375,8 @@ def main():
                 for k, v in cella.items():
                     if k != 'n':
                         somme[k] += v
-        print('  %-11s nodi %2d · fat %10.0f · con %9.0f · ddt %9.0f · ord %10.0f · OC %10.0f' % (
-            p, len(c['nd']), somme['fat'], somme['con'], somme['ddt'], somme['ord'], c['ric'].get('oc', 0)))
+        print('  %-11s nodi %2d · fat %10.0f · con %9.0f · ddt %9.0f · ord %10.0f · OC %10.0f · FAT %10.0f' % (
+            p, len(c['nd']), somme['fat'], somme['con'], somme['ddt'], somme['ord'], c['ric'].get('oc', 0), c['ric'].get('fat', 0)))
 
 
 if __name__ == '__main__':
