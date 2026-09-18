@@ -21,9 +21,12 @@ HERE = os.path.dirname(__file__)
 CHARTS = os.path.join(HERE, "charts", "single")
 READY = os.path.join(HERE, "..", "pinescript", "ready")
 
-# Config single-chart: identica al Pine (niente rotazione ne' vol-target,
-# che sono meccaniche di portafoglio non replicabili su un solo chart)
-V2_SINGLE = replace(APEX_V2, top_k=None, max_pos=1, vol_target=None)
+# Config single-chart: identica al Pine. Spente le meccaniche che il Pine
+# non implementa: rotazione e vol-target (portafoglio, non replicabili su un
+# solo chart) e il filtro equity-curve (rischio dimezzato sotto l'EMA50
+# dell'equity), cosi' i numeri citati negli header sono quelli dello script.
+V2_SINGLE = replace(APEX_V2, top_k=None, max_pos=1, vol_target=None,
+                    eq_curve_filter=False)
 
 
 def run_coin(coin: str):
@@ -70,27 +73,34 @@ def chart(coin: str, res, px: pd.DataFrame, rank: int):
     return path
 
 
-def make_pine(coin: str, m: dict, rank: int):
+MESI = ["gen", "feb", "mar", "apr", "mag", "giu",
+        "lug", "ago", "set", "ott", "nov", "dic"]
+
+
+def make_pine(coin: str, m: dict, rank: int, end: pd.Timestamp):
     """Genera il file Pine con i settaggi V2 gia' impostati come default."""
     os.makedirs(READY, exist_ok=True)
     src = open(os.path.join(HERE, "..", "pinescript", "apex_trend_strategy.pine")).read()
     tkr = coin.replace("USD", "USDT")
+    fine = f"{MESI[end.month - 1]} {end.year}"
     hdr = (f"//@version=5\n"
            f"// ════════════════════════════════════════════════════════════════\n"
            f"//  APEX-V2 PRONTA PER {coin.replace('USD','')} - settaggi gia' impostati\n"
            f"//  1. Apri il grafico BINANCE:{tkr} (o equivalente), timeframe 1D\n"
            f"//  2. Incolla questo script nel Pine Editor -> Aggiungi al grafico\n"
-           f"//  Backtest 2021->giu 2026 (#{rank} su 10 coin): CAGR {m['cagr_pct']}% |\n"
+           f"//  Backtest 2021->{fine} (#{rank} su 10 coin): CAGR {m['cagr_pct']}% |\n"
            f"//  MaxDD {m['max_drawdown_pct']}% | PF {m['profit_factor']} | "
            f"{m['n_trades']} trade | win rate {m['win_rate_pct']}%\n"
-           f"//  Preset FUTURES (leva 2): per SPOT metti Leva=1 (rendimento ~meta',\n"
-           f"//  stesso profilo). Il funding dei perpetual non e' simulato.\n"
+           f"//  Numeri dal backtest Python di QUESTA logica single-chart (costi\n"
+           f"//  0.15%/lato). La 'Leva max' e' solo un limite di margine: non\n"
+           f"//  moltiplica la size, i numeri non ne dipendono. Il funding dei\n"
+           f"//  perpetual non e' simulato.\n"
            f"// ════════════════════════════════════════════════════════════════\n")
     body = src.split("strategy(", 1)[1]
     body = "strategy(" + body
     body = body.replace('strategy("APEX Trend Strategy v2 [Daily]"',
                         f'strategy("APEX-V2 {coin.replace("USD","")} [Daily]"')
-    # default single-chart V2: canale 20, trailing 5, rischio 15, cap 50, leva 2
+    # default single-chart V2: canale 20, trailing 5, rischio 15, cap 50
     body = body.replace('input.int(30,    "Canale breakout (gg)"',
                         'input.int(20,    "Canale breakout (gg)"')
     body = body.replace('input.float(4.0, "Trailing ATR x"',
@@ -99,8 +109,6 @@ def make_pine(coin: str, m: dict, rank: int):
                         'input.float(15.0,"Rischio per trade % equity"')
     body = body.replace('input.float(30.0,"Cap posizione % equity"',
                         'input.float(50.0,"Cap posizione % equity"')
-    body = body.replace('input.float(1.0, "Leva (1 = spot)"',
-                        'input.float(2.0, "Leva (1 = spot)"')
     path = os.path.join(READY, f"APEX_V2_{coin.replace('USD','')}.pine")
     open(path, "w").write(hdr + body)
     return path
@@ -126,7 +134,7 @@ def main():
     for rank, coin in enumerate(top5, 1):
         res, px = results[coin]
         cp = chart(coin, res, px, rank)
-        pp = make_pine(coin, res.metrics, rank)
+        pp = make_pine(coin, res.metrics, rank, px.index[-1])
         print(f"  #{rank} {coin}: {cp} | {pp}")
 
 

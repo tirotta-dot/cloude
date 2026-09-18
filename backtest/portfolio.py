@@ -42,7 +42,7 @@ class ApexParams:
     slippage_pct: float = 0.05
     top_k: int | None = None       # entra solo nelle prime k coin per momentum 90g
     leverage: float = 1.0          # esposizione massima in multipli di equity
-    borrow_apr: float = 12.0       # costo annuo del margine sul cash negativo
+    borrow_apr: float = 12.0       # funding annuo sul notional aperto (perpetual)
     # ── feature sperimentali (testate in improvements.py) ──
     smart_exit: bool = False       # uscita EMA20 solo se il trade e' in perdita
     chandelier: bool = False       # trailing dal massimo close dall'ingresso
@@ -70,8 +70,13 @@ class ApexParams:
 def build_signals(df: pd.DataFrame, p: ApexParams, btc_regime: pd.Series | None,
                   is_btc: bool) -> dict:
     c = df["close"]
-    e200 = ema(c, 200)
-    a = atr(df, 14)
+    # warmup: ewm di pandas parte dalla prima barra valida (salta i NaN),
+    # quindi EMA200/ATR vanno mascherati finche' non hanno storia reale
+    # sufficiente, altrimenti su una coin listata da poco il filtro di
+    # regime "vale" gia' pochi giorni dopo il listing
+    n_valid = c.notna().cumsum()
+    e200 = ema(c, 200).where(n_valid >= 200)
+    a = atr(df, 14).where(n_valid >= 14)
     hi = c.rolling(p.ch_len).max().shift(1)
     regime = (c > e200) & (ema(c, 50) > e200)
     entry = (c > hi) & (c > e200)
@@ -112,7 +117,9 @@ def run_portfolio(data: dict[str, pd.DataFrame], p: ApexParams,
     arr = {s: {k: data[s][k].to_numpy() for k in ["open", "high", "low", "close"]}
            for s in syms}
     btc_c = data["BTCUSD"]["close"]
-    btc_regime = btc_c > ema(btc_c, 200)
+    # stesso warmup di build_signals: la EMA200 del filtro BTC deve avere
+    # 200 barre reali prima di dichiarare il regime valido
+    btc_regime = (btc_c > ema(btc_c, 200)) & (btc_c.notna().cumsum() >= 200)
     sig = {s: build_signals(data[s], p, btc_regime, s == "BTCUSD") for s in syms}
 
     cost = (p.fee_pct + p.slippage_pct) / 100
@@ -146,7 +153,8 @@ def run_portfolio(data: dict[str, pd.DataFrame], p: ApexParams,
         if ret <= 0:
             last_loss_i[s] = i
         trades.append(Trade(dates[ps["entry_i"]], dates[i], ps["entry_px"],
-                            fill, f"long:{s}", ret, reason))
+                            fill, f"long:{s}", ret, reason,
+                            ps["qty"] * (fill - ps["entry_px"])))
         pos[s] = None
 
     def entry_frac(s: str, i: int, eq_now: float, risk: float, cap: float) -> float:
@@ -206,14 +214,15 @@ def run_portfolio(data: dict[str, pd.DataFrame], p: ApexParams,
 
         candidates = [s for s in syms if pend_in[s] and pos[s] is None
                       and i - last_loss_i[s] > p.cooldown] if entries_on else []
-        candidates.sort(key=lambda s: sig[s]["mom"][i], reverse=True)
+        # momentum di IERI: la decisione per l'open di oggi non puo' usare
+        # il close odierno (no lookahead, come breadth/ATR/regime sopra)
+        candidates.sort(key=lambda s: sig[s]["mom"][max(i - 1, 0)], reverse=True)
         # rotazione: solo le prime k coin per momentum sono eleggibili
         if topk_today is not None:
-            rank = sorted(syms, key=lambda s: sig[s]["mom"][i], reverse=True)
+            rank = sorted(syms, key=lambda s: sig[s]["mom"][max(i - 1, 0)], reverse=True)
             allowed = set(rank[:topk_today])
             candidates = [s for s in candidates if s in allowed]
         for s in candidates:
-            pend_in[s] = False
             n_open = sum(1 for ps in pos.values() if ps)
             if n_open >= p.max_pos or eq_now <= 0:
                 continue
@@ -235,6 +244,11 @@ def run_portfolio(data: dict[str, pd.DataFrame], p: ApexParams,
                       "stop": fill * (1 - p.sl_pct / 100), "trail": -np.inf,
                       "hh": -np.inf, "adds": 0}
             cash -= invested
+        # il segnale vale solo per l'apertura successiva alla chiusura che lo
+        # ha generato: i pendenti non eseguiti (top-k, cooldown, blocco
+        # ingressi) decadono e si riarmano solo se l'entry e' ancora vera
+        for s in syms:
+            pend_in[s] = False
 
         # 2b) piramidazione: un solo add-on a meta' size su nuovo breakout
         for s in syms:
@@ -299,9 +313,12 @@ def run_portfolio(data: dict[str, pd.DataFrame], p: ApexParams,
                     and arr[s]["close"][i] > ps["entry_px"] * 1.05):
                 pend_add[s] = True
 
-        # interessi sul margine (cash negativo) e mark-to-market
-        if cash < 0:
-            cash -= abs(cash) * p.borrow_apr / 100 / 365
+        # funding perpetual: si paga sull'INTERO notional delle posizioni
+        # aperte, ogni giorno in posizione (la venue di riferimento sono i
+        # futures: il solo interesse sul cash negativo sottostimerebbe)
+        notional = sum(ps["qty"] * arr[s]["close"][i] for s, ps in pos.items() if ps)
+        if notional > 0:
+            cash -= notional * p.borrow_apr / 100 / 365
         equity[i] = mark_equity(i, "close")
         exposure[i] = (equity[i] - cash) / equity[i] if equity[i] > 0 else 0
         eq_prev = equity[i]

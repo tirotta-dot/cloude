@@ -6,6 +6,9 @@ Due obiettivi:
  2. Preset 4H pronti per TradingView: stessa logica V2, ma destinata a
     girare su grafico a 4 ore (NON backtestabile qui: manca lo storico
     intraday -> FMP intraday a pagamento, exchange fuori allowlist).
+    Le coin dei preset vengono dalla classifica della config V2 realmente
+    consegnata (single_coin_ranking.csv, generata da single_coin.py), NON
+    dalla classifica FAST che usa altri parametri.
 
 Genera: classifica single-coin FAST, 5 grafici (densita' trade visibile),
 5 file Pine 4H pronti.
@@ -28,9 +31,11 @@ HERE = os.path.dirname(__file__)
 CHARTS = os.path.join(HERE, "charts", "fast")
 READY4H = os.path.join(HERE, "..", "pinescript", "ready_4h")
 
-# Single-chart FAST: 1 posizione, BTC solo regime, parametri reattivi
+# Single-chart FAST: 1 posizione, BTC solo regime, parametri reattivi.
+# eq_curve_filter spento come in V2_SINGLE: il Pine non lo implementa.
 APEX_F = replace(APEX_V2, top_k=None, max_pos=1, vol_target=None,
-                 ch_len=7, exit_len=10, cooldown=0, vol_cap_pctile=None)
+                 ch_len=7, exit_len=10, cooldown=0, vol_cap_pctile=None,
+                 eq_curve_filter=False)
 
 
 def run_coin(coin, p_base):
@@ -56,8 +61,9 @@ def chart(coin, res, px, rank):
         ax[0].scatter(*zip(*sl), marker="v", color="#c62828", s=34, zorder=5, label="Uscite -")
     ax[0].set_yscale("log")
     m = res.metrics
+    yrs = (px.index[-1] - px.index[0]).days / 365.25
     ax[0].set_title(f"#{rank} APEX-F (FAST, daily) su {coin} | {m['n_trades']} trade "
-                    f"(~{m['n_trades']/5.44:.0f}/anno) · CAGR {m['cagr_pct']}% · "
+                    f"(~{m['n_trades']/yrs:.0f}/anno) · CAGR {m['cagr_pct']}% · "
                     f"DD {m['max_drawdown_pct']}% · PF {m['profit_factor']}")
     ax[0].legend(loc="upper left", fontsize=8)
     ax[0].grid(alpha=0.3)
@@ -88,13 +94,15 @@ def make_pine_4h(coin, rank):
            f"//  in fretta che sul daily -> molti piu' ingressi.\n"
            f"//  NB: questo preset NON e' backtestato sullo storico intraday\n"
            f"//  (non disponibile in questo ambiente). Verifica nel backtester\n"
-           f"//  di TradingView prima di operare. Preset FUTURES leva 2; per\n"
-           f"//  spot metti Leva=1.\n"
+           f"//  di TradingView prima di operare. Coin scelta dalla top-5 del\n"
+           f"//  backtest daily della config V2 (single_coin_ranking.csv), che\n"
+           f"//  NON e' un backtest di questo preset 4H. La 'Leva max' e' solo\n"
+           f"//  un limite di margine: non moltiplica la size.\n"
            f"// ════════════════════════════════════════════════════════════════\n")
     body = "strategy(" + src.split("strategy(", 1)[1]
     body = body.replace('strategy("APEX Trend Strategy v2 [Daily]"',
                         f'strategy("APEX-V2 4H {coin.replace("USD","")}"')
-    # default 4H: canale 20, trailing 5, rischio 15, cap 50, leva 2 (come V2)
+    # default 4H: canale 20, trailing 5, rischio 15, cap 50 (come V2)
     body = body.replace('input.int(30,    "Canale breakout (gg)"',
                         'input.int(20,    "Canale breakout (barre)"')
     body = body.replace('input.float(4.0, "Trailing ATR x"', 'input.float(5.0, "Trailing ATR x"')
@@ -102,7 +110,6 @@ def make_pine_4h(coin, rank):
                         'input.float(15.0,"Rischio per trade % equity"')
     body = body.replace('input.float(30.0,"Cap posizione % equity"',
                         'input.float(50.0,"Cap posizione % equity"')
-    body = body.replace('input.float(1.0, "Leva (1 = spot)"', 'input.float(2.0, "Leva (1 = spot)"')
     path = os.path.join(READY4H, f"APEX_V2_4H_{coin.replace('USD','')}.pine")
     open(path, "w").write(hdr + body)
     return path
@@ -115,8 +122,9 @@ def main():
         res, px = run_coin(coin, APEX_F)
         results[coin] = (res, px)
         m = res.metrics
+        yrs = (px.index[-1] - px.index[0]).days / 365.25
         rows.append({"coin": coin, "trades": m["n_trades"],
-                     "tr/anno": round(m["n_trades"] / 5.44, 1), "CAGR%": m["cagr_pct"],
+                     "tr/anno": round(m["n_trades"] / yrs, 1), "CAGR%": m["cagr_pct"],
                      "tot%": m["total_return_pct"], "MaxDD%": m["max_drawdown_pct"],
                      "PF": m["profit_factor"], "win%": m["win_rate_pct"], "Calmar": m["calmar"]})
     tab = pd.DataFrame(rows).sort_values("CAGR%", ascending=False).reset_index(drop=True)
@@ -125,10 +133,18 @@ def main():
     tab.to_csv(os.path.join(HERE, "fast_ranking.csv"), index=False)
 
     top5 = tab.head(5)["coin"].tolist()
-    print("\nTOP 5 FAST:", top5)
+    print("\nTOP 5 FAST (grafici daily):", top5)
     for rank, coin in enumerate(top5, 1):
         res, px = results[coin]
-        print(f"  #{rank} {coin}: {chart(coin, res, px, rank)} | {make_pine_4h(coin, rank)}")
+        print(f"  #{rank} {coin}: {chart(coin, res, px, rank)}")
+
+    # Preset 4H: coin scelte con la classifica della config V2 realmente
+    # consegnata nel preset (single_coin.py), non con la variante FAST
+    v2 = pd.read_csv(os.path.join(HERE, "single_coin_ranking.csv"))
+    top5_v2 = v2.head(5)["coin"].tolist()
+    print("\nTOP 5 V2 (preset 4H):", top5_v2)
+    for rank, coin in enumerate(top5_v2, 1):
+        print(f"  #{rank} {coin}: {make_pine_4h(coin, rank)}")
 
 
 if __name__ == "__main__":

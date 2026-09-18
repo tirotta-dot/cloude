@@ -16,15 +16,17 @@
 //   • Ingresso: breakout del massimo degli ultimi N barre 30m
 //   • Uscite: EMA uscita 30m | trailing ATR (chandelier) | profit-lock |
 //             stop di emergenza | cooldown dopo una perdita
-//   • Sizing a rischio con cap e leva opzionale
+//   • Sizing a rischio con cap e limite di leva
 //
 //  ⚠️ NON backtestato qui (storico intraday non disponibile nell'ambiente
 //  di sviluppo). Validalo nello Strategy Tester di TradingView, che ha i
-//  dati 30m/1h. Anti-repaint: tutte le serie HTF usano lookahead_off.
+//  dati 30m/1h. Anti-repaint: le serie HTF usano la barra 1h CHIUSA
+//  (offset [1] + lookahead_on, pattern standard non-repainting).
 // ═════════════════════════════════════════════════════════════════════════
+// costi 0.15%/lato come il backtest Python (0.10% fee + 0.05% slippage)
 strategy("APEX-MTF 30m+1h", overlay=true,
      initial_capital=10000, commission_type=strategy.commission.percent,
-     commission_value=0.1, slippage=2, calc_on_every_tick=false)
+     commission_value=0.15, slippage=0, calc_on_every_tick=false)
 
 // ── Input: timeframe ───────────────────────────────────────────────
 confTF       = input.timeframe("60", "Timeframe di conferma", group="Multi-timeframe",
@@ -59,8 +61,9 @@ lockMult     = input.float(3.0, "Trailing ATR x post-lock",   group="Uscita", st
 // ── Input: money management ────────────────────────────────────────
 riskPerc     = input.float(12.0,"Rischio per trade % equity", group="Money management")
 maxFracPerc  = input.float(40.0,"Cap posizione % equity",     group="Money management")
-levMult      = input.float(2.0, "Leva (1 = spot)",            group="Money management",
-     minval=1.0, maxval=3.0, step=0.25)
+levMult      = input.float(1.0, "Leva max (limite margine)",  group="Money management",
+     minval=1.0, maxval=3.0, step=0.25,
+     tooltip="Limite di esposizione in multipli dell'equity: NON moltiplica la size, che resta dimensionata da rischio e cap. Con cap <= 100% non cambia i risultati su un chart singolo.")
 startDate    = input.time(timestamp("2021-01-01"), "Inizio backtest", group="Periodo")
 endDate      = input.time(timestamp("2035-01-01"), "Fine backtest",   group="Periodo")
 
@@ -72,10 +75,13 @@ atrVal  = ta.atr(atrLen)
 chHigh  = ta.highest(close, chLen)[1]
 
 // ── Conferma dal timeframe superiore (1h) — anti-repaint ───────────
+// Pattern standard non-repainting: offset [1] + lookahead_on = valori
+// dell'ultima barra HTF CHIUSA, identici su barre storiche e realtime
+// (lookahead_off senza [1] ripitturerebbe live sulla barra 1h in corso).
 f_htf(sym) =>
     request.security(sym, confTF,
-         [close, ta.ema(close, regimeLen), ta.ema(close, 50)],
-         lookahead=barmerge.lookahead_off)
+         [close[1], ta.ema(close, regimeLen)[1], ta.ema(close, 50)[1]],
+         lookahead=barmerge.lookahead_on)
 
 [c1h, e200_1h, e50_1h] = f_htf(syminfo.tickerid)
 conf1h = not useConf1h or (c1h > e200_1h and (not useAlignment or e50_1h > e200_1h))
@@ -106,13 +112,14 @@ bgcolor(useConf1h and not conf1h ? color.new(color.gray, 90) : na, title="Confer
 bgcolor(useBtcFilter and not btcOk ? color.new(color.red, 92) : na, title="Regime BTC off")
 
 // ── Ingresso con sizing a rischio ──────────────────────────────────
+// la leva NON moltiplica la size: e' solo un tetto di esposizione
 stopDistPerc = trailMult * atrVal / close * 100
-frac = math.min(maxFracPerc / 100, riskPerc / stopDistPerc)
+frac = math.min(math.min(maxFracPerc / 100, riskPerc / stopDistPerc), levMult)
 
 longCond = inDate and inRegime and conf1h and btcOk and breakout and volOk and
    cooldownOk and strategy.position_size == 0
 if longCond
-    strategy.entry("Long", strategy.long, qty=strategy.equity * frac * levMult / close,
+    strategy.entry("Long", strategy.long, qty=strategy.equity * frac / close,
          alert_message='{"action":"buy","ticker":"{{ticker}}","tf":"30m","price":{{close}},"strategy":"APEX_MTF"}')
 
 // ── Uscite ─────────────────────────────────────────────────────────

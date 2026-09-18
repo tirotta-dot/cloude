@@ -1,2 +1,7 @@
 data/raw/
 __pycache__/
+.claude/settings.local.json
+# Second Brain: dati personali e output di verifica restano fuori dal repo
+second-brain/state.json
+second-brain/vmap.json
+second-brain/shots/
