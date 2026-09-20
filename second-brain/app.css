@@ -1130,7 +1130,6 @@ h1 em{white-space:nowrap}
   letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
 .ogdate b{color:var(--cy)}
 
-/* audit fable 5 */
 li.trip > *{min-width:0}
 li.trip .tag{max-width:100%}
 li.trip .tag.mono{white-space:normal;overflow-wrap:anywhere;text-align:left}
@@ -1956,3 +1955,8 @@ body[data-view="v-offerte"] .bar-in > .seg button[aria-pressed="true"]{backgroun
 /* R25: budget proposto (non ancora confermato) */
 .bdgt td.prop{color:#b45309;font-style:italic}
 .bdgprop select.sel{max-width:420px;margin-left:6px}
+
+/* R28 (20/09/2026): sul telefono la prima colonna (nodo o commessa) resta ferma mentre la tabella scorre */
+.bdgt th:first-child,.bdgt td:first-child,.bdged th:first-child,.bdged td:first-child{position:sticky;left:0;background:var(--panel);z-index:1}
+.bdgt tr.tot td:first-child,.bdgt tr[data-bdgcm]:hover td:first-child{background:var(--panel-2)}
+.bdgprz input.sel{margin:0 4px}
