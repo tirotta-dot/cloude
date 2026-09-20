@@ -1950,7 +1950,8 @@ body[data-view="v-offerte"] .bar-in > .seg button[aria-pressed="true"]{backgroun
 .bdgpar label{font-size:10.5px;color:var(--muted);display:block;margin-bottom:2px}
 .bdgpar input.sel,.bdgpar select.sel{width:100%;box-sizing:border-box}
 .bdgk .cm-kpi b{font-size:20px}
-@media (max-width:760px){.bdged table{min-width:640px;display:block;overflow-x:auto}}
+/* R28d: sul telefono l'editor scorre in orizzontale (swipe) e la colonna Nodo resta ferma */
+@media (max-width:760px){.bdged{overflow-x:auto}.bdged table{min-width:640px}.bdged input.sel{min-width:140px}}
 
 /* R25: budget proposto (non ancora confermato) */
 .bdgt td.prop{color:#b45309;font-style:italic}
@@ -1958,5 +1959,6 @@ body[data-view="v-offerte"] .bar-in > .seg button[aria-pressed="true"]{backgroun
 
 /* R28 (20/09/2026): sul telefono la prima colonna (nodo o commessa) resta ferma mentre la tabella scorre */
 .bdgt th:first-child,.bdgt td:first-child,.bdged th:first-child,.bdged td:first-child{position:sticky;left:0;background:var(--panel);z-index:1}
-.bdgt tr.tot td:first-child,.bdgt tr[data-bdgcm]:hover td:first-child{background:var(--panel-2)}
+.otab.bdgt tr.bad td:first-child,.otab.bdgt tr.warn td:first-child,.otab.bdgt tr.ok td:first-child{background:var(--panel)}
+.otab.bdgt tr.tot td:first-child,.otab.bdgt tr[data-bdgcm]:hover td:first-child{background:var(--panel-2)}
 .bdgprz input.sel{margin:0 4px}

@@ -75,7 +75,7 @@ const path = require('path'), fs = require('fs');
   report.evase = await page.evaluate(() => ({ n: document.querySelectorAll('.picker .pk').length, btn: (document.getElementById('cv-ev') || {}).textContent }));
   await click('#cm-bdg', '09k-budget-evase-tutte');
   await page.waitForTimeout(1600);
-  report.bdgRiepEvase = await page.evaluate(() => ({ righe: document.querySelectorAll('.bdgt tbody tr').length, kpi: Array.from(document.querySelectorAll('.bdgk .cm-kpi')).map(k => k.textContent.replace(/\s+/g, ' ').trim()).slice(0, 5), prime: Array.from(document.querySelectorAll('.bdgt tbody tr')).slice(0, 4).map(r => r.textContent.replace(/\s+/g, ' ').trim().slice(0, 160)) }));
+  report.bdgRiepEvase = await page.evaluate(() => ({ btn: (document.getElementById('cm-bdg') || {}).textContent, righe: document.querySelectorAll('.bdgt tbody tr').length, kpi: Array.from(document.querySelectorAll('.bdgk .cm-kpi')).map(k => k.textContent.replace(/\s+/g, ' ').trim()).slice(0, 5), prime: Array.from(document.querySelectorAll('.bdgt tbody tr')).slice(0, 4).map(r => r.textContent.replace(/\s+/g, ' ').trim().slice(0, 160)) }));
   await shotEl('.bdgk', '09k2-riepilogo-evase-kpi'); // tabella dell'utile consuntivo delle commesse chiuse: KPI e prime righe
   { const t = page.locator('.bdgt').first(); if (await t.count()) { await t.evaluate(e => e.scrollIntoView({ block: 'start' })); await page.waitForTimeout(300); await shot('09k3-riepilogo-evase-tab'); } }
   await click('.picker .pk[data-code="SBC-14-24"]', '09l-sel-sbc14');
