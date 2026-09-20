@@ -51,6 +51,9 @@ const path = require('path'), fs = require('fs');
   report.contrattiRows = await page.evaluate(() => document.querySelectorAll('.otab tbody tr').length);
   await click('#cm-bdg', '09d-budget-tutte');
   await page.waitForTimeout(1600);
+  report.bdgFiles = await page.evaluate(() => Array.from(document.querySelectorAll('[data-bdgfile]')).map(a => a.getAttribute('href')));
+  if (report.bdgFiles.length < 5) errors.push('Budget: attesi almeno 5 link ai file pubblicati, trovati ' + report.bdgFiles.length);
+  for (const u of report.bdgFiles) { const r = await page.request.get(base.replace(/index\.html$/, '') + u); if (!r.ok()) errors.push('file pubblicato non raggiungibile: ' + u + ' (' + r.status() + ')'); }
   report.bdgRiep = await page.evaluate(() => ({ righe: document.querySelectorAll('.bdgt tbody tr').length, kpi: Array.from(document.querySelectorAll('.bdgk .cm-kpi')).map(k => k.textContent.replace(/\s+/g, ' ').trim()).slice(0, 5), btn: (document.getElementById('cm-bdg') || {}).textContent }));
   await click('.picker .pk[data-code="SBC-15-26"]', '09e-sel-sbc15');
   await click('#cm-bdg', '09f-budget-sbc15');

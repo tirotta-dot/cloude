@@ -4268,8 +4268,8 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
   function bdgFileHtml(){
     var xs = Array.isArray(S.export) ? S.export.filter(function(x){ return x && x.url && /^export\/[A-Za-z0-9._-]+\.(xlsx|csv)$/.test(x.url); }) : [];
     if (!xs.length) return '';
-    return '<p class="srcline">Excel pronti: ' + xs.map(function(x){
-      return '<a href="' + esc(x.url) + '" download>' + esc(x.nome || x.url) + ' ↗</a>' + (x.data ? ' <span class="osub">del ' + esc(itFull(x.data)) + '</span>' : '') + (x.nota ? ' · ' + esc(x.nota) : '');
+    return '<p class="srcline">File pronti: ' + xs.map(function(x){
+      return '<a href="' + esc(x.url) + '" target="_blank" rel="noopener" data-bdgfile="' + esc(x.url) + '">' + esc(x.nome || x.url) + ' ↗</a>' + (x.data ? ' <span class="osub">del ' + esc(itFull(x.data)) + '</span>' : '') + (x.nota ? ' · ' + esc(x.nota) : '');
     }).join(' · ') + '</p>';
   }
   function bdgRiepilogo(list){
@@ -4278,7 +4278,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     righe.forEach(function(M){
       if (M.haBudget){ tB += M.budgetTot; if (M.proposta && M.rif.length) nProp++; else nB++; }
       tI += M.costoOggi; if (M.chiusa) nCh++; else if (!M.c.sp){ nAp++; if (!M.conf) nDc++; }
-      if (M.prezzo != null){ tP += M.prezzo; nP++; }
+      if (M.prezzo != null && !M.prezzoDubbio){ tP += M.prezzo; nP++; }
       if (M.utile != null){ tU += M.utile; nU++; tPU += M.prezzo; }
     });
     var tuttoChiuso = nCh === righe.length && righe.length > 0;
@@ -4459,6 +4459,17 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
       DLc.save({filename: bdgFile(key, 'csv'), data: csvIt(rows)})
         .then(function(){ b.textContent = 'scaricato'; setTimeout(function(){ b.textContent = 'Scarica .csv'; }, 3000); })
         .catch(function(err){ b.textContent = (err && err.code === 'declined') ? 'annullato' : 'errore: ' + ((err && err.code) || err); setTimeout(function(){ b.textContent = 'Scarica .csv'; }, 4000); });
+    }); });
+    /* R26: i file pubblicati con la pagina si scaricano con la capability downloads; senza, il link si apre da solo */
+    document.querySelectorAll('[data-bdgfile]').forEach(function(a){ a.addEventListener('click', function(ev){
+      if (!DLc) return;
+      ev.preventDefault();
+      var u = a.getAttribute('data-bdgfile'), nome = u.split('/').pop(), t0 = a.textContent;
+      a.textContent = 'scarico…';
+      fetch(u).then(function(r){ if (!r.ok) throw new Error('risposta ' + r.status); return r.text(); })
+        .then(function(txt){ return DLc.save({filename: nome, data: txt}); })
+        .then(function(){ a.textContent = 'scaricato'; setTimeout(function(){ a.textContent = t0; }, 3000); })
+        .catch(function(err){ a.textContent = (err && err.code === 'declined') ? 'annullato' : 'errore: ' + ((err && (err.code || err.message)) || err); setTimeout(function(){ a.textContent = t0; }, 4000); });
     }); });
     document.querySelectorAll('[data-bdgxls]').forEach(function(b){ b.addEventListener('click', function(){
       var key = b.getAttribute('data-bdgxls'), cl = (window.claude && window.claude.use) ? window.claude : null;

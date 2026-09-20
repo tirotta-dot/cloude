@@ -792,7 +792,9 @@ def scrivi_riepilogo(wb, S, MM):
     for i, M in enumerate(MM):
         row, t, c = rh + 1 + i, M['tot'], M['c']
         vals = [c['code'], c.get('cliente') or '', c.get('desc') or '', len(M['nodi']), stato_nodi(M),
-                M['prezzo'] if M['prezzo'] is not None else '', M['prezzoFonte'] or '', t['ext'], M['ore']['bEur'], M['budgetTot'], t['fat'] + t['con'] + t['alt'], t['ddt'], t['ord'], t['imp'],
+                M['prezzo'] if M['prezzo'] is not None and not M.get('prezzoDubbio') else '',
+                ('incompleto nel gestionale: %s da %s' % (eur_r(M['prezzo']), (M['prezzoFonte'] or '').replace(' nel gestionale', ''))) if M.get('prezzoDubbio') else (M['prezzoFonte'] or ''),
+                t['ext'], M['ore']['bEur'], M['budgetTot'], t['fat'] + t['con'] + t['alt'], t['ddt'], t['ord'], t['imp'],
                 M['ore']['cEur'], M['costoOggi'], t['sc'] if t['ext'] > 0 else '', (t['pct'] - 1) if t['pct'] is not None else '',
                 M['utile'] if M['utile'] is not None else '', M['utileTipo'] or ('prezzo incompleto' if M.get('prezzoDubbio') else ''), M['marg'] if M['marg'] is not None else '',
                 M['utileB'] if M['utileB'] is not None else '', M['utileO'] if M['utileO'] is not None else '']
