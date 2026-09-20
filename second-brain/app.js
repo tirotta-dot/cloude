@@ -7192,7 +7192,10 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     if (!ns) return;
     ns.doc('config/salute').onSnapshot(function (s) {
       if (!s.exists) { mk.hidden = true; return; }
-      var d = s.data() || {}, an = d.anomalie || [];
+      var d = s.data() || {}, an = (d.anomalie || []).slice();
+      /* R28: un controllo più vecchio di 8 giorni è di per sé un'anomalia (il guardiano non gira) */
+      var tc = Date.parse(d.controllato || '');
+      if (!isNaN(tc) && Date.now() - tc > 8 * 86400000) an.push('ultimo controllo salute il ' + String(d.controllato).slice(0, 10) + ': la routine settimanale non gira da più di 8 giorni');
       var b = document.getElementById('ok-saln'); if (b) b.textContent = an.length;
       mk.hidden = !an.length;
       if (an.length) {
