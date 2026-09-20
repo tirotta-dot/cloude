@@ -83,7 +83,10 @@ def segnala_evasa(c, M, t):
     elif M.get('prezzoDubbio'):
         s.append('prezzo del gestionale incompleto (%s, %s, costi %s): scrivi il prezzo di vendita' % (B.eur_r(M['prezzo']), M['prezzoFonte'].replace(' nel gestionale', ''), B.eur_r(M['costoOggi'])))
     elif M.get('prezzoDaConfermare'):
-        s.append('fatture al cliente %s e ordine cliente %s lontani: prezzo da confermare' % (B.eur_r(M['fatCli']), B.eur_r(M['oc'])))
+        if M.get('oc') is not None and M.get('fatCli') and abs(M['fatCli'] - M['oc']) / max(M['fatCli'], M['oc']) > 0.3:
+            s.append('fatture al cliente %s e ordine cliente %s lontani: prezzo da confermare' % (B.eur_r(M['fatCli']), B.eur_r(M['oc'])))
+        else:
+            s.append('prezzo dalle fatture al cliente (%s) sotto i costi consuntivi (%s): prezzo da confermare' % (B.eur_r(M['prezzo']), B.eur_r(M['costoOggi'])))
     if M['utile'] is not None and M['utile'] < 0:
         s.append('utile negativo: %s' % B.eur_r(M['utile']))
     elif M['marg'] is not None and M['marg'] < 0.10:

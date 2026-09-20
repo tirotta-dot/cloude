@@ -4292,8 +4292,10 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
   function bdgRiepilogo(list){
     var altre = list.filter(cmAltro), cms = list.filter(function(c){ return !cmAltro(c); });
     var righe = cms.map(bdgModello), tB = 0, tI = 0, tP = 0, tU = 0, tPU = 0, nB = 0, nProp = 0, nP = 0, nU = 0, nCh = 0, nAp = 0, nDc = 0;
+    var nUdc = 0, tUdc = 0; /* R28: evase con prezzo da confermare dentro il KPI utile */
     righe.forEach(function(M){
       if (M.haBudget){ tB += M.budgetTot; if (M.proposta && M.rif.length) nProp++; else nB++; }
+      if (M.utile != null && M.prezzoDaConfermare){ nUdc++; tUdc += M.utile; }
       tI += M.costoOggi; if (M.chiusa) nCh++; else if (!M.c.sp){ nAp++; if (!M.conf) nDc++; }
       if (M.prezzo != null && !M.prezzoDubbio){ tP += M.prezzo; nP++; }
       if (M.utile != null){ tU += M.utile; nU++; tPU += M.prezzo; }
@@ -4305,7 +4307,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     var h = '<div class="cm-kpis bdgk"><div class="cm-kpi"><b>' + eurR(tP) + '</b><span>prezzo di vendita</span><small>' + nP + ' commesse con prezzo su ' + righe.length + '</small></div>'
       + '<div class="cm-kpi"><b>' + (tuttoChiuso ? eurR(tI) : eurR(tB)) + '</b><span>' + (tuttoChiuso ? 'costi consuntivi' : 'budget totale' + (nProp ? ' (incluso proposto)' : '')) + '</span><small>' + (tuttoChiuso ? 'impegnato + ore' : nB + ' con budget inserito o confermato · ' + nProp + ' con budget proposto da confermare · ' + (righe.length - nB - nProp) + ' senza') + '</small></div>'
       + (tuttoChiuso ? '' : '<div class="cm-kpi"><b>' + eurR(tI) + '</b><span>costi a oggi</span><small>esterni impegnati + ore</small></div>')
-      + '<div class="cm-kpi' + (tU < 0 ? ' hot' : '') + '"><b>' + (nU ? eurR(tU) : '—') + '</b><span>' + tipoU + '</span><small>' + (nU ? nU + ' commesse con prezzo e ' + (tuttoChiuso ? 'costi' : 'budget') + (tPU ? ' · margine ' + Math.round(tU / tPU * 100) + '% sul loro prezzo' : '') : 'serve prezzo e budget') + '</small></div>'
+      + '<div class="cm-kpi' + (tU < 0 ? ' hot' : '') + '"><b>' + (nU ? eurR(tU) : '—') + '</b><span>' + tipoU + '</span><small>' + (nU ? nU + ' commesse con prezzo e ' + (tuttoChiuso ? 'costi' : 'budget') + (tPU ? ' · margine ' + Math.round(tU / tPU * 100) + '% sul loro prezzo' : '') + (nUdc ? ' · di cui ' + nUdc + ' con prezzo da confermare (' + eurR(tUdc) + ')' : '') : 'serve prezzo e budget') + '</small></div>'
       + (nAp ? '<div class="cm-kpi' + (nDc ? ' hot' : '') + '"><b>' + nDc + '</b><span>nodi da confermare</span><small>commesse in corso senza nodi confermati, su ' + nAp + '</small></div>' : '') + '</div>';
     h += '<section class="og"><h3 class="cfh"><i class="dt cy"></i>Tutte le commesse in vista<em class="oghint">' + righe.length + ' commesse · seleziona una commessa per i nodi</em>'
       + '<span class="cfbtn"><button class="chip" data-bdgcopy="*">Copia per Excel</button><button class="chip" data-bdgcsv="*">Scarica .csv</button>' + (nCh ? '' : '<button class="chip" data-bdgxls="*">Excel su Drive</button>') + '</span></h3>'
