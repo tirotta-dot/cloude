@@ -3888,7 +3888,10 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
      consuntivi). Le ore possono essere a budget anche per l'intera commessa (c.bdg.hu / c.bdg.ho).
      Revisione del 18/09 sera: decimali con la virgola negli input, modifiche non salvate conservate
      al ridisegno, indicizzazione per anno anche nella colonna Y+1, ore delle ditte esterne nel
-     consuntivo, nodo del gestionale uguale al codice commessa trattato come "senza nodo". */
+     consuntivo, nodo del gestionale uguale al codice commessa trattato come "senza nodo".
+     R26 (20/09/2026, «Fai tutte le commesse del file del gestionale»): prezzo delle evase = contratto, altrimenti il
+     maggiore tra fatture al cliente e ordine cliente; un prezzo dal gestionale sotto la metà dei costi consuntivi è
+     «incompleto» (niente utile, avviso); il prezzo di vendita si scrive dall'editor del budget (c.eco.valore). */
   var bdgVista = 'scost', BDG_CACHE = {}, BDG_RIF = {}, BDG_PEND = {}, BDG_DIRTY = {}, XP = [], XPsig = '';
   var NN_CACHE = {}, CIN_CACHE = {}, CONS_OK = {};
   function idxDefault(){ return {"2013":1.2,"2014":0.2,"2015":0.1,"2016":-0.1,"2017":1.2,"2018":1.2,"2019":0.6,"2020":-0.2,"2021":1.9,"2022":8.1,"2023":5.7,"2024":1.0,"2025":1.7,"2026":1.8,"2027":1.9}; }
@@ -4098,9 +4101,10 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     var oreCons = cU * tU + cO * tO + cEeur;
     var bU = tot.hu + hCm.u, bO = tot.ho + hCm.o, oreBdg = bU * tU + bO * tO;
     var valore = (c.eco && c.eco.valore) ? Number(c.eco.valore) : null, oc = (cc.ric && cc.ric.oc) ? Number(cc.ric.oc) : null, fatCli = (cc.ric && cc.ric.fat) ? Number(cc.ric.fat) : null;
+    /* R26 (20/09): per le evase vale il maggiore tra fatture al cliente e ordine cliente (nell'estrazione le fatture sono spesso parziali) */
     var prezzo, prezzoFonte;
     if (valore != null){ prezzo = valore; prezzoFonte = 'contratto'; }
-    else if (c.ev && fatCli != null && fatCli > 0){ prezzo = fatCli; prezzoFonte = 'fatture al cliente nel gestionale'; }
+    else if (c.ev && fatCli != null && fatCli > 0 && (oc == null || fatCli >= oc)){ prezzo = fatCli; prezzoFonte = 'fatture al cliente nel gestionale'; }
     else if (oc != null){ prezzo = oc; prezzoFonte = 'ordine cliente nel gestionale'; }
     else { prezzo = null; prezzoFonte = null; }
     var haBudget = tot.ext > 0 || bU > 0 || bO > 0;
@@ -4109,10 +4113,14 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
       ore: {bU: bU, bO: bO, cU: cU, cO: cO, cE: cE, cEeur: cEeur, bEur: oreBdg, cEur: oreCons, hCm: hCm},
       prezzo: prezzo, prezzoFonte: prezzoFonte, oc: oc, valore: valore, fatCli: fatCli, haBudget: haBudget, chiusa: !!c.ev,
       budgetTot: tot.ext + oreBdg, costoOggi: tot.imp + oreCons};
+    /* R26: un prezzo preso dal gestionale sotto la metà dei costi consuntivi è quasi certamente incompleto (fatture registrate
+       altrove): niente utile finché Danilo non scrive il prezzo; fatture e ordine cliente lontani più del 30% → da confermare */
+    m.prezzoDubbio = !!(c.ev && prezzo != null && prezzoFonte !== 'contratto' && m.costoOggi > 0 && prezzo < 0.5 * m.costoOggi);
+    m.prezzoDaConfermare = !!(c.ev && prezzoFonte !== 'contratto' && fatCli != null && fatCli > 0 && oc != null && Math.abs(fatCli - oc) / Math.max(fatCli, oc) > 0.3);
     /* utile: a budget per le commesse in corso, consuntivo per le evase (R25) */
     m.utileB = (prezzo != null && haBudget) ? prezzo - m.budgetTot : null;
     m.utileO = prezzo != null ? prezzo - m.costoOggi : null;
-    if (c.ev){ m.utile = m.utileO; m.utileTipo = m.utile != null ? 'consuntivo' : null; }
+    if (c.ev){ m.utile = m.prezzoDubbio ? null : m.utileO; m.utileTipo = m.utile != null ? 'consuntivo' : null; }
     else { m.utile = m.utileB; m.utileTipo = m.utile != null ? (proposta && m.rif.length ? 'budget proposto' : 'budget') : null; }
     m.marg = (m.utile != null && prezzo) ? m.utile / prezzo : null;
     m.margB = (m.utileB != null && prezzo) ? m.utileB / prezzo : null;
@@ -4182,13 +4190,15 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     if (M.valore != null && M.oc != null && Math.abs(M.valore - M.oc) > 1) pInfo += ' · ordine cliente ' + eurR(M.oc);
     if (M.fatCli != null && M.fatCli > 0 && M.prezzoFonte !== 'fatture al cliente nel gestionale' && (p == null || Math.abs(M.fatCli - p) > 1)) pInfo += ' · fatturato al cliente ' + eurR(M.fatCli);
     if (M.prezzoFonte === 'fatture al cliente nel gestionale' && M.oc != null && Math.abs(M.oc - p) / p > 0.3) pInfo += ' · attenzione: ordine cliente ' + eurR(M.oc);
-    k += '<div class="cm-kpi"><b>' + (p != null ? eurR(p) : '—') + '</b><span>prezzo di vendita</span><small>' + pInfo + '</small></div>';
+    if (M.prezzoDubbio) pInfo += ' · <b>probabilmente incompleto</b>: sotto la metà dei costi consuntivi, scrivi il prezzo di vendita nell\'editor qui sotto';
+    else if (M.prezzoDaConfermare) pInfo += ' · da confermare';
+    k += '<div class="cm-kpi' + (M.prezzoDubbio ? ' hot' : '') + '"><b>' + (p != null ? eurR(p) : '—') + '</b><span>prezzo di vendita</span><small>' + pInfo + '</small></div>';
     k += '<div class="cm-kpi"><b>' + (M.haBudget ? eurR(M.budgetTot) : '—') + '</b><span>' + (prop ? 'budget proposto' : 'budget totale') + '</span><small>' + (M.haBudget ? 'esterni ' + eurR(M.tot.ext) + ' + ore ' + eurR(M.ore.bEur) + (prop ? ' · da confermare' : '') : (M.chiusa ? 'commessa evasa: contano i costi consuntivi' : 'nessun budget inserito')) + '</small></div>';
     k += '<div class="cm-kpi' + (M.tot.stato === 'bad' ? ' hot' : '') + '"><b>' + eurR(M.costoOggi) + '</b><span>' + (M.chiusa ? 'costi consuntivi' : 'costi a oggi') + '</span><small>impegnato ' + eurR(M.tot.imp) + ' + ore ' + eurR(M.ore.cEur) + '</small></div>';
     k += '<div class="cm-kpi' + (M.tot.stato === 'bad' ? ' hot' : '') + '"><b>' + (M.tot.ext > 0 ? (M.tot.sc > 0 ? '+' : '') + eurR(M.tot.sc) : '—') + '</b><span>scostamento esterni</span><small>' + (M.tot.ext > 0 ? pctTxt(M.tot.pct) + ' sul budget esterno' + (prop ? ' proposto' : '') : M.chiusa ? 'commessa evasa: nessun budget da confrontare' : 'serve il budget per nodo') + '</small></div>';
     k += '<div class="cm-kpi' + (M.utile != null && M.utile < 0 ? ' hot' : '') + '"><b>' + (M.utile != null ? eurR(M.utile) : '—') + '</b><span>' + (M.chiusa ? 'utile consuntivo' : 'utile a budget') + '</span><small>'
       + (M.utile != null ? 'margine ' + Math.round(M.marg * 100) + '% sul prezzo' + (M.chiusa ? ' · prezzo − costi consuntivi (impegnato + ore)' : (prop ? ' · sul budget proposto, da confermare' : '') + ' · con i soli costi a oggi ' + eurR(M.utileO) + ' (' + Math.round(M.margO * 100) + '%)')
-        : (M.prezzo == null ? 'manca il prezzo di vendita' : M.chiusa ? '—' : 'serve il budget: inseriscilo o conferma quello proposto')) + '</small></div>';
+        : (M.prezzo == null ? 'manca il prezzo di vendita' : M.chiusa ? (M.prezzoDubbio ? 'prezzo del gestionale incompleto: scrivi il prezzo di vendita' : '—') : 'serve il budget: inseriscilo o conferma quello proposto')) + '</small></div>';
     return k + '</div>';
   }
   function bdgPropostaHtml(M){
@@ -4219,6 +4229,8 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
       + '<p class="cm-hint" style="margin:8px 0 4px">Ore per l\'intera commessa, se non le dividi per nodo (si sommano a quelle per nodo): '
       + 'ufficio <input class="sel num" id="bdg-hu-' + esc(code) + '" value="' + esc(numEd(hu)) + '" inputmode="decimal" placeholder="0" style="width:80px"> h · '
       + 'produzione <input class="sel num" id="bdg-ho-' + esc(code) + '" value="' + esc(numEd(ho)) + '" inputmode="decimal" placeholder="0" style="width:80px"> h</p>'
+      + '<p class="cm-hint" style="margin:4px 0">Prezzo di vendita € <input class="sel num" id="bdg-prz-' + esc(code) + '" value="' + esc(numEd(pend && pend.prezzo != null ? pend.prezzo : (M.valore != null ? M.valore : ''))) + '" inputmode="decimal" placeholder="' + esc(M.prezzo != null && M.valore == null ? numEd(Math.round(M.prezzo)) : '0') + '" style="width:120px"> · '
+      + (M.valore != null ? 'valore a contratto (scheda Economics): cambialo qui se serve' : M.prezzo != null ? 'oggi preso da ' + esc(M.prezzoFonte) + (M.prezzoDubbio ? ', probabilmente incompleto' : '') + ': scrivilo qui se diverso' : 'nessun prezzo trovato: scrivilo qui') + '</p>'
       + '<div class="actions"><button class="chip" data-bdgadd="' + esc(code) + '">+ nodo</button>'
       + '<button class="chip" data-bdgprop="' + esc(code) + '">Aggiungi i nodi del gestionale mancanti</button>'
       + '<button class="btn" data-bdgsave="' + esc(code) + '">Salva budget</button>'
@@ -4251,6 +4263,15 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
         : esc(q) + ' · ' + (x.stato === 'errore' ? 'errore: ' + esc(x.errore || '') : 'in coda, arriva al prossimo giro della routine'));
     }).join(' · ') + '</p>';
   }
+  /* R26: file Excel pubblicati insieme alla pagina (S.export: [{nome, url, data, nota}]), es. l'Excel di tutte le commesse
+     e il resoconto dei punti aperti del 20/09/2026; il link è relativo alla pagina */
+  function bdgFileHtml(){
+    var xs = Array.isArray(S.export) ? S.export.filter(function(x){ return x && x.url && /^export\/[A-Za-z0-9._-]+\.(xlsx|csv)$/.test(x.url); }) : [];
+    if (!xs.length) return '';
+    return '<p class="srcline">Excel pronti: ' + xs.map(function(x){
+      return '<a href="' + esc(x.url) + '" download>' + esc(x.nome || x.url) + ' ↗</a>' + (x.data ? ' <span class="osub">del ' + esc(itFull(x.data)) + '</span>' : '') + (x.nota ? ' · ' + esc(x.nota) : '');
+    }).join(' · ') + '</p>';
+  }
   function bdgRiepilogo(list){
     var altre = list.filter(cmAltro), cms = list.filter(function(c){ return !cmAltro(c); });
     var righe = cms.map(bdgModello), tB = 0, tI = 0, tP = 0, tU = 0, tPU = 0, nB = 0, nProp = 0, nP = 0, nU = 0, nCh = 0, nAp = 0, nDc = 0;
@@ -4274,11 +4295,11 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
       var c = M.c, st = M.tot.stato;
       h += '<tr class="' + esc(st) + '" data-bdgcm="' + esc(c.code) + '"><td class="nodo"><b>' + esc(c.code) + '</b><span class="osub">' + esc(c.cliente || '') + (c.desc ? ' · ' + esc(c.desc) : '') + '</span></td>'
         + '<td>' + M.nodi.length + (M.chiusa ? (M.conf ? ' <span class="pill ok">confermati</span>' : '') : M.proposta ? ' <span class="pill warn">proposti' + (M.rif.length ? ' da ' + M.rif.length + ' simil' + (M.rif.length > 1 ? 'i' : 'e') : '') + '</span>' : M.conf ? ' <span class="pill ok">confermati</span>' : ' <span class="pill warn">da confermare</span>') + '</td>'
-        + '<td class="num mono">' + (M.prezzo != null ? eurR(M.prezzo) : '—') + (M.prezzoFonte && M.prezzoFonte !== 'contratto' ? '<span class="osub">' + esc(M.prezzoFonte.replace(' nel gestionale', '')) + '</span>' : '') + '</td>'
+        + '<td class="num mono">' + (M.prezzo != null ? eurR(M.prezzo) : '—') + (M.prezzoFonte && M.prezzoFonte !== 'contratto' ? '<span class="osub">' + esc(M.prezzoFonte.replace(' nel gestionale', '')) + (M.prezzoDubbio ? ' · incompleto?' : M.prezzoDaConfermare ? ' · da confermare' : '') + '</span>' : '') + '</td>'
         + '<td class="num mono">' + (M.haBudget ? eurR(M.budgetTot) : '<span class="osub">' + (M.chiusa ? '—' : 'da inserire') + '</span>') + '</td>'
         + '<td class="num mono"><b>' + eurR(M.costoOggi) + '</b></td>'
         + '<td class="num mono pct">' + (M.tot.ext > 0 ? (M.tot.sc > 0 ? '+' : '') + eurR(M.tot.sc) + ' (' + pctTxt(M.tot.pct) + ')' : '—') + '</td>'
-        + '<td class="num mono' + (M.utile != null && M.utile < 0 ? ' bad' : '') + '">' + (M.utile != null ? eurR(M.utile) + '<span class="osub">' + esc(M.utileTipo) + '</span>' : '<span class="osub">' + (M.prezzo == null ? 'senza prezzo' : M.chiusa ? '—' : 'senza budget') + '</span>') + '</td>'
+        + '<td class="num mono' + (M.utile != null && M.utile < 0 ? ' bad' : '') + '">' + (M.utile != null ? eurR(M.utile) + '<span class="osub">' + esc(M.utileTipo) + '</span>' : '<span class="osub">' + (M.prezzo == null ? 'senza prezzo' : M.chiusa ? (M.prezzoDubbio ? 'prezzo incompleto' : '—') : 'senza budget') + '</span>') + '</td>'
         + '<td class="num mono">' + (M.marg != null ? Math.round(M.marg * 100) + '%' : '—') + '</td></tr>';
     });
     h += '</tbody></table></div>';
@@ -4296,7 +4317,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
       + 'Il <b>listino</b> porta ogni costo all\'anno corrente e al successivo con gli indici qui sotto e applica il margine. '
       + (S.cons && S.cons.agg ? 'Consuntivo dall\'estrazione del ' + esc(itFull(S.cons.agg)) + '.' : '<b>Consuntivo non ancora caricato.</b>')
       + ((S.cons && S.cons.note && S.cons.note.length) ? ' <span class="osub">Controlli sull\'estrazione: ' + S.cons.note.map(esc).join('; ') + '.</span>' : '') + '</div>';
-    h += bdgExportHtml() + bdgParamHtml();
+    h += bdgExportHtml() + bdgFileHtml() + bdgParamHtml();
     if (!nsel) return h + bdgRiepilogo(list);
     h += '<div class="seg sub" style="margin:0 0 12px"><button data-bdgv="scost" aria-pressed="' + (bdgVista === 'scost') + '">Scostamento dal budget</button><button data-bdgv="listino" aria-pressed="' + (bdgVista === 'listino') + '">Listino indicizzato e prezzo</button></div>';
     list.forEach(function(c){
@@ -4366,9 +4387,10 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     var iu = document.getElementById('bdg-hu-' + code), io = document.getElementById('bdg-ho-' + code);
     return {hu: iu ? numIt(iu.value) : null, ho: io ? numIt(io.value) : null, presente: !!(iu || io)};
   }
+  function bdgLeggiPrezzo(code){ var i = document.getElementById('bdg-prz-' + code); return i ? numIt(i.value) : null; }
   /* le modifiche non salvate sopravvivono a un ridisegno della scheda */
   function bdgCattura(){
-    Object.keys(BDG_DIRTY).forEach(function(code){ var nodi = bdgLeggiEditor(code); if (nodi) BDG_PEND[code] = {nodi: nodi, ore: bdgLeggiOre(code)}; });
+    Object.keys(BDG_DIRTY).forEach(function(code){ var nodi = bdgLeggiEditor(code); if (nodi) BDG_PEND[code] = {nodi: nodi, ore: bdgLeggiOre(code), prezzo: bdgLeggiPrezzo(code)}; });
     BDG_DIRTY = {};
   }
   function bdgRirender(){ bdgCattura(); dashboard(); }
@@ -4382,6 +4404,9 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     else fonte = prima.fonte && !conferma ? prima.fonte : 'inserito da Danilo dalla pagina';
     c.bdg = {nodi: nodi, hu: ore.hu, ho: ore.ho, conf: conferma ? true : !!prima.conf, agg: isoOggi(), fonte: fonte, confd: conferma ? isoOggi() : (prima.confd || null),
       rif: M.proposta && M.rif.length ? M.rif.map(function(s){ return s.code; }) : (prima.rif || null)};
+    /* R26: il prezzo di vendita scritto nell'editor finisce in c.eco.valore (da qui non si cancella mai) */
+    var prz = bdgLeggiPrezzo(code);
+    if (prz != null && prz > 0 && !(c.eco && Number(c.eco.valore) === prz)){ c.eco = (c.eco && typeof c.eco === 'object') ? c.eco : {}; c.eco.valore = prz; if (!c.eco.val) c.eco.val = 'EUR'; c.eco.valFonte = 'scritto da Danilo nella scheda Budget il ' + isoOggi(); }
     delete BDG_PEND[code]; delete BDG_DIRTY[code];
     salvaSubito(msg || 'budget salvato'); dashboard();
     var el = document.getElementById('bdg-' + code); if (el) el.scrollIntoView({block: 'start', behavior: 'smooth'});

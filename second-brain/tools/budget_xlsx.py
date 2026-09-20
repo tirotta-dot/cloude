@@ -22,6 +22,7 @@ altrimenti (solo evase) dalle fatture al cliente, altrimenti dall'ordine cliente
 
   budget_xlsx.py --state state.json --cm SBC-15-26 --out export/          → export/budget-SBC-15-26.xlsx
   budget_xlsx.py --state state.json --all --out export/                   → export/budget-tutte.xlsx (Riepilogo + un foglio per commessa in corso)
+  budget_xlsx.py --state state.json --all --compatto --out export/        → export/budget-riepilogo.xlsx (solo Riepilogo + Parametri: piccolo, per Drive)
   budget_xlsx.py --state state.json --cm A --cm B --out file.xlsx
   budget_xlsx.py --state state.json --cm SBC-15-26 --json                 → modello in JSON (per i controlli incrociati con la pagina)
   budget_xlsx.py --state state.json --json-all                            → modello di tutte le commesse (aperte ed evase) in JSON
@@ -442,7 +443,8 @@ def modello(S, c, Y, rif_mode=None):
     fat_cli = num(ric.get('fat')) if js_truthy(ric.get('fat')) else None
     if valore is not None:
         prezzo, fonte = valore, 'contratto'
-    elif c.get('ev') and fat_cli is not None and fat_cli > 0:
+    elif c.get('ev') and fat_cli is not None and fat_cli > 0 and (oc is None or fat_cli >= oc):
+        # R26 (20/09): per le evase vale il maggiore tra fatture al cliente e ordine cliente (le fatture nell'estrazione sono spesso parziali)
         prezzo, fonte = fat_cli, 'fatture al cliente nel gestionale'
     elif oc is not None:
         prezzo, fonte = oc, 'ordine cliente nel gestionale'
@@ -455,11 +457,16 @@ def modello(S, c, Y, rif_mode=None):
          'ore': {'bU': bU, 'bO': bO, 'cU': cU, 'cO': cO, 'cE': cE, 'cEeur': cEeur, 'bEur': ore_bdg, 'cEur': ore_cons, 'hCm': h_cm},
          'prezzo': prezzo, 'prezzoFonte': fonte, 'oc': oc, 'valore': valore, 'fatCli': fat_cli, 'haBudget': ha_budget, 'chiusa': bool(c.get('ev')),
          'budgetTot': tot['ext'] + ore_bdg, 'costoOggi': tot['imp'] + ore_cons}
+    # R26: un prezzo preso dal gestionale sotto la metà dei costi consuntivi è quasi certamente incompleto (fatture
+    # registrate altrove): niente utile finché Danilo non scrive il prezzo; fatture e ordine cliente lontani >30% → da confermare
+    M['prezzoDubbio'] = bool(c.get('ev') and prezzo is not None and fonte != 'contratto' and M['costoOggi'] > 0 and prezzo < 0.5 * M['costoOggi'])
+    M['prezzoDaConfermare'] = bool(c.get('ev') and fonte != 'contratto' and fat_cli is not None and fat_cli > 0 and oc is not None
+                                   and abs(fat_cli - oc) / max(fat_cli, oc) > 0.3)
     # utile: a budget per le commesse in corso, consuntivo per le evase (R25)
     M['utileB'] = prezzo - M['budgetTot'] if prezzo is not None and ha_budget else None
     M['utileO'] = prezzo - M['costoOggi'] if prezzo is not None else None
     if c.get('ev'):
-        M['utile'] = M['utileO']
+        M['utile'] = None if M['prezzoDubbio'] else M['utileO']
         M['utileTipo'] = 'consuntivo' if M['utile'] is not None else None
     else:
         M['utile'] = M['utileB']
@@ -492,6 +499,10 @@ def prezzo_info(M):
         t += ' · fatturato al cliente ' + eur_r(M['fatCli'])
     if fonte == 'fatture al cliente nel gestionale' and M['oc'] is not None and abs(M['oc'] - p) / p > 0.3:
         t += ' · attenzione: ordine cliente ' + eur_r(M['oc'])
+    if M.get('prezzoDubbio'):
+        t += ' · probabilmente incompleto: sotto la metà dei costi consuntivi, scrivi il prezzo di vendita'
+    elif M.get('prezzoDaConfermare'):
+        t += ' · da confermare'
     return t
 
 
@@ -708,8 +719,8 @@ def scrivi_commessa(wb, S, M, P, usati):
     ws.conditional_formatting.add('H%d:H%d' % (ru, rs), CellIsRule(operator='greaterThan', formula=['0'], fill=st['bad']))
 
     # ---- riquadro riepilogo (righe 4-10), con formule sulla tabella e sul blocco ore; etichette come l'export della pagina
-    ws['A4'], ws['B4'] = 'Prezzo di vendita', M['prezzo'] if M['prezzo'] is not None else ''
-    ws['C4'] = prezzo_info(M)
+    ws['A4'], ws['B4'] = 'Prezzo di vendita', M['prezzo'] if M['prezzo'] is not None and not M.get('prezzoDubbio') else ''
+    ws['C4'] = prezzo_info(M) if not M.get('prezzoDubbio') else ('nel gestionale %s (%s), probabilmente incompleto: scrivi qui il prezzo di vendita e l\'utile si calcola' % (eur_r(M['prezzo']), M['prezzoFonte']))
     ws['A5'], ws['B5'] = 'Budget totale commessa', '=C{0}+C{1}'.format(rt, rs)
     ws['C5'] = '=IF(OR(B5>0,B{1}>0),"esterni "&FIXED(C{0},0)&" € + ore "&FIXED(C{1},0)&" €"{2},"{3}")'.format(
         rt, rs, '&" · proposto da %s, da confermare"' % ', '.join(s['code'] for s in M['rif']) if prop_rif else '', 'commessa evasa: contano i costi consuntivi' if M['chiusa'] else 'nessun budget inserito')
@@ -783,7 +794,7 @@ def scrivi_riepilogo(wb, S, MM):
         vals = [c['code'], c.get('cliente') or '', c.get('desc') or '', len(M['nodi']), stato_nodi(M),
                 M['prezzo'] if M['prezzo'] is not None else '', M['prezzoFonte'] or '', t['ext'], M['ore']['bEur'], M['budgetTot'], t['fat'] + t['con'] + t['alt'], t['ddt'], t['ord'], t['imp'],
                 M['ore']['cEur'], M['costoOggi'], t['sc'] if t['ext'] > 0 else '', (t['pct'] - 1) if t['pct'] is not None else '',
-                M['utile'] if M['utile'] is not None else '', M['utileTipo'] or '', M['marg'] if M['marg'] is not None else '',
+                M['utile'] if M['utile'] is not None else '', M['utileTipo'] or ('prezzo incompleto' if M.get('prezzoDubbio') else ''), M['marg'] if M['marg'] is not None else '',
                 M['utileB'] if M['utileB'] is not None else '', M['utileO'] if M['utileO'] is not None else '']
         for j, v in enumerate(vals, start=1):
             cell = ws.cell(row, j, v)
@@ -827,7 +838,8 @@ def lista_commesse(S, codici):
     return [by[k] for k in codici]
 
 
-def costruisci(S, codici, Y=None, riepilogo=None, rif_mode=None):
+def costruisci(S, codici, Y=None, riepilogo=None, rif_mode=None, compatto=False):
+    """compatto=True: solo Riepilogo + Parametri (niente fogli per commessa): file piccolo, adatto al caricamento automatico su Drive."""
     import openpyxl
     Y = Y or dt.date.today().year
     cf = bcfg(S)
@@ -837,9 +849,10 @@ def costruisci(S, codici, Y=None, riepilogo=None, rif_mode=None):
     wb.remove(wb.active)
     P = scrivi_parametri(wb, cf, Y, S)
     usati = {'Parametri', 'Riepilogo'}
-    for M in MM:
-        scrivi_commessa(wb, S, M, P, usati)
-    if riepilogo or (riepilogo is None and len(MM) != 1):
+    if not compatto:
+        for M in MM:
+            scrivi_commessa(wb, S, M, P, usati)
+    if compatto or riepilogo or (riepilogo is None and len(MM) != 1):
         scrivi_riepilogo(wb, S, MM)
     wb.move_sheet('Parametri', offset=len(wb.sheetnames))
     wb.active = 0
@@ -872,6 +885,7 @@ def main():
     ap.add_argument('--rif', help='commessa chiusa di riferimento per la proposta (default: media delle simili)')
     ap.add_argument('--json', action='store_true', help='stampa il modello calcolato in JSON invece di scrivere il file')
     ap.add_argument('--json-all', action='store_true', help='modello in JSON di tutte le commesse dello stato (aperte ed evase), per i controlli incrociati')
+    ap.add_argument('--compatto', action='store_true', help='solo Riepilogo e Parametri, senza i fogli per commessa (file piccolo per Drive)')
     a = ap.parse_args()
     if not a.all and not a.cm and not a.json_all:
         ap.error('indica --cm CODICE (anche più volte), --all oppure --json-all')
@@ -884,11 +898,11 @@ def main():
         return
     if not a.out:
         ap.error('--out è obbligatorio senza --json')
-    wb, MM = costruisci(S, codici, a.anno, rif_mode=a.rif)
+    wb, MM = costruisci(S, codici, a.anno, rif_mode=a.rif, compatto=a.compatto)
     out = a.out
     if os.path.isdir(out) or out.endswith('/') or not out.lower().endswith('.xlsx'):
         os.makedirs(out, exist_ok=True)
-        nome = 'budget-tutte.xlsx' if codici is None else 'budget-%s.xlsx' % re.sub(r'[^A-Za-z0-9_-]+', '_', '-'.join(codici))[:60]
+        nome = ('budget-riepilogo.xlsx' if a.compatto else 'budget-tutte.xlsx') if codici is None else 'budget-%s.xlsx' % re.sub(r'[^A-Za-z0-9_-]+', '_', '-'.join(codici))[:60]
         out = os.path.join(out, nome)
     wb.save(out)
     print('%s · %d commesse · fogli: %s' % (out, len(MM), ', '.join(wb.sheetnames[:6]) + (' …' if len(wb.sheetnames) > 6 else '')))
