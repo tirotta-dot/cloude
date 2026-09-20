@@ -4239,7 +4239,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
   function bdgEditorHtml(M){
     var code = M.c.code, gest = consNodi(code).filter(function(x){ return x !== '-'; }), pend = BDG_PEND[code] || null;
     var nodi = pend ? pend.nodi : M.nodi, hu = pend ? pend.ore.hu : (M.ore.hCm.u || ''), ho = pend ? pend.ore.ho : (M.ore.hCm.o || '');
-    var h = '<details class="bdged" id="bdged-' + esc(code) + '"' + (pend || (!M.chiusa && (M.proposta || !M.conf)) ? ' open' : '') + '><summary>Nodi e budget di ' + esc(code) + ' · modifica qui' + (M.chiusa ? ' (commessa evasa: il budget resta solo come memoria)' : '') + '</summary>'
+    var h = '<details class="bdged" id="bdged-' + esc(code) + '"' + (pend || (!M.chiusa && !M.conf && !M.nodi.length) ? ' open' : '') + '><summary>Nodi e budget di ' + esc(code) + ' · modifica qui' + (M.chiusa ? ' (commessa evasa: il budget resta solo come memoria)' : '') + '</summary>'
       + '<table><thead><tr><th>Nodo</th><th>Nel gestionale (alias, separati da virgola)</th><th>Budget esterno €</th><th>Ore ufficio</th><th>Ore produzione</th><th>Note</th><th></th></tr></thead><tbody>';
     nodi.forEach(function(n){ h += bdgRigaEd(code, n); });
     h += '</tbody></table><datalist id="bdgdl-' + esc(code) + '">' + gest.map(function(x){ return '<option value="' + esc(x) + '">'; }).join('') + '</datalist>'
@@ -4251,7 +4251,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
       + '<div class="actions"><button class="chip" data-bdgadd="' + esc(code) + '">+ nodo</button>'
       + '<button class="chip" data-bdgprop="' + esc(code) + '">Aggiungi i nodi del gestionale mancanti</button>'
       + '<button class="btn" data-bdgsave="' + esc(code) + '">Salva budget</button>'
-      + (M.conf ? '' : '<button class="btn" data-bdgconf="' + esc(code) + '">Salva e confermo i nodi</button>')
+      + (M.conf ? '' : '<button class="btn" data-bdgconf="' + esc(code) + '">' + (M.proposta && M.rif.length ? 'Confermo nodi e budget proposto' : 'Confermo questi nodi') + '</button>')
       + '<span class="cm-hint" id="bdgmsg-' + esc(code) + '">' + (pend ? '<b>modifiche non ancora salvate</b>' : M.c.bdg && M.c.bdg.agg ? 'ultima modifica ' + esc(itFull(M.c.bdg.agg)) + (M.c.bdg.fonte ? ' · ' + esc(M.c.bdg.fonte) : '') : 'budget mai salvato') + '</span></div></details>';
     return h;
   }
@@ -4421,7 +4421,10 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     if (!nodi) nodi = M.nodi.map(function(n){ return {id: n.id, n: n.n, d: n.d || '', al: n.al || [], ext: n.ext, hu: n.hu, ho: n.ho, note: n.note || ''}; });
     if (!ore.presente && M.ore && M.ore.hCm) ore = {hu: M.ore.hCm.u || null, ho: M.ore.hCm.o || null};
     var prima = c.bdg || {}, fonte;
-    if (M.proposta && M.rif.length) fonte = 'proposto dalle commesse ' + M.rif.map(function(s){ return s.code; }).join(', ') + ' (indicizzato al ' + M.Y + ')' + (conferma ? ', confermato da Danilo' : ', modificato da Danilo');
+    /* R28: «modificato» solo se le righe salvate differiscono davvero dalla proposta */
+    var base = M.nodi || [], cambiato = nodi.length !== base.length || nodi.some(function(n, i){ var b = base[i]; return !b || String(n.n || '') !== String(b.n || '') || bdgNum(n.ext) !== bdgNum(b.ext) || bdgNum(n.hu) !== bdgNum(b.hu) || bdgNum(n.ho) !== bdgNum(b.ho); })
+      || (M.ore && M.ore.hCm && (bdgNum(ore.hu) !== bdgNum(M.ore.hCm.u) || bdgNum(ore.ho) !== bdgNum(M.ore.hCm.o)));
+    if (M.proposta && M.rif.length) fonte = 'proposto dalle commesse ' + M.rif.map(function(s){ return s.code; }).join(', ') + ' (indicizzato al ' + M.Y + ')' + (conferma ? (cambiato ? ', modificato e confermato da Danilo' : ', confermato da Danilo') : (cambiato ? ', modificato da Danilo' : ', salvato da Danilo'));
     else fonte = prima.fonte && !conferma ? prima.fonte : 'inserito da Danilo dalla pagina';
     c.bdg = {nodi: nodi, hu: ore.hu, ho: ore.ho, conf: conferma ? true : !!prima.conf, agg: isoOggi(), ts: new Date().toISOString(), fonte: fonte, confd: conferma ? isoOggi() : (prima.confd || null),
       rif: M.proposta && M.rif.length ? M.rif.map(function(s){ return s.code; }) : (prima.rif || null)};
