@@ -1304,6 +1304,8 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     if (r) JSON.parse(r).forEach(function(k){ sel[k] = true; }); }catch(e){} }
 
   function dashboard(){
+    /* R27 (20/09): le modifiche non salvate dell'editor del budget sopravvivono a qualunque ridisegno (ricerca, filtri, picker, cambio scheda) */
+    if (typeof BDG_DIRTY === 'object' && BDG_DIRTY && Object.keys(BDG_DIRTY).length) bdgCattura();
     var capi = [], paesi = [];
     CMv().forEach(function(c){
       if (c.capo && capi.indexOf(c.capo) < 0) capi.push(c.capo);
@@ -2697,7 +2699,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
         contesto: 'Creata dal Calendario del Second Brain · filtro «_F_»'
           .replace('_F_', calF)
       }).then(function(){
-        esito.textContent = '✓ richiesta registrata: l’invito con Meet parte entro un’ora';
+        esito.textContent = '✓ richiesta registrata: l’invito con Meet parte al prossimo giro della routine (8:10, 13:10 o 17:10, lunedì–sabato)';
         riuTsel = {};
         var f = document.getElementById('riuform');
         if (f) f.reset();
@@ -4046,9 +4048,13 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     if (nO){ hu = Math.round(sU / nO); ho = Math.round(sO / nO); }
     return {nodi: out, rif: rif, simili: simili, mode: mode, tot: tot, hu: hu, ho: ho, nOre: nO};
   }
+  /* alias di un nodo sempre come elenco (uno stato scritto a mano potrebbe avere una stringa) */
+  function bdgAl(b){ var a = b && b.al; return Array.isArray(a) ? a : (a == null || a === '') ? [] : String(a).split(',').map(function(x){ return x.trim(); }).filter(Boolean); }
+  /* numero da un valore dello stato: numero, oppure testo all'italiana («1.500.000», «1500000,50»); null se non è un numero positivo */
+  function bdgNum(v){ if (v == null || v === '') return null; var x = typeof v === 'number' ? v : numIt(String(v)); x = Number(x); return (isFinite(x) && x > 0) ? x : null; }
   /* nodo del gestionale → id del nodo a budget: '-' solo tramite l'alias esplicito '-' */
   function bdgMappa(c, nodi){
-    var m = {}, norm = nodi.map(function(b){ return {id: b.id, n: normNodo(b.n), al: (b.al || []).map(normNodo).filter(Boolean), meno: (b.al || []).indexOf('-') >= 0}; });
+    var m = {}, norm = nodi.map(function(b){ return {id: b.id, n: normNodo(b.n), al: bdgAl(b).map(normNodo).filter(Boolean), meno: bdgAl(b).indexOf('-') >= 0}; });
     consNodi(c.code).forEach(function(nd){
       if (nd === '-'){ norm.forEach(function(b){ if (!m[nd] && b.meno) m[nd] = b.id; }); return; }
       var k = normNodo(nd); if (!k) return;
@@ -4100,7 +4106,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     var ore = c.ore || {}, cU = Number(ore.uff) || 0, cO = Number(ore.off) || 0, cE = Number(ore.est) || 0, cEeur = Number(ore.estEur) || 0;
     var oreCons = cU * tU + cO * tO + cEeur;
     var bU = tot.hu + hCm.u, bO = tot.ho + hCm.o, oreBdg = bU * tU + bO * tO;
-    var valore = (c.eco && c.eco.valore) ? Number(c.eco.valore) : null, oc = (cc.ric && cc.ric.oc) ? Number(cc.ric.oc) : null, fatCli = (cc.ric && cc.ric.fat) ? Number(cc.ric.fat) : null;
+    var valore = bdgNum(c.eco && c.eco.valore), oc = (cc.ric && cc.ric.oc) ? Number(cc.ric.oc) : null, fatCli = (cc.ric && cc.ric.fat) ? Number(cc.ric.fat) : null;
     /* R26 (20/09): per le evase vale il maggiore tra fatture al cliente e ordine cliente (nell'estrazione le fatture sono spesso parziali) */
     var prezzo, prezzoFonte;
     if (valore != null){ prezzo = valore; prezzoFonte = 'contratto'; }
@@ -4116,7 +4122,9 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     /* R26: un prezzo preso dal gestionale sotto la metà dei costi consuntivi è quasi certamente incompleto (fatture registrate
        altrove): niente utile finché Danilo non scrive il prezzo; fatture e ordine cliente lontani più del 30% → da confermare */
     m.prezzoDubbio = !!(c.ev && prezzo != null && prezzoFonte !== 'contratto' && m.costoOggi > 0 && prezzo < 0.5 * m.costoOggi);
-    m.prezzoDaConfermare = !!(c.ev && prezzoFonte !== 'contratto' && fatCli != null && fatCli > 0 && oc != null && Math.abs(fatCli - oc) / Math.max(fatCli, oc) > 0.3);
+    m.prezzoDaConfermare = !!(c.ev && prezzoFonte !== 'contratto' && prezzo != null && !m.prezzoDubbio
+      && ((fatCli != null && fatCli > 0 && oc != null && Math.abs(fatCli - oc) / Math.max(fatCli, oc) > 0.3)
+          || (prezzoFonte === 'fatture al cliente nel gestionale' && prezzo < m.costoOggi)));
     /* utile: a budget per le commesse in corso, consuntivo per le evase (R25) */
     m.utileB = (prezzo != null && haBudget) ? prezzo - m.budgetTot : null;
     m.utileO = prezzo != null ? prezzo - m.costoOggi : null;
@@ -4316,7 +4324,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     var h = '<div class="ore-wait" style="margin-bottom:14px"><b>Budget e consuntivo per nodo.</b> Il budget lo scrivi tu qui (costi esterni, ore ufficio e produzione per nodo); per una commessa nuova te lo propongo dalle commesse chiuse della stessa famiglia e lo confermi. Il consuntivo arriva dal gestionale per nodo e anno: <b>fatturato</b> (fatture e costi contabilizzati), <b>consegnato</b> (DDT non ancora fatturati), <b>ordinato</b> (ordini aperti). Impegnato = la somma. <b>Utile</b>: a budget per le commesse in corso (prezzo − budget), consuntivo per le evase (prezzo − costi). '
       + 'Il <b>listino</b> porta ogni costo all\'anno corrente e al successivo con gli indici qui sotto e applica il margine. '
       + (S.cons && S.cons.agg ? 'Consuntivo dall\'estrazione del ' + esc(itFull(S.cons.agg)) + '.' : '<b>Consuntivo non ancora caricato.</b>')
-      + ((S.cons && S.cons.note && S.cons.note.length) ? ' <span class="osub">Controlli sull\'estrazione: ' + S.cons.note.map(esc).join('; ') + '.</span>' : '') + '</div>';
+      + ((S.cons && S.cons.note && S.cons.note.length) ? ' <span class="osub">Controlli sull\'estrazione: ' + [].concat(S.cons.note).map(esc).join('; ') + '.</span>' : '') + '</div>';
     h += bdgExportHtml() + bdgFileHtml() + bdgParamHtml();
     if (!nsel) return h + bdgRiepilogo(list);
     h += '<div class="seg sub" style="margin:0 0 12px"><button data-bdgv="scost" aria-pressed="' + (bdgVista === 'scost') + '">Scostamento dal budget</button><button data-bdgv="listino" aria-pressed="' + (bdgVista === 'listino') + '">Listino indicizzato e prezzo</button></div>';
@@ -4366,12 +4374,12 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
   function bdgRows(key){ var M = BDG_CACHE[key]; if (!M) return null; return key === '*' ? bdgRigheRiep(M) : bdgRighe(M); }
 
   /* ---- editor: lettura righe e salvataggio ---- */
-  function bdgLeggiEditor(code){
+  function bdgLeggiEditor(code, anchevuote){
     var ed = document.getElementById('bdged-' + code); if (!ed) return null;
     var nodi = [], k = 0;
     ed.querySelectorAll('tbody tr').forEach(function(tr){
       var g = function(f){ var i = tr.querySelector('input[data-f="' + f + '"]'); return i ? i.value.trim() : ''; };
-      var nome = g('n'); if (!nome) return;
+      var nome = g('n'); if (!nome && !(anchevuote && (g('ext') || g('hu') || g('ho') || g('al') || g('note')))) return;
       k++;
       nodi.push({id: tr.getAttribute('data-bid') || ('b' + k), n: nome, d: '', al: g('al').split(',').map(function(x){ return x.trim(); }).filter(function(x){ return x === '-' || normNodo(x); }),
         ext: numIt(g('ext')), hu: numIt(g('hu')), ho: numIt(g('ho')), note: g('note')});
@@ -4390,7 +4398,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
   function bdgLeggiPrezzo(code){ var i = document.getElementById('bdg-prz-' + code); return i ? numIt(i.value) : null; }
   /* le modifiche non salvate sopravvivono a un ridisegno della scheda */
   function bdgCattura(){
-    Object.keys(BDG_DIRTY).forEach(function(code){ var nodi = bdgLeggiEditor(code); if (nodi) BDG_PEND[code] = {nodi: nodi, ore: bdgLeggiOre(code), prezzo: bdgLeggiPrezzo(code)}; });
+    Object.keys(BDG_DIRTY).forEach(function(code){ var nodi = bdgLeggiEditor(code, true); if (nodi) BDG_PEND[code] = {nodi: nodi, ore: bdgLeggiOre(code), prezzo: bdgLeggiPrezzo(code)}; });
     BDG_DIRTY = {};
   }
   function bdgRirender(){ bdgCattura(); dashboard(); }
@@ -4402,11 +4410,11 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     var prima = c.bdg || {}, fonte;
     if (M.proposta && M.rif.length) fonte = 'proposto dalle commesse ' + M.rif.map(function(s){ return s.code; }).join(', ') + ' (indicizzato al ' + M.Y + ')' + (conferma ? ', confermato da Danilo' : ', modificato da Danilo');
     else fonte = prima.fonte && !conferma ? prima.fonte : 'inserito da Danilo dalla pagina';
-    c.bdg = {nodi: nodi, hu: ore.hu, ho: ore.ho, conf: conferma ? true : !!prima.conf, agg: isoOggi(), fonte: fonte, confd: conferma ? isoOggi() : (prima.confd || null),
+    c.bdg = {nodi: nodi, hu: ore.hu, ho: ore.ho, conf: conferma ? true : !!prima.conf, agg: isoOggi(), ts: new Date().toISOString(), fonte: fonte, confd: conferma ? isoOggi() : (prima.confd || null),
       rif: M.proposta && M.rif.length ? M.rif.map(function(s){ return s.code; }) : (prima.rif || null)};
     /* R26: il prezzo di vendita scritto nell'editor finisce in c.eco.valore (da qui non si cancella mai) */
     var prz = bdgLeggiPrezzo(code);
-    if (prz != null && prz > 0 && !(c.eco && Number(c.eco.valore) === prz)){ c.eco = (c.eco && typeof c.eco === 'object') ? c.eco : {}; c.eco.valore = prz; if (!c.eco.val) c.eco.val = 'EUR'; c.eco.valFonte = 'scritto da Danilo nella scheda Budget il ' + isoOggi(); }
+    if (prz != null && prz > 0 && !(c.eco && Number(c.eco.valore) === prz)){ c.eco = (c.eco && typeof c.eco === 'object') ? c.eco : {}; c.eco.valore = prz; if (!c.eco.val) c.eco.val = 'EUR'; c.eco.valFonte = 'scritto da Danilo nella scheda Budget il ' + isoOggi(); c.eco.valTs = new Date().toISOString(); }
     delete BDG_PEND[code]; delete BDG_DIRTY[code];
     salvaSubito(msg || 'budget salvato'); dashboard();
     var el = document.getElementById('bdg-' + code); if (el) el.scrollIntoView({block: 'start', behavior: 'smooth'});
@@ -4466,7 +4474,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
       ev.preventDefault();
       var u = a.getAttribute('data-bdgfile'), nome = u.split('/').pop(), t0 = a.textContent;
       a.textContent = 'scarico…';
-      fetch(u).then(function(r){ if (!r.ok) throw new Error('risposta ' + r.status); return r.text(); })
+      fetch(u).then(function(r){ if (!r.ok) throw new Error('risposta ' + r.status); return /\.csv$/i.test(u) ? r.text() : r.arrayBuffer(); })
         .then(function(txt){ return DLc.save({filename: nome, data: txt}); })
         .then(function(){ a.textContent = 'scaricato'; setTimeout(function(){ a.textContent = t0; }, 3000); })
         .catch(function(err){ a.textContent = (err && err.code === 'declined') ? 'annullato' : 'errore: ' + ((err && (err.code || err.message)) || err); setTimeout(function(){ a.textContent = t0; }, 4000); });
@@ -4730,7 +4738,8 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
         e[b.id] = {tipo:'billing', d:!!b.d, dd:b.dd || null, n:b.n || '', nq:b.nq || []};
       });
       var cm = (S.commesse || []).map(function(c){
-        return {code:c.code, ev:!!c.ev, evd:c.evd || null, sp:!!c.sp, spd:c.spd || null, bdg:c.bdg || null};
+        return {code:c.code, ev:!!c.ev, evd:c.evd || null, sp:!!c.sp, spd:c.spd || null, bdg:c.bdg || null,
+          eco:(c.eco && c.eco.valTs) ? {valore:c.eco.valore, val:c.eco.val || null, valFonte:c.eco.valFonte || null, valTs:c.eco.valTs} : null};
       });
       localStorage.setItem(LS, JSON.stringify({
         v: 2,
@@ -4817,7 +4826,11 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
           if (x.ev){ c.ev = true; c.evd = x.evd; } else { delete c.ev; delete c.evd; }
           segna((x.ev ? 'evasa: ' : 'riattivata: ') + c.code);
         }
-        if (x.bdg && (!c.bdg || (x.bdg.agg || '') > (c.bdg.agg || ''))){ c.bdg = x.bdg; segna('budget: ' + c.code); }
+        if (x.bdg && (!c.bdg || (x.bdg.ts || x.bdg.agg || '') > (c.bdg.ts || c.bdg.agg || ''))){ c.bdg = x.bdg; segna('budget: ' + c.code); }
+        if (x.eco && x.eco.valTs && (!c.eco || !c.eco.valTs || x.eco.valTs > c.eco.valTs)){
+          c.eco = (c.eco && typeof c.eco === 'object') ? c.eco : {};
+          c.eco.valore = x.eco.valore; if (x.eco.val) c.eco.val = x.eco.val; c.eco.valFonte = x.eco.valFonte; c.eco.valTs = x.eco.valTs; segna('prezzo: ' + c.code);
+        }
         if (!!c.sp !== !!x.sp){
           if (x.sp){ c.sp = true; c.spd = x.spd; } else { delete c.sp; delete c.spd; }
           segna((x.sp ? 'sospesa: ' : 'ripresa: ') + c.code);

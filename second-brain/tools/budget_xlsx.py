@@ -335,8 +335,8 @@ def proposta(S, cf, c, Y, rif_mode=None):
 def mappa(S, c, nodi):
     """Nodo del gestionale → id del nodo a budget: '-' solo tramite l'alias esplicito '-'."""
     m = {}
-    norm = [{'id': b['id'], 'n': norm_nodo(b.get('n')), 'al': [a for a in (norm_nodo(a) for a in (b.get('al') or [])) if a],
-             'meno': '-' in (b.get('al') or [])} for b in nodi]
+    norm = [{'id': b.get('id') or 'b%d' % (i + 1), 'n': norm_nodo(b.get('n')), 'al': [a for a in (norm_nodo(a) for a in (b.get('al') or [])) if a],
+             'meno': '-' in (b.get('al') or [])} for i, b in enumerate(nodi)]
     for nd in cons_nodi(S, c['code']):
         if nd == '-':
             for b in norm:
@@ -367,6 +367,9 @@ def modello(S, c, Y, rif_mode=None):
     bdg = c.get('bdg') if isinstance(c.get('bdg'), dict) else {}
     salvati = js_truthy(bdg.get('nodi'))
     nodi = bdg.get('nodi') if salvati else None
+    if salvati:   # tolleranza per uno stato scritto a mano: id mancante, alias come testo
+        nodi = [dict(b, id=b.get('id') or 'b%d' % (i + 1), al=(b.get('al') if isinstance(b.get('al'), list) else [x.strip() for x in str(b.get('al') or '').split(',') if x.strip()]))
+                for i, b in enumerate(nodi) if isinstance(b, dict)]
     prop, P = not salvati, None
     if prop:
         P = proposta(S, cf, c, Y, rif_mode)
@@ -460,8 +463,9 @@ def modello(S, c, Y, rif_mode=None):
     # R26: un prezzo preso dal gestionale sotto la metà dei costi consuntivi è quasi certamente incompleto (fatture
     # registrate altrove): niente utile finché Danilo non scrive il prezzo; fatture e ordine cliente lontani >30% → da confermare
     M['prezzoDubbio'] = bool(c.get('ev') and prezzo is not None and fonte != 'contratto' and M['costoOggi'] > 0 and prezzo < 0.5 * M['costoOggi'])
-    M['prezzoDaConfermare'] = bool(c.get('ev') and fonte != 'contratto' and fat_cli is not None and fat_cli > 0 and oc is not None
-                                   and abs(fat_cli - oc) / max(fat_cli, oc) > 0.3)
+    M['prezzoDaConfermare'] = bool(c.get('ev') and fonte != 'contratto' and prezzo is not None and not M['prezzoDubbio']
+                                   and ((fat_cli is not None and fat_cli > 0 and oc is not None and abs(fat_cli - oc) / max(fat_cli, oc) > 0.3)
+                                        or (fonte == 'fatture al cliente nel gestionale' and prezzo < M['costoOggi'])))
     # utile: a budget per le commesse in corso, consuntivo per le evase (R25)
     M['utileB'] = prezzo - M['budgetTot'] if prezzo is not None and ha_budget else None
     M['utileO'] = prezzo - M['costoOggi'] if prezzo is not None else None
@@ -729,20 +733,20 @@ def scrivi_commessa(wb, S, M, P, usati):
     ws['A7'], ws['B7'] = 'Scostamento esterni', '=IF(C{0}>0,K{0}-C{0},"")'.format(rt)
     ws['C7'] = '=IF(C{0}>0,TEXT(K{0}/C{0}-1,"+0%;-0%")&" sul budget esterno{1}","{2}")'.format(
         rt, ' proposto' if prop_rif else '', 'commessa evasa: nessun budget da confrontare' if M['chiusa'] else 'serve il budget per nodo')
-    utile_b = '=IF(OR(B4="",AND(B5<=0,B{0}<=0)),"",B4-B5)'.format(rs)   # utile a budget: solo con prezzo e budget (esterni o ore)
-    utile_o = '=IF(B4="","",B4-B6)'                                      # utile con i costi a oggi / consuntivi
+    utile_b = '=IF(OR(B4="",B4<=0,AND(B5<=0,B{0}<=0)),"",B4-B5)'.format(rs)   # utile a budget: solo con prezzo e budget (esterni o ore)
+    utile_o = '=IF(OR(B4="",B4<=0),"",B4-B6)'                                      # utile con i costi a oggi / consuntivi
     ws['A8'] = utile_label(M)
     if M['chiusa']:
         ws['B8'] = utile_o
-        ws['C8'] = '=IF(B4="","manca il prezzo di vendita","margine "&TEXT(B8/B4,"0%")&" sul prezzo · prezzo − costi consuntivi (impegnato + ore)")'
+        ws['C8'] = '=IF(OR(B4="",B4<=0),"manca il prezzo di vendita","margine "&TEXT(B8/B4,"0%")&" sul prezzo · prezzo − costi consuntivi (impegnato + ore)")'
     else:
         ws['B8'] = utile_b
-        ws['C8'] = '=IF(B4="","manca il prezzo di vendita",IF(B8="","serve il budget: inseriscilo o conferma quello proposto","margine "&TEXT(B8/B4,"0%")&" sul prezzo{0} · con i soli costi a oggi "&FIXED(B4-B6,0)&" € ("&TEXT((B4-B6)/B4,"0%")&")"))'.format(
+        ws['C8'] = '=IF(OR(B4="",B4<=0),"manca il prezzo di vendita",IF(B8="","serve il budget: inseriscilo o conferma quello proposto","margine "&TEXT(B8/B4,"0%")&" sul prezzo{0} · con i soli costi a oggi "&FIXED(B4-B6,0)&" € ("&TEXT((B4-B6)/B4,"0%")&")"))'.format(
             ' · sul budget proposto, da confermare' if prop_rif else '')
     ws['A9'], ws['B9'] = 'Utile a budget', utile_b
-    ws['C9'] = '=IF(B9="","serve prezzo e budget","margine "&TEXT(B9/B4,"0%")&" · prezzo − budget totale' + (' (memoria)' if M['chiusa'] else '') + '")'
+    ws['C9'] = '=IF(OR(B9="",B4<=0),"serve prezzo e budget","margine "&TEXT(B9/B4,"0%")&" · prezzo − budget totale' + (' (memoria)' if M['chiusa'] else '') + '")'
     ws['A10'], ws['B10'] = 'Utile con i costi a oggi', utile_o
-    ws['C10'] = '=IF(B10="","manca il prezzo di vendita","margine "&TEXT(B10/B4,"0%")&" · prezzo − costi a oggi (impegnato + ore)")'
+    ws['C10'] = '=IF(OR(B10="",B4<=0),"manca il prezzo di vendita","margine "&TEXT(B10/B4,"0%")&" · prezzo − costi a oggi (impegnato + ore)")'
     for r in range(4, 11):
         ws.cell(r, 1).font = st['norm']; ws.cell(r, 2).font = st['bold']; ws.cell(r, 2).number_format = EUR; ws.cell(r, 3).font = st['sub']
     ws['B4'].fill = st['in']
@@ -901,6 +905,8 @@ def main():
     if not a.out:
         ap.error('--out è obbligatorio senza --json')
     wb, MM = costruisci(S, codici, a.anno, rif_mode=a.rif, compatto=a.compatto)
+    if not MM:
+        sys.exit('nessuna commessa da esportare' + (' (nessuna commessa in corso nello stato)' if codici is None else ''))
     out = a.out
     if os.path.isdir(out) or out.endswith('/') or not out.lower().endswith('.xlsx'):
         os.makedirs(out, exist_ok=True)

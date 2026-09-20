@@ -111,6 +111,9 @@ def famiglia(code):
 def progetti_da_pkl(path):
     d = pickle.load(open(path, 'rb'))
     ix = {h: i for i, h in enumerate(d['hdr'])}
+    mancano = [c for c in ('Progetto', 'Cliente/fornitore', 'Ragione sociale', 'Data consegna') if c not in ix]
+    if mancano:
+        sys.exit('colonne mancanti nell\'estrazione: ' + ', '.join(mancano))
     P = defaultdict(lambda: {'n': 0, 'cli': Counter(), 'first': None, 'last': None, 'grafie': Counter()})
     for r in d['rows']:
         p = norm_code(r[ix['Progetto']])

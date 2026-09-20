@@ -23,6 +23,10 @@ ORD = {'alta': 3, 'media': 2, 'bassa': 1, 'nessuna': 0}
 def normalizza(t):
     """Ricava gg/base dal testo quando l'agente non li ha compilati bene."""
     gg = t.get('giorni')
+    try:
+        gg = int(float(gg)) if gg not in (None, '') else None
+    except (TypeError, ValueError):
+        gg = None
     base = (t.get('base') or 'non specificato').lower()
     testo = (t.get('testo') or '').lower()
     if gg is None or gg < 0:

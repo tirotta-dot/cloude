@@ -150,6 +150,8 @@ def chiave_articolo(riga):
     art = str(riga.get('Codice articolo') or '').strip().upper()
     if not art or art in ('#N/A', 'NONE'):
         art = re.sub(r'\s+', ' ', str(riga.get('Descrizione') or '').strip().upper())[:80]
+    if not forn and not art:
+        return None   # senza fornitore e articolo il confronto non ha senso: niente controlli su questa riga
     return (forn, art)
 
 
@@ -290,9 +292,17 @@ def finalizza(cm):
 
 
 def aggrega_csv(path):
+    """CSV aggregato (Progetto;Nodo;Anno;Stadio;Costo;Righe) prodotto dall'Apps Script: separatore riconosciuto
+    (; o ,), intestazione controllata; si ferma con un messaggio chiaro se il file non è quello atteso."""
     cm = {}
     with open(path, encoding='utf-8-sig', newline='') as f:
-        rd = csv.DictReader(f, delimiter=';')
+        prima = f.readline()
+        sep = ';' if prima.count(';') >= prima.count(',') else ','
+        f.seek(0)
+        rd = csv.DictReader(f, delimiter=sep)
+        mancano = [c for c in ('Progetto', 'Nodo', 'Anno', 'Stadio', 'Costo') if c not in (rd.fieldnames or [])]
+        if mancano:
+            sys.exit('il CSV %s non ha le colonne attese (%s): trovate %s' % (path, ', '.join(mancano), rd.fieldnames))
         for r in rd:
             p = norm_code(r.get('Progetto'))
             k = (r.get('Stadio') or '').strip()
@@ -351,6 +361,12 @@ def main():
         if not a.all:
             codici = {norm_code(c.get('code')) for c in stato.get('commesse', [])}
             cm = {k: v for k, v in cm.items() if k in codici}
+    if stato is not None:
+        prev_cm = (stato.get('cons') or {}).get('cm') or {}
+        if not cm:
+            sys.exit('consuntivo vuoto (0 commesse): lo stato NON viene toccato. Controlla separatore e intestazione del file.')
+        if prev_cm and len(cm) < 0.5 * len(prev_cm):
+            sys.exit('consuntivo troppo piccolo (%d commesse contro %d nello stato): lo stato NON viene toccato.' % (len(cm), len(prev_cm)))
     note = []
     if log.get('righe_senza_anno'):
         note.append('%d righe senza data contate nell\'anno %d' % (log['righe_senza_anno'], anno_agg))
@@ -367,6 +383,13 @@ def main():
         note.append('%d righe d\'ordine aperte con consegne o fatture dello stesso articolo (%.0f €): possibili consegne parziali' % (controlli['ordini_con_consegne']['righe'], controlli['ordini_con_consegne']['importo']))
     if controlli.get('contabilizzati_gemelli'):
         note.append('%d costi contabilizzati con una fattura fornitore uguale nello stesso mese (%.0f €): possibili doppioni' % (controlli['contabilizzati_gemelli']['righe'], controlli['contabilizzati_gemelli']['importo']))
+    if a.csv and stato is not None and not controlli:
+        # dal foglio aggregato i controlli non si possono rifare: si conservano quelli dell'ultima estrazione completa
+        prev = stato.get('cons') or {}
+        if prev.get('controlli'):
+            controlli = prev['controlli']
+            note = [x for x in (prev.get('note') or []) if 'senza data' not in x and 'non ricalcolati' not in x] + note
+            note.append('controlli non ricalcolati: consuntivo dal foglio aggregato, segnalazioni dell\'estrazione completa del %s' % (prev.get('agg') or '—'))
     cons = {
         'agg': a.agg, 'file': a.file,
         'fonte': 'estrazione completa del gestionale (tutti i tipi di documento), aggregata per commessa, nodo e anno',

@@ -32,7 +32,7 @@ PCT = '0%'
 
 def tipo_cm(c):
     g = c.get('gest') if isinstance(c.get('gest'), dict) else {}
-    return g.get('tipo') or ('manuale' if not g else 'commessa')
+    return g.get('tipo') or 'commessa'   # le commesse seguite a mano da Danilo (senza gest) sono commesse vere
 
 
 def k_eur(x):
@@ -131,7 +131,7 @@ def costruisci(S, Y=None):
     cons = S.get('cons') or {}
     st = stili()
     wb = Workbook()
-    cms = list(S.get('commesse') or [])
+    cms = [c for c in (S.get('commesse') or []) if isinstance(c, dict) and c.get('code')]
     MM = {c['code']: B.modello(S, c, Y) for c in cms}
     aperte = [c for c in cms if not c.get('ev')]
     evase = [c for c in cms if c.get('ev')]
