@@ -213,7 +213,7 @@ def aggrega(righe, anno_agg=None, log=None):
         if a is None:
             senza_anno += 1
             a = anno_agg or dt.date.today().year
-        righe_costo.append([p, nodo_di(riga), a, k, imp, chiave_articolo(riga) if k in ('ddt', 'fat', 'ord') else None,
+        righe_costo.append([p, nodo_di(riga), a, k, imp, chiave_articolo(riga) if k in ('ddt', 'fat', 'ord', 'con') else None,
                             num(riga.get('Qt. acquistate')), data_di(riga)])
     log['righe_senza_anno'] = senza_anno
     # --- controlli (solo segnalazione, i numeri non cambiano)
@@ -240,8 +240,24 @@ def aggrega(righe, anno_agg=None, log=None):
             parziali['righe'] += 1
             parziali['importo'] += r[4]
             parziali['commesse'][r[0]] += r[4]
+    # costi contabilizzati (FOR-PRO-COS) che hanno una fattura fornitore uguale nello stesso mese: potrebbero
+    # essere la stessa spesa registrata due volte
+    fat_mese = defaultdict(int)
+    for r in righe_costo:
+        if r[3] == 'fat' and r[5] and r[7]:
+            fat_mese[(r[0], r[5][0], round(r[4], 2), r[7].strftime('%Y-%m'))] += 1
+    con_gem = {'righe': 0, 'importo': 0.0, 'commesse': defaultdict(float)}
+    for r in righe_costo:
+        if r[3] == 'con' and r[5] and r[7] and r[4]:
+            key = (r[0], r[5][0], round(r[4], 2), r[7].strftime('%Y-%m'))
+            if fat_mese.get(key):
+                fat_mese[key] -= 1
+                con_gem['righe'] += 1
+                con_gem['importo'] += r[4]
+                con_gem['commesse'][r[0]] += r[4]
     log['ddt_gemelli'] = gemelli
     log['ordini_con_consegne'] = parziali
+    log['contabilizzati_gemelli'] = con_gem
     # --- somma
     for p, nd, a, k, imp, _k, _q, _d in righe_costo:
         c = cm[p]
@@ -339,7 +355,7 @@ def main():
     if log.get('righe_senza_anno'):
         note.append('%d righe senza data contate nell\'anno %d' % (log['righe_senza_anno'], anno_agg))
     controlli = {}
-    for nome, k in (('ddt_gemelli', 'ddt_gemelli'), ('ordini_con_consegne', 'ordini_con_consegne')):
+    for nome, k in (('ddt_gemelli', 'ddt_gemelli'), ('ordini_con_consegne', 'ordini_con_consegne'), ('contabilizzati_gemelli', 'contabilizzati_gemelli')):
         x = log.get(k)
         if not x or not x['righe']:
             continue
@@ -349,6 +365,8 @@ def main():
         note.append('%d righe DDT identiche a righe di fattura (%.0f €): possibili doppioni, da verificare con Luca' % (controlli['ddt_gemelli']['righe'], controlli['ddt_gemelli']['importo']))
     if controlli.get('ordini_con_consegne'):
         note.append('%d righe d\'ordine aperte con consegne o fatture dello stesso articolo (%.0f €): possibili consegne parziali' % (controlli['ordini_con_consegne']['righe'], controlli['ordini_con_consegne']['importo']))
+    if controlli.get('contabilizzati_gemelli'):
+        note.append('%d costi contabilizzati con una fattura fornitore uguale nello stesso mese (%.0f €): possibili doppioni' % (controlli['contabilizzati_gemelli']['righe'], controlli['contabilizzati_gemelli']['importo']))
     cons = {
         'agg': a.agg, 'file': a.file,
         'fonte': 'estrazione completa del gestionale (tutti i tipi di documento), aggregata per commessa, nodo e anno',
