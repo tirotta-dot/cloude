@@ -256,7 +256,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
   }
   function match(g,t){
     var hay = (g.code + ' ' + g.name + ' ' + t.t + ' ' + ntxt(t)
-      + ' ' + (t.ri || []).join(' ')).toLowerCase();
+      + ' ' + riList(t).join(' ')).toLowerCase();
     return (filter === 'all' || (filter === 'open' && !t.d) || (filter === 'done' && t.d))
         && (!urgent || !!t.due)
         && (!prionly || pri(t) <= 2)
@@ -316,8 +316,16 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
   function gmUrl(tid){
     return 'https://mail.google.com/mail/#all/' + encodeURIComponent(String(tid || ''));
   }
+  /* "di cosa parla la mail": deve essere un elenco di punti; se una routine ha scritto un testo unico
+     lo spezzo io sui punti e virgola o sugli a capo invece di far cadere la pagina */
+  function riList(t){
+    var ri = t && t.ri;
+    if (Array.isArray(ri)) return ri.filter(function(x){ return x != null && String(x).trim(); }).map(String);
+    if (ri == null || ri === '') return [];
+    return String(ri).split(/\n+|;\s+/).map(function(x){ return x.trim(); }).filter(Boolean);
+  }
   function rifBox(t){
-    var ri = t.ri || [], tid = t.tid;
+    var ri = riList(t), tid = t.tid;
     if (!ri.length && !tid) return '';
     if (!ri.length)
       return '<div class="rifsolo"><a class="gml" href="' + gmUrl(tid)
