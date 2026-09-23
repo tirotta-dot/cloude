@@ -173,7 +173,7 @@ def costruisci(S, Y=None):
     ws = wb.create_sheet('Evase')
     ws['A1'] = 'Commesse evase: prezzo trovato nel gestionale, costi consuntivi, utile'
     ws['A1'].font = st['h1']
-    ws['A2'] = 'prezzo = valore a contratto se noto, altrimenti il maggiore tra fatture al cliente e ordine cliente nel gestionale · utile = prezzo − costi consuntivi (impegnato + ore) · un prezzo sotto la metà dei costi è considerato incompleto e non dà utile'
+    ws['A2'] = 'prezzo = valore a contratto se noto, altrimenti il maggiore tra fatture al cliente e ordine cliente nel gestionale · utile = prezzo − costi consuntivi (impegnato + ore) · un prezzo sotto la metà dei costi è considerato incompleto e non dà utile' + (' · costi a prezzi %d/%d = costi esterni rivalutati con gli indici ISTAT dei Parametri (dal 2025 stime) + ore alle tariffe correnti%s' % (Y, Y + 1, (' · ' + B.idx_avviso(B.bcfg(S), Y)) if B.idx_avviso(B.bcfg(S), Y) else ''))
     ws['A2'].font = st['h2']
     H = ['Commessa', 'Tipo', 'Cliente', 'Descrizione', 'Evasa il', 'Prezzo di vendita', 'Fonte prezzo', 'Fatture al cliente', 'Ordine cliente', 'Costi consuntivi',
          'Costi a prezzi %d' % Y, 'Costi a prezzi %d' % (Y + 1), 'Utile', 'Margine', 'Segnalazioni']

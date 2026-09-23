@@ -91,7 +91,7 @@ const path = require('path'), fs = require('fs');
   if (!/incompleto/.test((report.bdgDubbio.kpi || []).join(' '))) errors.push('FC-14-17: manca l\'avviso di prezzo incompleto');
   // R29: consuntivo delle evase a prezzi dell'anno corrente e del successivo
   report.bdgIdx = await page.evaluate(() => ({ th: Array.from(document.querySelectorAll('#bdg-FC-14-17 .bdgt thead th')).map(t => t.textContent.trim()), kpi: (Array.from(document.querySelectorAll('#bdg-FC-14-17 .bdgk .cm-kpi'))[2] || {}).textContent }));
-  if (!(report.bdgIdx.th || []).some(t => /^(A prezzi|Indicizzato) 20\d\d$/.test(t)) || !/a prezzi 20\d\d/.test(report.bdgIdx.kpi || '')) errors.push('FC-14-17: mancano le colonne o il KPI «a prezzi anno»');
+  if (!(report.bdgIdx.th || []).some(t => /^Costi a prezzi 20\d\d$/.test(t)) || !/costi a prezzi 20\d\d/.test(report.bdgIdx.kpi || '')) errors.push('FC-14-17: mancano le colonne o il KPI «costi a prezzi anno»');
   if (!report.bdgDubbio.prz) errors.push('FC-14-17: manca il campo prezzo di vendita nell\'editor');
   await page.evaluate(() => { const ed = document.getElementById('bdged-FC-14-17'); if (ed) ed.open = true; const i = document.getElementById('bdg-prz-FC-14-17'); if (i) i.value = '1500000'; });
   await click('[data-bdgsave="FC-14-17"]', '09n2-prezzo-salvato');

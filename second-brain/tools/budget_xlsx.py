@@ -33,7 +33,7 @@ Fogli: Riepilogo (se più commesse), un foglio per commessa (nodi, ore interne, 
 import argparse, datetime as dt, json, math, os, re, sys
 
 IDX_DEFAULT = {"2013": 1.2, "2014": 0.2, "2015": 0.1, "2016": -0.1, "2017": 1.2, "2018": 1.2, "2019": 0.6,
-               "2020": -0.2, "2021": 1.9, "2022": 8.1, "2023": 5.7, "2024": 1.0, "2025": 1.7, "2026": 1.8, "2027": 1.9}
+               "2020": -0.2, "2021": 1.9, "2022": 8.1, "2023": 5.7, "2024": 1.0, "2025": 1.7, "2026": 1.8, "2027": 1.9, "2028": 1.9}
 STADI = ('fat', 'con', 'ddt', 'ord', 'alt')
 # colonne in euro: i totali sommano i valori arrotondati delle righe (BDG_MONEY in app.js)
 MONEY = ('ext', 'fat', 'con', 'ddt', 'ord', 'alt', 'sost', 'imp', 'bOre', 'bTot', 'idxY', 'idxY1', 'przY', 'przY1')
@@ -72,7 +72,7 @@ def js_keys(d):
 def bcfg(S):
     c = dict(S.get('cfg') or {})
     idx = c.get('idx') if isinstance(c.get('idx'), dict) else IDX_DEFAULT
-    c['idx'] = {str(k): num(v) for k, v in idx.items()}
+    c['idx'] = {str(k): num(v) for k, v in idx.items() if num(v, None) is not None}  # R30: un anno vuoto non vale 0%
     c['marg'] = 30.0 if c.get('marg') is None or num(c.get('marg'), None) is None else num(c['marg'])
     c['margTipo'] = 'ricarico' if c.get('margTipo') == 'ricarico' else 'prezzo'
     c['tUff'] = num(c.get('tUff'))
@@ -80,11 +80,36 @@ def bcfg(S):
     return c
 
 
+def idx_anno(cf, y):
+    """Indice dell'anno y; se manca nei Parametri, l'ultimo anno noto precedente (idxAnno in app.js, R30)."""
+    k = str(int(y))
+    if k in cf['idx']:
+        return {'v': cf['idx'][k], 'ok': True, 'da': int(y)}
+    prima = [int(a) for a in cf['idx'] if int(a) < int(y)]
+    if not prima:
+        return {'v': 0.0, 'ok': False, 'da': None}
+    b = max(prima)
+    return {'v': cf['idx'][str(b)], 'ok': False, 'da': b}
+
+
 def fattore_idx(cf, da, a):
     f = 1.0
     for y in range(int(da) + 1, int(a) + 1):
-        f *= 1 + cf['idx'].get(str(y), 0.0) / 100
+        f *= 1 + idx_anno(cf, y)['v'] / 100
     return f
+
+
+def idx_avviso(cf, Y):
+    """Avviso se manca l'indice dell'anno corrente o del successivo (idxAvviso in app.js)."""
+    m, usa = [], ''
+    for y in (int(Y), int(Y) + 1):
+        r = idx_anno(cf, y)
+        if not r['ok']:
+            m.append(str(y))
+            usa = ('%s%% (%d)' % (('%g' % r['v']).replace('.', ','), r['da'])) if r['da'] is not None else '0%'
+    if not m:
+        return ''
+    return ('mancano gli indici ' + ' e '.join(m) if len(m) > 1 else "manca l'indice " + m[0]) + ' nei Parametri: uso ' + usa
 
 
 def prezzo_vendita(cf, costo):
@@ -583,13 +608,16 @@ def scrivi_parametri(wb, cf, Y, S):
     for i, y in enumerate(anni):
         r = r0 + i
         ws.cell(r, 1, int(y)).number_format = '0'
-        c = ws.cell(r, 2, cf['idx'].get(y, 0.0))
-        c.number_format, c.fill, c.border = '0.0', st['in'], st['border']
+        ia = idx_anno(cf, int(y))  # R30: un anno senza indice usa l'ultimo noto, segnalato in giallo
+        c = ws.cell(r, 2, ia['v'])
+        c.number_format, c.fill, c.border = '0.0', st['in'] if ia['ok'] else st['warn'], st['border']
+        if not ia['ok']:
+            ws.cell(r, 5, 'non impostato nei Parametri: usato l\'ultimo indice noto%s' % ((' (%d)' % ia['da']) if ia['da'] is not None else '')).font = st['sub']
         # fattore da questo anno all'anno corrente (e al successivo): prodotto (1+idx) per gli anni successivi fino a Y (Y+1)
         # (SUMPRODUCT valuta le matrici anche senza formula-matrice, in Excel come in LibreOffice)
         ws.cell(r, 3, '=EXP(SUMPRODUCT((A$%d:A$%d>A%d)*(A$%d:A$%d<=$B$8)*LN(1+B$%d:B$%d/100)))' % (r0, rz, r, r0, rz, r0, rz)).number_format = '0.0000'
         ws.cell(r, 4, '=EXP(SUMPRODUCT((A$%d:A$%d>A%d)*(A$%d:A$%d<=$B$8+1)*LN(1+B$%d:B$%d/100)))' % (r0, rz, r, r0, rz, r0, rz)).number_format = '0.0000'
-    ws.cell(rz + 2, 1, 'Fonte indici: ISTAT NIC medie annue 2013-2024; 2025-2027 stime, modificabili.').font = st['sub']
+    ws.cell(rz + 2, 1, 'Fonte indici: ISTAT NIC medie annue 2013-2024; dal 2025 stime, modificabili.').font = st['sub']
     ws.column_dimensions['A'].width = 44; ws.column_dimensions['B'].width = 14; ws.column_dimensions['C'].width = 26; ws.column_dimensions['D'].width = 26
     cons = S.get('cons') or {}
     ws.cell(rz + 4, 1, 'Consuntivo: %s%s' % (cons.get('agg') or 'non caricato', (' · ' + cons['file']) if cons.get('file') else '')).font = st['sub']
@@ -624,7 +652,7 @@ def scrivi_commessa(wb, S, M, P, usati):
 
     # ---- tabella nodi (intestazioni come l'export della pagina, bdgRighe)
     H = ['Nodo', 'Nel gestionale', 'Budget esterno', 'Ore ufficio', 'Ore produzione', 'Budget ore €', 'Budget totale', 'Fatturato', 'Consegnato', 'Ordinato',
-         'Impegnato', 'Scostamento €', 'Scostamento %', 'Indicizzato %d' % Y, 'Prezzo %d' % Y, 'Indicizzato %d' % (Y + 1), 'Prezzo %d' % (Y + 1), 'Note']
+         'Impegnato', 'Scostamento €', 'Scostamento %', 'Costi a prezzi %d' % Y, 'Prezzo %d' % Y, 'Costi a prezzi %d' % (Y + 1), 'Prezzo %d' % (Y + 1), 'Note']
     r_h = 12
     for j, h in enumerate(H, start=1):
         cell = ws.cell(r_h, j, h)
@@ -769,7 +797,7 @@ def scrivi_commessa(wb, S, M, P, usati):
     ws.sheet_properties.pageSetUpPr.fitToPage = True
     ws.cell(rs + 2, 1, 'Celle gialle = budget da compilare (per nodo; ore anche per l\'intera commessa). Fatturato = fatture fornitore + costi contabilizzati; Consegnato = DDT e conto lavoro non ancora fatturati; Ordinato = ordini fornitore aperti; Impegnato = la somma. '
             'I totali in euro sommano le righe arrotondate all\'euro, come in tabella. Le ore delle ditte esterne valgono il costo registrato nel file ore. '
-            'Utile a budget = prezzo − budget totale (commesse in corso); utile consuntivo = prezzo − costi (commesse evase). Indicizzato e Prezzo usano il foglio Parametri.').font = st['sub']
+            'Utile a budget = prezzo − budget totale (commesse in corso); utile consuntivo = prezzo − costi (commesse evase). Costi a prezzi e Prezzo usano gli indici del foglio Parametri (un anno senza indice usa l\'ultimo noto).').font = st['sub']
     return ws.title
 
 
@@ -791,8 +819,11 @@ def scrivi_riepilogo(wb, S, MM):
     ws['A2'].font = st['h2']
     Yr = MM[0]['Y'] if MM else dt.date.today().year
     H = ['Commessa', 'Cliente', 'Descrizione', 'Nodi', 'Stato nodi', 'Prezzo di vendita', 'Fonte prezzo', 'Budget esterno', 'Budget ore €', 'Budget totale', 'Fatturato', 'Consegnato', 'Ordinato', 'Impegnato',
-         'Ore consuntivo €', 'Costi a oggi', 'Scostamento esterni €', 'Scostamento %', 'Utile', 'Tipo utile', 'Margine %', 'Utile a budget', 'Utile con i costi a oggi',
-         'Costi a prezzi %d' % Yr, 'Costi a prezzi %d' % (Yr + 1)]
+         'Ore consuntivo €', 'Costi a oggi', 'Costi a prezzi %d' % Yr, 'Costi a prezzi %d' % (Yr + 1), 'Scostamento esterni €', 'Scostamento %', 'Utile', 'Tipo utile', 'Margine %',
+         'Utile a budget', 'Utile con i costi a oggi']
+    # R30: le due colonne rivalutate stanno accanto ai costi a oggi (colonne 17-18), come nella pagina
+    ws['A2'] = ws['A2'].value + ' · costi a prezzi %d/%d = esterni rivalutati con gli indici del foglio Parametri (dal 2025 stime), ore alle tariffe correnti%s' % (
+        Yr, Yr + 1, (' · ' + idx_avviso(bcfg(S), Yr)) if idx_avviso(bcfg(S), Yr) else '')
     rh = 4
     for j, h in enumerate(H, start=1):
         cell = ws.cell(rh, j, h)
@@ -804,33 +835,32 @@ def scrivi_riepilogo(wb, S, MM):
                 M['prezzo'] if M['prezzo'] is not None and not M.get('prezzoDubbio') else '',
                 ('incompleto nel gestionale: %s da %s' % (eur_r(M['prezzo']), (M['prezzoFonte'] or '').replace(' nel gestionale', ''))) if M.get('prezzoDubbio') else (M['prezzoFonte'] or ''),
                 t['ext'], M['ore']['bEur'], M['budgetTot'], t['fat'] + t['con'] + t['alt'], t['ddt'], t['ord'], t['imp'],
-                M['ore']['cEur'], M['costoOggi'], t['sc'] if t['ext'] > 0 else '', (t['pct'] - 1) if t['pct'] is not None else '',
+                M['ore']['cEur'], M['costoOggi'], M['costoIdxY'], M['costoIdxY1'], t['sc'] if t['ext'] > 0 else '', (t['pct'] - 1) if t['pct'] is not None else '',
                 M['utile'] if M['utile'] is not None else '', M['utileTipo'] or ('prezzo incompleto' if M.get('prezzoDubbio') else ''), M['marg'] if M['marg'] is not None else '',
-                M['utileB'] if M['utileB'] is not None else '', M['utileO'] if M['utileO'] is not None else '',
-                M['costoIdxY'], M['costoIdxY1']]
+                M['utileB'] if M['utileB'] is not None else '', M['utileO'] if M['utileO'] is not None else '']
         for j, v in enumerate(vals, start=1):
             cell = ws.cell(row, j, v)
             cell.border, cell.font = st['border'], st['norm']
-            cell.number_format = PCT if j == 18 else PCT0 if j == 21 else '@' if j in (7, 20) else EUR if j >= 6 else '@' if j != 4 else '0'
-        ws.cell(row, 1).font = st['bold']; ws.cell(row, 19).font = st['bold']
+            cell.number_format = PCT if j == 20 else PCT0 if j == 23 else '@' if j in (7, 22) else EUR if j >= 6 else '@' if j != 4 else '0'
+        ws.cell(row, 1).font = st['bold']; ws.cell(row, 21).font = st['bold']
         if not M['chiusa'] and (M['proposta'] or not M['conf']):
             ws.cell(row, 5).fill = st['warn']
     rn = rh + len(MM)
     rt = rn + 1
     ws.cell(rt, 1, 'Totale')
-    for j in (6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 19, 22, 23, 24, 25):
+    for j in (6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 21, 24, 25):
         ws.cell(rt, j, '=SUM({0}{1}:{0}{2})'.format(L(j), rh + 1, rn)).number_format = EUR
-    ws.cell(rt, 17, '=IF(H{0}>0,N{0}-H{0},"")'.format(rt)).number_format = EUR
-    ws.cell(rt, 18, '=IF(H{0}>0,N{0}/H{0}-1,"")'.format(rt)).number_format = PCT
-    ws.cell(rt, 20, 'consuntivo' if n_ch == len(MM) and MM else 'a budget / consuntivo' if n_ch else 'a budget')
-    ws.cell(rt, 21, '=IF(F{0}>0,S{0}/F{0},"")'.format(rt)).number_format = PCT0
+    ws.cell(rt, 19, '=IF(H{0}>0,N{0}-H{0},"")'.format(rt)).number_format = EUR
+    ws.cell(rt, 20, '=IF(H{0}>0,N{0}/H{0}-1,"")'.format(rt)).number_format = PCT
+    ws.cell(rt, 22, 'consuntivo' if n_ch == len(MM) and MM else 'a budget / consuntivo' if n_ch else 'a budget')
+    ws.cell(rt, 23, '=IF(F{0}>0,U{0}/F{0},"")'.format(rt)).number_format = PCT0
     for j in range(1, len(H) + 1):
         cell = ws.cell(rt, j)
         cell.font, cell.fill, cell.border = st['tot'], st['totfill'], st['border']
     if MM:
-        ws.conditional_formatting.add('R%d:R%d' % (rh + 1, rt), CellIsRule(operator='greaterThan', formula=['0'], fill=st['bad']))
-        ws.conditional_formatting.add('S%d:S%d' % (rh + 1, rt), CellIsRule(operator='lessThan', formula=['0'], fill=st['bad']))
-    widths = [12, 26, 24, 6, 18, 15, 22, 14, 13, 14, 13, 13, 13, 14, 14, 14, 15, 9, 14, 15, 10, 14, 16]
+        ws.conditional_formatting.add('T%d:T%d' % (rh + 1, rt), CellIsRule(operator='greaterThan', formula=['0'], fill=st['bad']))
+        ws.conditional_formatting.add('U%d:U%d' % (rh + 1, rt), CellIsRule(operator='lessThan', formula=['0'], fill=st['bad']))
+    widths = [12, 26, 24, 6, 18, 15, 22, 14, 13, 14, 13, 13, 13, 14, 14, 14, 14, 14, 15, 9, 14, 15, 10, 14, 16]
     for j, w in enumerate(widths, start=1):
         ws.column_dimensions[L(j)].width = w
     ws.freeze_panes = 'B%d' % (rh + 1)

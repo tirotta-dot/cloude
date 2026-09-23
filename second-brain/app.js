@@ -3896,7 +3896,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
      «incompleto» (niente utile, avviso); il prezzo di vendita si scrive dall'editor del budget (c.eco.valore). */
   var bdgVista = 'scost', BDG_CACHE = {}, BDG_RIF = {}, BDG_PEND = {}, BDG_DIRTY = {}, XP = [], XPsig = '';
   var NN_CACHE = {}, CIN_CACHE = {}, CONS_OK = {};
-  function idxDefault(){ return {"2013":1.2,"2014":0.2,"2015":0.1,"2016":-0.1,"2017":1.2,"2018":1.2,"2019":0.6,"2020":-0.2,"2021":1.9,"2022":8.1,"2023":5.7,"2024":1.0,"2025":1.7,"2026":1.8,"2027":1.9}; }
+  function idxDefault(){ return {"2013":1.2,"2014":0.2,"2015":0.1,"2016":-0.1,"2017":1.2,"2018":1.2,"2019":0.6,"2020":-0.2,"2021":1.9,"2022":8.1,"2023":5.7,"2024":1.0,"2025":1.7,"2026":1.8,"2027":1.9,"2028":1.9}; }
   function bcfg(){
     var c = cfg();
     if (!c.idx || typeof c.idx !== 'object') c.idx = idxDefault();
@@ -3905,10 +3905,25 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     return c;
   }
   function annoCorr(){ return new Date().getFullYear(); }
+  /* R30 (21/09): un anno senza indice nei Parametri usa l'ultimo indice noto (prima valeva 0%, e dal 2027 le colonne
+     «costi a prezzi Y» e «Y+1» sarebbero diventate uguali senza avviso); idxAvviso(Y) lo dice nei KPI e negli export.
+     Una spesa datata dopo l'anno di arrivo (es. 2027 → 2026) resta al valore nominale: non si deflaziona. */
+  function idxAnno(c, y){
+    var i = c.idx[String(y)];
+    if (i != null && i !== '' && !isNaN(Number(i))) return {v: Number(i), ok: true, da: y};
+    var best = null;
+    Object.keys(c.idx).forEach(function(k){ var n = Number(k), w = c.idx[k]; if (n < y && w != null && w !== '' && !isNaN(Number(w)) && (best == null || n > best)) best = n; });
+    return {v: best == null ? 0 : Number(c.idx[String(best)]), ok: false, da: best};
+  }
   function fattoreIdx(da, a){
     var c = bcfg(), f = 1, y;
-    for (y = da + 1; y <= a; y++){ var i = c.idx[String(y)]; f *= 1 + (i == null ? 0 : (Number(i) || 0)) / 100; }
+    for (y = da + 1; y <= a; y++) f *= 1 + idxAnno(c, y).v / 100;
     return f;
+  }
+  function idxAvviso(Y){
+    var c = bcfg(), m = [], usa = '';
+    [Y, Y + 1].forEach(function(y){ var r = idxAnno(c, y); if (!r.ok){ m.push(y); usa = r.da != null ? numEd(r.v) + '% (' + r.da + ')' : '0%'; } });
+    return m.length ? (m.length > 1 ? 'mancano gli indici ' + m.join(' e ') : 'manca l\'indice ' + m[0]) + ' nei Parametri: uso ' + usa : '';
   }
   function prezzoVendita(costo){
     var c = bcfg(), m = (Number(c.marg) || 0) / 100;
@@ -4145,13 +4160,15 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     var w = Math.min(r.pct, 1.5) / 1.5 * 100;
     return '<div class="bdgbar"><i style="width:' + w.toFixed(1) + '%"></i></div>';
   }
+  /* R30: un solo nome per il consuntivo rivalutato, «Costi a prezzi Y», in tabella, KPI, riepilogo, CSV ed Excel */
+  var BDG_TIT_IDX = 'costi esterni rivalutati con gli indici ISTAT dei Parametri (dal 2025 stime); le ore restano alle tariffe di quest\'anno';
   function bdgTabella(M){
     var Y = M.Y, prop = M.proposta && M.rif.length, h = '<div class="otab cf bdgt"><table><thead><tr><th>Nodo</th>';
     if (bdgVista === 'listino'){
-      h += '<th class="num">Impegnato a oggi</th><th>Per anno</th><th class="num">Indicizzato ' + Y + '</th><th class="num">Prezzo ' + Y + '</th><th class="num">Indicizzato ' + (Y + 1) + '</th><th class="num">Prezzo ' + (Y + 1) + '</th>';
+      h += '<th class="num">' + (M.chiusa ? 'Consuntivo' : 'Impegnato a oggi') + '</th><th>Per anno</th><th class="num" title="' + BDG_TIT_IDX + '">Costi a prezzi ' + Y + '</th><th class="num">Prezzo ' + Y + '</th><th class="num" title="' + BDG_TIT_IDX + '">Costi a prezzi ' + (Y + 1) + '</th><th class="num">Prezzo ' + (Y + 1) + '</th>';
     } else if (M.chiusa){
       /* R29: per le evase il consuntivo storico e lo stesso consuntivo a prezzi di quest'anno e del prossimo */
-      h += (M.haBudget ? '<th class="num">Budget (memoria)</th>' : '') + '<th class="num">Fatturato</th><th class="num">Consegnato</th><th class="num">Ordinato</th><th class="num">Consuntivo</th><th class="num">A prezzi ' + Y + '</th><th class="num">A prezzi ' + (Y + 1) + '</th>'
+      h += (M.haBudget ? '<th class="num">Budget (memoria)</th>' : '') + '<th class="num">Fatturato</th><th class="num">Consegnato</th><th class="num">Ordinato</th><th class="num">Consuntivo</th><th class="num" title="' + BDG_TIT_IDX + '">Costi a prezzi ' + Y + '</th><th class="num" title="' + BDG_TIT_IDX + '">Costi a prezzi ' + (Y + 1) + '</th>'
         + (M.haBudget ? '<th class="num">Scost. €</th><th class="num">Scost. %</th>' : '');
     } else {
       h += '<th class="num">' + (prop ? 'Budget proposto' : 'Budget esterno') + '</th><th class="num">Fatturato</th><th class="num">Consegnato</th><th class="num">Ordinato</th><th class="num">Impegnato</th><th class="num">Scost. €</th><th class="num">Scost. %</th>';
@@ -4204,6 +4221,13 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
       + '</tbody></table></div><p class="srcline">Il file ore del gestionale non riporta il nodo: le ore si confrontano per commessa. Le ore delle ditte esterne valgono il costo registrato nel file ore. Tariffe in Denaro → Tariffe.</p></details>';
     return h;
   }
+  /* R30: nel KPI delle evase i due consuntivi rivalutati; con le ore, scomposti come la riga storica (esterni + ore) */
+  function bdgKpiIdx(M){
+    var Y = M.Y, av = idxAvviso(Y), s;
+    if (M.ore.cEur > 0) s = ' · costi a prezzi ' + Y + ' <b>' + eurR(M.costoIdxY) + '</b> (esterni ' + eurR(M.tot.idxY) + ' + ore ' + eurR(M.ore.cEur) + ') · ' + (Y + 1) + ' <b>' + eurR(M.costoIdxY1) + '</b> (esterni ' + eurR(M.tot.idxY1) + ' + ore ' + eurR(M.ore.cEur) + ') · esterni indicizzati ISTAT, ore alle tariffe ' + Y + (M.ore.cEeur > 0 ? ', ditte esterne al costo registrato' : '');
+    else s = ' · costi a prezzi ' + Y + ' <b>' + eurR(M.costoIdxY) + '</b> · ' + (Y + 1) + ' <b>' + eurR(M.costoIdxY1) + '</b> (esterni indicizzati ISTAT, ore alle tariffe ' + Y + ')';
+    return s + (av ? ' · <b>' + av + '</b>' : '');
+  }
   function bdgKpi(M){
     var p = M.prezzo, prop = M.proposta && M.rif.length, k = '<div class="cm-kpis bdgk">';
     var pInfo = M.prezzoFonte ? 'da ' + esc(M.prezzoFonte) : 'non trovato: né contratto né ordine cliente';
@@ -4214,7 +4238,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     else if (M.prezzoDaConfermare) pInfo += ' · da confermare';
     k += '<div class="cm-kpi' + (M.prezzoDubbio ? ' hot' : '') + '"><b>' + (p != null ? eurR(p) : '—') + '</b><span>prezzo di vendita</span><small>' + pInfo + '</small></div>';
     k += '<div class="cm-kpi"><b>' + (M.haBudget ? eurR(M.budgetTot) : '—') + '</b><span>' + (prop ? 'budget proposto' : 'budget totale') + '</span><small>' + (M.haBudget ? 'esterni ' + eurR(M.tot.ext) + ' + ore ' + eurR(M.ore.bEur) + (prop ? ' · da confermare' : '') : (M.chiusa ? 'commessa evasa: contano i costi consuntivi' : 'nessun budget inserito')) + '</small></div>';
-    k += '<div class="cm-kpi' + (M.tot.stato === 'bad' ? ' hot' : '') + '"><b>' + eurR(M.costoOggi) + '</b><span>' + (M.chiusa ? 'costi consuntivi' : 'costi a oggi') + '</span><small>impegnato ' + eurR(M.tot.imp) + ' + ore ' + eurR(M.ore.cEur) + (M.chiusa ? ' · a prezzi ' + M.Y + ' <b>' + eurR(M.costoIdxY) + '</b> · ' + (M.Y + 1) + ' <b>' + eurR(M.costoIdxY1) + '</b> (esterni indicizzati, ore alle tariffe ' + M.Y + ')' : '') + '</small></div>';
+    k += '<div class="cm-kpi' + (M.tot.stato === 'bad' ? ' hot' : '') + '"><b>' + eurR(M.costoOggi) + '</b><span>' + (M.chiusa ? 'costi consuntivi' : 'costi a oggi') + '</span><small>impegnato ' + eurR(M.tot.imp) + ' + ore ' + eurR(M.ore.cEur) + (M.chiusa ? bdgKpiIdx(M) : '') + '</small></div>';
     k += '<div class="cm-kpi' + (M.tot.stato === 'bad' ? ' hot' : '') + '"><b>' + (M.tot.ext > 0 ? (M.tot.sc > 0 ? '+' : '') + eurR(M.tot.sc) : '—') + '</b><span>scostamento esterni</span><small>' + (M.tot.ext > 0 ? pctTxt(M.tot.pct) + ' sul budget esterno' + (prop ? ' proposto' : '') : M.chiusa ? 'commessa evasa: nessun budget da confrontare' : 'serve il budget per nodo') + '</small></div>';
     k += '<div class="cm-kpi' + (M.utile != null && M.utile < 0 ? ' hot' : '') + '"><b>' + (M.utile != null ? eurR(M.utile) : '—') + '</b><span>' + (M.chiusa ? 'utile consuntivo' : 'utile a budget') + '</span><small>'
       + (M.utile != null ? 'margine ' + Math.round(M.marg * 100) + '% sul prezzo' + (M.chiusa ? ' · prezzo − costi consuntivi (impegnato + ore)' : (prop ? ' · sul budget proposto, da confermare' : '') + ' · con i soli costi a oggi ' + eurR(M.utileO) + ' (' + Math.round(M.margO * 100) + '%)')
@@ -4305,7 +4329,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     var altre = list.filter(cmAltro), cms = list.filter(function(c){ return !cmAltro(c); });
     var righe = cms.map(bdgModello), tB = 0, tI = 0, tP = 0, tU = 0, tPU = 0, nB = 0, nProp = 0, nP = 0, nU = 0, nCh = 0, nAp = 0, nDc = 0;
     var nUdc = 0, tUdc = 0; /* R28: evase con prezzo da confermare dentro il KPI utile */
-    var Yr = annoCorr(), tIY = 0, tIY1 = 0; /* R29: consuntivo a prezzi di quest'anno e del prossimo */
+    var Yr = annoCorr(), tIY = 0, tIY1 = 0, avR = idxAvviso(Yr); /* R29: consuntivo a prezzi di quest'anno e del prossimo */
     righe.forEach(function(M){
       if (M.haBudget){ tB += M.budgetTot; if (M.proposta && M.rif.length) nProp++; else nB++; }
       if (M.utile != null && M.prezzoDaConfermare){ nUdc++; tUdc += M.utile; }
@@ -4318,13 +4342,13 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     var colBdg = !tuttoChiuso || righe.some(function(M){ return M.haBudget; });
     var tipoU = tuttoChiuso ? 'utile consuntivo' : nCh ? 'utile (a budget / consuntivo)' : 'utile a budget';
     var h = '<div class="cm-kpis bdgk"><div class="cm-kpi"><b>' + eurR(tP) + '</b><span>prezzo di vendita</span><small>' + nP + ' commesse con prezzo su ' + righe.length + '</small></div>'
-      + '<div class="cm-kpi"><b>' + (tuttoChiuso ? eurR(tI) : eurR(tB)) + '</b><span>' + (tuttoChiuso ? 'costi consuntivi' : 'budget totale' + (nProp ? ' (incluso proposto)' : '')) + '</span><small>' + (tuttoChiuso ? 'impegnato + ore · a prezzi ' + Yr + ' <b>' + eurR(tIY) + '</b> · ' + (Yr + 1) + ' <b>' + eurR(tIY1) + '</b>' : nB + ' con budget inserito o confermato · ' + nProp + ' con budget proposto da confermare · ' + (righe.length - nB - nProp) + ' senza') + '</small></div>'
+      + '<div class="cm-kpi"><b>' + (tuttoChiuso ? eurR(tI) : eurR(tB)) + '</b><span>' + (tuttoChiuso ? 'costi consuntivi' : 'budget totale' + (nProp ? ' (incluso proposto)' : '')) + '</span><small>' + (tuttoChiuso ? 'impegnato + ore · costi a prezzi ' + Yr + ' <b>' + eurR(tIY) + '</b> · ' + (Yr + 1) + ' <b>' + eurR(tIY1) + '</b> (esterni indicizzati ISTAT, ore alle tariffe ' + Yr + ')' + (avR ? ' · <b>' + avR + '</b>' : '') : nB + ' con budget inserito o confermato · ' + nProp + ' con budget proposto da confermare · ' + (righe.length - nB - nProp) + ' senza') + '</small></div>'
       + (tuttoChiuso ? '' : '<div class="cm-kpi"><b>' + eurR(tI) + '</b><span>costi a oggi</span><small>esterni impegnati + ore</small></div>')
       + '<div class="cm-kpi' + (tU < 0 ? ' hot' : '') + '"><b>' + (nU ? eurR(tU) : '—') + '</b><span>' + tipoU + '</span><small>' + (nU ? nU + ' commesse con prezzo e ' + (tuttoChiuso ? 'costi' : 'budget') + (tPU ? ' · margine ' + Math.round(tU / tPU * 100) + '% sul loro prezzo' : '') + (nUdc ? ' · di cui ' + nUdc + ' con prezzo da confermare (' + eurR(tUdc) + ')' : '') : 'serve prezzo e budget') + '</small></div>'
       + (nAp ? '<div class="cm-kpi' + (nDc ? ' hot' : '') + '"><b>' + nDc + '</b><span>nodi da confermare</span><small>commesse in corso senza nodi confermati, su ' + nAp + '</small></div>' : '') + '</div>';
     h += '<section class="og"><h3 class="cfh"><i class="dt cy"></i>Tutte le commesse in vista<em class="oghint">' + righe.length + ' commesse · seleziona una commessa per i nodi</em>'
       + '<span class="cfbtn"><button class="chip" data-bdgcopy="*">Copia per Excel</button><button class="chip" data-bdgcsv="*">Scarica .csv</button>' + (nCh ? '' : '<button class="chip" data-bdgxls="*">Excel su Drive</button>') + '</span></h3>'
-      + '<div class="otab cf bdgt"><table><thead><tr><th>Commessa</th><th>Nodi</th><th class="num">Prezzo di vendita</th>' + (colBdg ? '<th class="num">' + (tuttoChiuso ? 'Budget (memoria)' : 'Budget totale') + '</th>' : '') + '<th class="num">' + (tuttoChiuso ? 'Costi consuntivi' : 'Costi a oggi') + '</th>' + (tuttoChiuso ? '<th class="num">A prezzi ' + Yr + '</th><th class="num">A prezzi ' + (Yr + 1) + '</th>' : '') + (colBdg ? '<th class="num">Scost. esterni</th>' : '') + '<th class="num">Utile</th><th class="num">Margine</th></tr></thead><tbody>';
+      + '<div class="otab cf bdgt"><table><thead><tr><th>Commessa</th><th>Nodi</th><th class="num">Prezzo di vendita</th>' + (colBdg ? '<th class="num">' + (tuttoChiuso ? 'Budget (memoria)' : 'Budget totale') + '</th>' : '') + '<th class="num">' + (tuttoChiuso ? 'Costi consuntivi' : 'Costi a oggi') + '</th>' + (tuttoChiuso ? '<th class="num" title="' + BDG_TIT_IDX + '">Costi a prezzi ' + Yr + '</th><th class="num" title="' + BDG_TIT_IDX + '">Costi a prezzi ' + (Yr + 1) + '</th>' : '') + (colBdg ? '<th class="num">Scost. esterni</th>' : '') + '<th class="num">Utile</th><th class="num">Margine</th></tr></thead><tbody>';
     righe.forEach(function(M){
       var c = M.c, st = M.tot.stato;
       h += '<tr class="' + esc(st) + '" data-bdgcm="' + esc(c.code) + '"><td class="nodo"><b>' + esc(c.code) + '</b><span class="osub">' + esc(c.cliente || '') + (c.desc ? ' · ' + esc(c.desc) : '') + '</span></td>'
@@ -4349,7 +4373,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
   function bdgHtml(list, nsel){
     BDG_CACHE = {};
     var h = '<div class="ore-wait" style="margin-bottom:14px"><b>Budget e consuntivo per nodo.</b> Il budget lo scrivi tu qui (costi esterni, ore ufficio e produzione per nodo); per una commessa nuova te lo propongo dalle commesse chiuse della stessa famiglia e lo confermi. Il consuntivo arriva dal gestionale per nodo e anno: <b>fatturato</b> (fatture e costi contabilizzati), <b>consegnato</b> (DDT non ancora fatturati), <b>ordinato</b> (ordini aperti). Impegnato = la somma. <b>Utile</b>: a budget per le commesse in corso (prezzo − budget), consuntivo per le evase (prezzo − costi). '
-      + 'Il <b>listino</b> porta ogni costo all\'anno corrente e al successivo con gli indici qui sotto e applica il margine. '
+      + 'Il <b>listino</b> porta ogni costo all\'anno corrente e al successivo con gli indici qui sotto e applica il margine. Per le evase, le colonne <b>Costi a prezzi ' + annoCorr() + ' / ' + (annoCorr() + 1) + '</b> rivalutano i costi esterni con gli stessi indici ISTAT (dal 2025 sono stime) e aggiungono le ore alle tariffe di quest\'anno: è il consuntivo da usare per le nuove offerte. '
       + (S.cons && S.cons.agg ? 'Consuntivo dall\'estrazione del ' + esc(itFull(S.cons.agg)) + '.' : '<b>Consuntivo non ancora caricato.</b>')
       + ((S.cons && S.cons.note && S.cons.note.length) ? ' <span class="osub">Controlli sull\'estrazione: ' + [].concat(S.cons.note).map(esc).join('; ') + '.</span>' : '') + '</div>';
     h += bdgExportHtml() + bdgFileHtml() + bdgParamHtml();
@@ -4374,9 +4398,9 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
   function bdgRighe(M){
     var Y = M.Y, rows = [['Commessa', M.c.code, M.c.cliente || '', M.c.desc || '', M.chiusa ? 'evasa' : 'in corso'], ['Prezzo di vendita', M.prezzo != null ? Math.round(M.prezzo) : '', M.prezzoFonte || ''],
       ['Budget totale commessa', M.haBudget ? Math.round(M.budgetTot) : '', 'esterni', Math.round(M.tot.ext), 'ore €', Math.round(M.ore.bEur), M.proposta && M.rif.length ? 'proposto da ' + M.rif.map(function(s){ return s.code; }).join(', ') : ''],
-      ['Costi ' + (M.chiusa ? 'consuntivi' : 'a oggi'), Math.round(M.costoOggi), 'impegnato', Math.round(M.tot.imp), 'ore €', Math.round(M.ore.cEur), 'a prezzi ' + Y, Math.round(M.costoIdxY), 'a prezzi ' + (Y + 1), Math.round(M.costoIdxY1)],
+      ['Costi ' + (M.chiusa ? 'consuntivi' : 'a oggi'), Math.round(M.costoOggi), 'impegnato', Math.round(M.tot.imp), 'ore €', Math.round(M.ore.cEur), 'costi a prezzi ' + Y, Math.round(M.costoIdxY), 'costi a prezzi ' + (Y + 1), Math.round(M.costoIdxY1)],
       ['Utile ' + (M.utileTipo || ''), M.utile != null ? Math.round(M.utile) : '', 'Utile a budget', M.utileB != null ? Math.round(M.utileB) : '', 'Utile con i costi a oggi', M.utileO != null ? Math.round(M.utileO) : ''], [],
-      ['Nodo', 'Nel gestionale', 'Budget esterno', 'Ore ufficio', 'Ore produzione', 'Budget ore €', 'Budget totale', 'Fatturato', 'Consegnato', 'Ordinato', 'Impegnato', 'Scostamento €', 'Scostamento %', 'Indicizzato ' + Y, 'Prezzo ' + Y, 'Indicizzato ' + (Y + 1), 'Prezzo ' + (Y + 1), 'Note']];
+      ['Nodo', 'Nel gestionale', 'Budget esterno', 'Ore ufficio', 'Ore produzione', 'Budget ore €', 'Budget totale', 'Fatturato', 'Consegnato', 'Ordinato', 'Impegnato', 'Scostamento €', 'Scostamento %', 'Costi a prezzi ' + Y, 'Prezzo ' + Y, 'Costi a prezzi ' + (Y + 1), 'Prezzo ' + (Y + 1), 'Note']];
     M.righe.concat([M.tot]).forEach(function(r){
       rows.push([r.n, (r.gest || []).join(', '), Math.round(r.ext), oreCsv(r.hu), oreCsv(r.ho), Math.round(r.bOre), Math.round(r.bTot), Math.round(r.fat + r.con + r.alt), Math.round(r.ddt), Math.round(r.ord), Math.round(r.imp),
         r.ext > 0 ? Math.round(r.sc) : '', r.pct == null ? '' : Math.round((r.pct - 1) * 100), Math.round(r.idxY), Math.round(r.przY), Math.round(r.idxY1), Math.round(r.przY1), r.note || (r.extra ? 'non a budget' : '')]);
@@ -4390,11 +4414,11 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     return rows;
   }
   function bdgRigheRiep(righe){
-    var rows = [['Commessa', 'Cliente', 'Descrizione', 'Nodi', 'Stato nodi', 'Prezzo di vendita', 'Fonte prezzo', 'Budget esterno', 'Budget ore €', 'Budget totale', 'Fatturato', 'Consegnato', 'Ordinato', 'Impegnato', 'Ore consuntivo €', 'Costi a oggi', 'Scostamento esterni €', 'Scostamento %', 'Utile', 'Tipo utile', 'Margine %', 'Utile a budget', 'Utile con i costi a oggi', 'Costi a prezzi ' + annoCorr(), 'Costi a prezzi ' + (annoCorr() + 1)]];
+    var rows = [['Commessa', 'Cliente', 'Descrizione', 'Nodi', 'Stato nodi', 'Prezzo di vendita', 'Fonte prezzo', 'Budget esterno', 'Budget ore €', 'Budget totale', 'Fatturato', 'Consegnato', 'Ordinato', 'Impegnato', 'Ore consuntivo €', 'Costi a oggi', 'Costi a prezzi ' + annoCorr(), 'Costi a prezzi ' + (annoCorr() + 1), 'Scostamento esterni €', 'Scostamento %', 'Utile', 'Tipo utile', 'Margine %', 'Utile a budget', 'Utile con i costi a oggi']];
     righe.forEach(function(M){ var t = M.tot;
       rows.push([M.c.code, M.c.cliente || '', M.c.desc || '', M.nodi.length, M.chiusa ? 'evasa' : M.proposta ? 'proposti' : M.conf ? 'confermati' : 'da confermare', M.prezzo != null ? Math.round(M.prezzo) : '', M.prezzoFonte || '',
-        Math.round(t.ext), Math.round(M.ore.bEur), Math.round(M.budgetTot), Math.round(t.fat + t.con + t.alt), Math.round(t.ddt), Math.round(t.ord), Math.round(t.imp), Math.round(M.ore.cEur), Math.round(M.costoOggi),
-        t.ext > 0 ? Math.round(t.sc) : '', t.pct == null ? '' : Math.round((t.pct - 1) * 100), M.utile != null ? Math.round(M.utile) : '', M.utileTipo || '', M.marg != null ? Math.round(M.marg * 100) : '', M.utileB != null ? Math.round(M.utileB) : '', M.utileO != null ? Math.round(M.utileO) : '', Math.round(M.costoIdxY), Math.round(M.costoIdxY1)]); });
+        Math.round(t.ext), Math.round(M.ore.bEur), Math.round(M.budgetTot), Math.round(t.fat + t.con + t.alt), Math.round(t.ddt), Math.round(t.ord), Math.round(t.imp), Math.round(M.ore.cEur), Math.round(M.costoOggi), Math.round(M.costoIdxY), Math.round(M.costoIdxY1),
+        t.ext > 0 ? Math.round(t.sc) : '', t.pct == null ? '' : Math.round((t.pct - 1) * 100), M.utile != null ? Math.round(M.utile) : '', M.utileTipo || '', M.marg != null ? Math.round(M.marg * 100) : '', M.utileB != null ? Math.round(M.utileB) : '', M.utileO != null ? Math.round(M.utileO) : '']); });
     return rows;
   }
   function bdgFile(code, est){ return 'budget-' + (code === '*' ? 'tutte' : String(code).replace(/[^A-Za-z0-9_-]+/g, '_').slice(0, 40)) + '.' + est; }
