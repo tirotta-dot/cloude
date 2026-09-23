@@ -4119,6 +4119,9 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
       ore: {bU: bU, bO: bO, cU: cU, cO: cO, cE: cE, cEeur: cEeur, bEur: oreBdg, cEur: oreCons, hCm: hCm},
       prezzo: prezzo, prezzoFonte: prezzoFonte, oc: oc, valore: valore, fatCli: fatCli, haBudget: haBudget, chiusa: !!c.ev,
       budgetTot: tot.ext + oreBdg, costoOggi: tot.imp + oreCons};
+    /* R29 (20/09): consuntivo a prezzi di oggi e dell'anno prossimo (richiesta di Danilo): costi esterni indicizzati
+       con gli indici annui dei Parametri, ore sempre alle tariffe dell'anno corrente */
+    m.costoIdxY = tot.idxY + oreCons; m.costoIdxY1 = tot.idxY1 + oreCons;
     /* R26: un prezzo preso dal gestionale sotto la metà dei costi consuntivi è quasi certamente incompleto (fatture registrate
        altrove): niente utile finché Danilo non scrive il prezzo; fatture e ordine cliente lontani più del 30% → da confermare */
     m.prezzoDubbio = !!(c.ev && prezzo != null && prezzoFonte !== 'contratto' && m.costoOggi > 0 && prezzo < 0.5 * m.costoOggi);
@@ -4146,6 +4149,10 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     var Y = M.Y, prop = M.proposta && M.rif.length, h = '<div class="otab cf bdgt"><table><thead><tr><th>Nodo</th>';
     if (bdgVista === 'listino'){
       h += '<th class="num">Impegnato a oggi</th><th>Per anno</th><th class="num">Indicizzato ' + Y + '</th><th class="num">Prezzo ' + Y + '</th><th class="num">Indicizzato ' + (Y + 1) + '</th><th class="num">Prezzo ' + (Y + 1) + '</th>';
+    } else if (M.chiusa){
+      /* R29: per le evase il consuntivo storico e lo stesso consuntivo a prezzi di quest'anno e del prossimo */
+      h += (M.haBudget ? '<th class="num">Budget (memoria)</th>' : '') + '<th class="num">Fatturato</th><th class="num">Consegnato</th><th class="num">Ordinato</th><th class="num">Consuntivo</th><th class="num">A prezzi ' + Y + '</th><th class="num">A prezzi ' + (Y + 1) + '</th>'
+        + (M.haBudget ? '<th class="num">Scost. €</th><th class="num">Scost. %</th>' : '');
     } else {
       h += '<th class="num">' + (prop ? 'Budget proposto' : 'Budget esterno') + '</th><th class="num">Fatturato</th><th class="num">Consegnato</th><th class="num">Ordinato</th><th class="num">Impegnato</th><th class="num">Scost. €</th><th class="num">Scost. %</th>';
     }
@@ -4161,6 +4168,11 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
         h += '<td class="num mono">' + eurR(r.imp) + '</td><td class="osub" style="white-space:nowrap">' + esc(tot ? '' : anni) + '</td>'
           + '<td class="num mono">' + eurR(r.idxY) + '</td><td class="num mono"><b>' + eurR(r.przY) + '</b></td>'
           + '<td class="num mono">' + eurR(r.idxY1) + '</td><td class="num mono"><b>' + eurR(r.przY1) + '</b></td>';
+      } else if (M.chiusa){
+        h += (M.haBudget ? '<td class="num mono">' + (r.ext ? eurR(r.ext) : '<span class="osub">—</span>') + '</td>' : '')
+          + '<td class="num mono">' + eurR(r.fat + r.con + r.alt) + '</td><td class="num mono">' + eurR(r.ddt) + '</td><td class="num mono">' + eurR(r.ord) + '</td>'
+          + '<td class="num mono"><b>' + eurR(r.imp) + '</b></td><td class="num mono">' + eurR(r.idxY) + '</td><td class="num mono">' + eurR(r.idxY1) + '</td>'
+          + (M.haBudget ? '<td class="num mono' + (r.ext > 0 && r.sc > 0 ? ' bad' : '') + '">' + (r.ext > 0 ? (r.sc > 0 ? '+' : '') + eurR(r.sc) : '—') + '</td><td class="num mono pct">' + pctTxt(r.pct) + bdgBarra(r) + '</td>' : '');
       } else {
         h += '<td class="num mono' + (prop && r.ext ? ' prop' : '') + '">' + (r.ext ? eurR(r.ext) : '<span class="osub">' + (M.chiusa ? '—' : r.extra ? 'non a budget' : 'da inserire') + '</span>') + '</td>'
           + '<td class="num mono">' + eurR(r.fat + r.con + r.alt) + '</td><td class="num mono">' + eurR(r.ddt) + '</td><td class="num mono">' + eurR(r.ord) + '</td>'
@@ -4202,7 +4214,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     else if (M.prezzoDaConfermare) pInfo += ' · da confermare';
     k += '<div class="cm-kpi' + (M.prezzoDubbio ? ' hot' : '') + '"><b>' + (p != null ? eurR(p) : '—') + '</b><span>prezzo di vendita</span><small>' + pInfo + '</small></div>';
     k += '<div class="cm-kpi"><b>' + (M.haBudget ? eurR(M.budgetTot) : '—') + '</b><span>' + (prop ? 'budget proposto' : 'budget totale') + '</span><small>' + (M.haBudget ? 'esterni ' + eurR(M.tot.ext) + ' + ore ' + eurR(M.ore.bEur) + (prop ? ' · da confermare' : '') : (M.chiusa ? 'commessa evasa: contano i costi consuntivi' : 'nessun budget inserito')) + '</small></div>';
-    k += '<div class="cm-kpi' + (M.tot.stato === 'bad' ? ' hot' : '') + '"><b>' + eurR(M.costoOggi) + '</b><span>' + (M.chiusa ? 'costi consuntivi' : 'costi a oggi') + '</span><small>impegnato ' + eurR(M.tot.imp) + ' + ore ' + eurR(M.ore.cEur) + '</small></div>';
+    k += '<div class="cm-kpi' + (M.tot.stato === 'bad' ? ' hot' : '') + '"><b>' + eurR(M.costoOggi) + '</b><span>' + (M.chiusa ? 'costi consuntivi' : 'costi a oggi') + '</span><small>impegnato ' + eurR(M.tot.imp) + ' + ore ' + eurR(M.ore.cEur) + (M.chiusa ? ' · a prezzi ' + M.Y + ' <b>' + eurR(M.costoIdxY) + '</b> · ' + (M.Y + 1) + ' <b>' + eurR(M.costoIdxY1) + '</b> (esterni indicizzati, ore alle tariffe ' + M.Y + ')' : '') + '</small></div>';
     k += '<div class="cm-kpi' + (M.tot.stato === 'bad' ? ' hot' : '') + '"><b>' + (M.tot.ext > 0 ? (M.tot.sc > 0 ? '+' : '') + eurR(M.tot.sc) : '—') + '</b><span>scostamento esterni</span><small>' + (M.tot.ext > 0 ? pctTxt(M.tot.pct) + ' sul budget esterno' + (prop ? ' proposto' : '') : M.chiusa ? 'commessa evasa: nessun budget da confrontare' : 'serve il budget per nodo') + '</small></div>';
     k += '<div class="cm-kpi' + (M.utile != null && M.utile < 0 ? ' hot' : '') + '"><b>' + (M.utile != null ? eurR(M.utile) : '—') + '</b><span>' + (M.chiusa ? 'utile consuntivo' : 'utile a budget') + '</span><small>'
       + (M.utile != null ? 'margine ' + Math.round(M.marg * 100) + '% sul prezzo' + (M.chiusa ? ' · prezzo − costi consuntivi (impegnato + ore)' : (prop ? ' · sul budget proposto, da confermare' : '') + ' · con i soli costi a oggi ' + eurR(M.utileO) + ' (' + Math.round(M.margO * 100) + '%)')
@@ -4293,10 +4305,11 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     var altre = list.filter(cmAltro), cms = list.filter(function(c){ return !cmAltro(c); });
     var righe = cms.map(bdgModello), tB = 0, tI = 0, tP = 0, tU = 0, tPU = 0, nB = 0, nProp = 0, nP = 0, nU = 0, nCh = 0, nAp = 0, nDc = 0;
     var nUdc = 0, tUdc = 0; /* R28: evase con prezzo da confermare dentro il KPI utile */
+    var Yr = annoCorr(), tIY = 0, tIY1 = 0; /* R29: consuntivo a prezzi di quest'anno e del prossimo */
     righe.forEach(function(M){
       if (M.haBudget){ tB += M.budgetTot; if (M.proposta && M.rif.length) nProp++; else nB++; }
       if (M.utile != null && M.prezzoDaConfermare){ nUdc++; tUdc += M.utile; }
-      tI += M.costoOggi; if (M.chiusa) nCh++; else if (!M.c.sp){ nAp++; if (!M.conf) nDc++; }
+      tI += M.costoOggi; tIY += M.costoIdxY || 0; tIY1 += M.costoIdxY1 || 0; if (M.chiusa) nCh++; else if (!M.c.sp){ nAp++; if (!M.conf) nDc++; }
       if (M.prezzo != null && !M.prezzoDubbio){ tP += M.prezzo; nP++; }
       if (M.utile != null){ tU += M.utile; nU++; tPU += M.prezzo; }
     });
@@ -4305,13 +4318,13 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     var colBdg = !tuttoChiuso || righe.some(function(M){ return M.haBudget; });
     var tipoU = tuttoChiuso ? 'utile consuntivo' : nCh ? 'utile (a budget / consuntivo)' : 'utile a budget';
     var h = '<div class="cm-kpis bdgk"><div class="cm-kpi"><b>' + eurR(tP) + '</b><span>prezzo di vendita</span><small>' + nP + ' commesse con prezzo su ' + righe.length + '</small></div>'
-      + '<div class="cm-kpi"><b>' + (tuttoChiuso ? eurR(tI) : eurR(tB)) + '</b><span>' + (tuttoChiuso ? 'costi consuntivi' : 'budget totale' + (nProp ? ' (incluso proposto)' : '')) + '</span><small>' + (tuttoChiuso ? 'impegnato + ore' : nB + ' con budget inserito o confermato · ' + nProp + ' con budget proposto da confermare · ' + (righe.length - nB - nProp) + ' senza') + '</small></div>'
+      + '<div class="cm-kpi"><b>' + (tuttoChiuso ? eurR(tI) : eurR(tB)) + '</b><span>' + (tuttoChiuso ? 'costi consuntivi' : 'budget totale' + (nProp ? ' (incluso proposto)' : '')) + '</span><small>' + (tuttoChiuso ? 'impegnato + ore · a prezzi ' + Yr + ' <b>' + eurR(tIY) + '</b> · ' + (Yr + 1) + ' <b>' + eurR(tIY1) + '</b>' : nB + ' con budget inserito o confermato · ' + nProp + ' con budget proposto da confermare · ' + (righe.length - nB - nProp) + ' senza') + '</small></div>'
       + (tuttoChiuso ? '' : '<div class="cm-kpi"><b>' + eurR(tI) + '</b><span>costi a oggi</span><small>esterni impegnati + ore</small></div>')
       + '<div class="cm-kpi' + (tU < 0 ? ' hot' : '') + '"><b>' + (nU ? eurR(tU) : '—') + '</b><span>' + tipoU + '</span><small>' + (nU ? nU + ' commesse con prezzo e ' + (tuttoChiuso ? 'costi' : 'budget') + (tPU ? ' · margine ' + Math.round(tU / tPU * 100) + '% sul loro prezzo' : '') + (nUdc ? ' · di cui ' + nUdc + ' con prezzo da confermare (' + eurR(tUdc) + ')' : '') : 'serve prezzo e budget') + '</small></div>'
       + (nAp ? '<div class="cm-kpi' + (nDc ? ' hot' : '') + '"><b>' + nDc + '</b><span>nodi da confermare</span><small>commesse in corso senza nodi confermati, su ' + nAp + '</small></div>' : '') + '</div>';
     h += '<section class="og"><h3 class="cfh"><i class="dt cy"></i>Tutte le commesse in vista<em class="oghint">' + righe.length + ' commesse · seleziona una commessa per i nodi</em>'
       + '<span class="cfbtn"><button class="chip" data-bdgcopy="*">Copia per Excel</button><button class="chip" data-bdgcsv="*">Scarica .csv</button>' + (nCh ? '' : '<button class="chip" data-bdgxls="*">Excel su Drive</button>') + '</span></h3>'
-      + '<div class="otab cf bdgt"><table><thead><tr><th>Commessa</th><th>Nodi</th><th class="num">Prezzo di vendita</th>' + (colBdg ? '<th class="num">' + (tuttoChiuso ? 'Budget (memoria)' : 'Budget totale') + '</th>' : '') + '<th class="num">' + (tuttoChiuso ? 'Costi consuntivi' : 'Costi a oggi') + '</th>' + (colBdg ? '<th class="num">Scost. esterni</th>' : '') + '<th class="num">Utile</th><th class="num">Margine</th></tr></thead><tbody>';
+      + '<div class="otab cf bdgt"><table><thead><tr><th>Commessa</th><th>Nodi</th><th class="num">Prezzo di vendita</th>' + (colBdg ? '<th class="num">' + (tuttoChiuso ? 'Budget (memoria)' : 'Budget totale') + '</th>' : '') + '<th class="num">' + (tuttoChiuso ? 'Costi consuntivi' : 'Costi a oggi') + '</th>' + (tuttoChiuso ? '<th class="num">A prezzi ' + Yr + '</th><th class="num">A prezzi ' + (Yr + 1) + '</th>' : '') + (colBdg ? '<th class="num">Scost. esterni</th>' : '') + '<th class="num">Utile</th><th class="num">Margine</th></tr></thead><tbody>';
     righe.forEach(function(M){
       var c = M.c, st = M.tot.stato;
       h += '<tr class="' + esc(st) + '" data-bdgcm="' + esc(c.code) + '"><td class="nodo"><b>' + esc(c.code) + '</b><span class="osub">' + esc(c.cliente || '') + (c.desc ? ' · ' + esc(c.desc) : '') + '</span></td>'
@@ -4319,6 +4332,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
         + '<td class="num mono">' + (M.prezzo != null ? eurR(M.prezzo) : '—') + (M.prezzoFonte && M.prezzoFonte !== 'contratto' ? '<span class="osub">' + esc(M.prezzoFonte.replace(' nel gestionale', '')) + (M.prezzoDubbio ? ' · incompleto?' : M.prezzoDaConfermare ? ' · da confermare' : '') + '</span>' : '') + '</td>'
         + (colBdg ? '<td class="num mono">' + (M.haBudget ? eurR(M.budgetTot) : '<span class="osub">' + (M.chiusa ? '—' : 'da inserire') + '</span>') + '</td>' : '')
         + '<td class="num mono"><b>' + eurR(M.costoOggi) + '</b></td>'
+        + (tuttoChiuso ? '<td class="num mono">' + eurR(M.costoIdxY) + '</td><td class="num mono">' + eurR(M.costoIdxY1) + '</td>' : '')
         + (colBdg ? '<td class="num mono pct">' + (M.tot.ext > 0 ? (M.tot.sc > 0 ? '+' : '') + eurR(M.tot.sc) + ' (' + pctTxt(M.tot.pct) + ')' : '—') + '</td>' : '')
         + '<td class="num mono' + (M.utile != null && M.utile < 0 ? ' bad' : '') + '">' + (M.utile != null ? eurR(M.utile) + '<span class="osub">' + esc(M.utileTipo) + '</span>' : '<span class="osub">' + (M.prezzo == null ? 'senza prezzo' : M.chiusa ? (M.prezzoDubbio ? 'prezzo incompleto' : '—') : 'senza budget') + '</span>') + '</td>'
         + '<td class="num mono">' + (M.marg != null ? Math.round(M.marg * 100) + '%' : '—') + '</td></tr>';
@@ -4360,7 +4374,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
   function bdgRighe(M){
     var Y = M.Y, rows = [['Commessa', M.c.code, M.c.cliente || '', M.c.desc || '', M.chiusa ? 'evasa' : 'in corso'], ['Prezzo di vendita', M.prezzo != null ? Math.round(M.prezzo) : '', M.prezzoFonte || ''],
       ['Budget totale commessa', M.haBudget ? Math.round(M.budgetTot) : '', 'esterni', Math.round(M.tot.ext), 'ore €', Math.round(M.ore.bEur), M.proposta && M.rif.length ? 'proposto da ' + M.rif.map(function(s){ return s.code; }).join(', ') : ''],
-      ['Costi ' + (M.chiusa ? 'consuntivi' : 'a oggi'), Math.round(M.costoOggi), 'impegnato', Math.round(M.tot.imp), 'ore €', Math.round(M.ore.cEur)],
+      ['Costi ' + (M.chiusa ? 'consuntivi' : 'a oggi'), Math.round(M.costoOggi), 'impegnato', Math.round(M.tot.imp), 'ore €', Math.round(M.ore.cEur), 'a prezzi ' + Y, Math.round(M.costoIdxY), 'a prezzi ' + (Y + 1), Math.round(M.costoIdxY1)],
       ['Utile ' + (M.utileTipo || ''), M.utile != null ? Math.round(M.utile) : '', 'Utile a budget', M.utileB != null ? Math.round(M.utileB) : '', 'Utile con i costi a oggi', M.utileO != null ? Math.round(M.utileO) : ''], [],
       ['Nodo', 'Nel gestionale', 'Budget esterno', 'Ore ufficio', 'Ore produzione', 'Budget ore €', 'Budget totale', 'Fatturato', 'Consegnato', 'Ordinato', 'Impegnato', 'Scostamento €', 'Scostamento %', 'Indicizzato ' + Y, 'Prezzo ' + Y, 'Indicizzato ' + (Y + 1), 'Prezzo ' + (Y + 1), 'Note']];
     M.righe.concat([M.tot]).forEach(function(r){
@@ -4376,11 +4390,11 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     return rows;
   }
   function bdgRigheRiep(righe){
-    var rows = [['Commessa', 'Cliente', 'Descrizione', 'Nodi', 'Stato nodi', 'Prezzo di vendita', 'Fonte prezzo', 'Budget esterno', 'Budget ore €', 'Budget totale', 'Fatturato', 'Consegnato', 'Ordinato', 'Impegnato', 'Ore consuntivo €', 'Costi a oggi', 'Scostamento esterni €', 'Scostamento %', 'Utile', 'Tipo utile', 'Margine %', 'Utile a budget', 'Utile con i costi a oggi']];
+    var rows = [['Commessa', 'Cliente', 'Descrizione', 'Nodi', 'Stato nodi', 'Prezzo di vendita', 'Fonte prezzo', 'Budget esterno', 'Budget ore €', 'Budget totale', 'Fatturato', 'Consegnato', 'Ordinato', 'Impegnato', 'Ore consuntivo €', 'Costi a oggi', 'Scostamento esterni €', 'Scostamento %', 'Utile', 'Tipo utile', 'Margine %', 'Utile a budget', 'Utile con i costi a oggi', 'Costi a prezzi ' + annoCorr(), 'Costi a prezzi ' + (annoCorr() + 1)]];
     righe.forEach(function(M){ var t = M.tot;
       rows.push([M.c.code, M.c.cliente || '', M.c.desc || '', M.nodi.length, M.chiusa ? 'evasa' : M.proposta ? 'proposti' : M.conf ? 'confermati' : 'da confermare', M.prezzo != null ? Math.round(M.prezzo) : '', M.prezzoFonte || '',
         Math.round(t.ext), Math.round(M.ore.bEur), Math.round(M.budgetTot), Math.round(t.fat + t.con + t.alt), Math.round(t.ddt), Math.round(t.ord), Math.round(t.imp), Math.round(M.ore.cEur), Math.round(M.costoOggi),
-        t.ext > 0 ? Math.round(t.sc) : '', t.pct == null ? '' : Math.round((t.pct - 1) * 100), M.utile != null ? Math.round(M.utile) : '', M.utileTipo || '', M.marg != null ? Math.round(M.marg * 100) : '', M.utileB != null ? Math.round(M.utileB) : '', M.utileO != null ? Math.round(M.utileO) : '']); });
+        t.ext > 0 ? Math.round(t.sc) : '', t.pct == null ? '' : Math.round((t.pct - 1) * 100), M.utile != null ? Math.round(M.utile) : '', M.utileTipo || '', M.marg != null ? Math.round(M.marg * 100) : '', M.utileB != null ? Math.round(M.utileB) : '', M.utileO != null ? Math.round(M.utileO) : '', Math.round(M.costoIdxY), Math.round(M.costoIdxY1)]); });
     return rows;
   }
   function bdgFile(code, est){ return 'budget-' + (code === '*' ? 'tutte' : String(code).replace(/[^A-Za-z0-9_-]+/g, '_').slice(0, 40)) + '.' + est; }

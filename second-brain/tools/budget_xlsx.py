@@ -460,6 +460,9 @@ def modello(S, c, Y, rif_mode=None):
          'ore': {'bU': bU, 'bO': bO, 'cU': cU, 'cO': cO, 'cE': cE, 'cEeur': cEeur, 'bEur': ore_bdg, 'cEur': ore_cons, 'hCm': h_cm},
          'prezzo': prezzo, 'prezzoFonte': fonte, 'oc': oc, 'valore': valore, 'fatCli': fat_cli, 'haBudget': ha_budget, 'chiusa': bool(c.get('ev')),
          'budgetTot': tot['ext'] + ore_bdg, 'costoOggi': tot['imp'] + ore_cons}
+    # R29 (20/09): consuntivo a prezzi di quest'anno e del prossimo (esterni indicizzati, ore alle tariffe dell'anno corrente)
+    M['costoIdxY'] = tot['idxY'] + ore_cons
+    M['costoIdxY1'] = tot['idxY1'] + ore_cons
     # R26: un prezzo preso dal gestionale sotto la metà dei costi consuntivi è quasi certamente incompleto (fatture
     # registrate altrove): niente utile finché Danilo non scrive il prezzo; fatture e ordine cliente lontani >30% → da confermare
     M['prezzoDubbio'] = bool(c.get('ev') and prezzo is not None and fonte != 'contratto' and M['costoOggi'] > 0 and prezzo < 0.5 * M['costoOggi'])
@@ -786,8 +789,10 @@ def scrivi_riepilogo(wb, S, MM):
         len(MM), (' (%d evase)' % n_ch) if n_ch and n_ch != len(MM) else '', cons.get('agg') or '—', dt.date.today().isoformat(),
         (' · esclusi dai totali %d progetti del gestionale che non sono commesse (fiere, ricambi, interni): hanno il loro foglio' % len(altre)) if altre else '')
     ws['A2'].font = st['h2']
+    Yr = MM[0]['Y'] if MM else dt.date.today().year
     H = ['Commessa', 'Cliente', 'Descrizione', 'Nodi', 'Stato nodi', 'Prezzo di vendita', 'Fonte prezzo', 'Budget esterno', 'Budget ore €', 'Budget totale', 'Fatturato', 'Consegnato', 'Ordinato', 'Impegnato',
-         'Ore consuntivo €', 'Costi a oggi', 'Scostamento esterni €', 'Scostamento %', 'Utile', 'Tipo utile', 'Margine %', 'Utile a budget', 'Utile con i costi a oggi']
+         'Ore consuntivo €', 'Costi a oggi', 'Scostamento esterni €', 'Scostamento %', 'Utile', 'Tipo utile', 'Margine %', 'Utile a budget', 'Utile con i costi a oggi',
+         'Costi a prezzi %d' % Yr, 'Costi a prezzi %d' % (Yr + 1)]
     rh = 4
     for j, h in enumerate(H, start=1):
         cell = ws.cell(rh, j, h)
@@ -801,7 +806,8 @@ def scrivi_riepilogo(wb, S, MM):
                 t['ext'], M['ore']['bEur'], M['budgetTot'], t['fat'] + t['con'] + t['alt'], t['ddt'], t['ord'], t['imp'],
                 M['ore']['cEur'], M['costoOggi'], t['sc'] if t['ext'] > 0 else '', (t['pct'] - 1) if t['pct'] is not None else '',
                 M['utile'] if M['utile'] is not None else '', M['utileTipo'] or ('prezzo incompleto' if M.get('prezzoDubbio') else ''), M['marg'] if M['marg'] is not None else '',
-                M['utileB'] if M['utileB'] is not None else '', M['utileO'] if M['utileO'] is not None else '']
+                M['utileB'] if M['utileB'] is not None else '', M['utileO'] if M['utileO'] is not None else '',
+                M['costoIdxY'], M['costoIdxY1']]
         for j, v in enumerate(vals, start=1):
             cell = ws.cell(row, j, v)
             cell.border, cell.font = st['border'], st['norm']
@@ -812,7 +818,7 @@ def scrivi_riepilogo(wb, S, MM):
     rn = rh + len(MM)
     rt = rn + 1
     ws.cell(rt, 1, 'Totale')
-    for j in (6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 19, 22, 23):
+    for j in (6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 19, 22, 23, 24, 25):
         ws.cell(rt, j, '=SUM({0}{1}:{0}{2})'.format(L(j), rh + 1, rn)).number_format = EUR
     ws.cell(rt, 17, '=IF(H{0}>0,N{0}-H{0},"")'.format(rt)).number_format = EUR
     ws.cell(rt, 18, '=IF(H{0}>0,N{0}/H{0}-1,"")'.format(rt)).number_format = PCT

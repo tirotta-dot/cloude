@@ -175,7 +175,8 @@ def costruisci(S, Y=None):
     ws['A1'].font = st['h1']
     ws['A2'] = 'prezzo = valore a contratto se noto, altrimenti il maggiore tra fatture al cliente e ordine cliente nel gestionale · utile = prezzo − costi consuntivi (impegnato + ore) · un prezzo sotto la metà dei costi è considerato incompleto e non dà utile'
     ws['A2'].font = st['h2']
-    H = ['Commessa', 'Tipo', 'Cliente', 'Descrizione', 'Evasa il', 'Prezzo di vendita', 'Fonte prezzo', 'Fatture al cliente', 'Ordine cliente', 'Costi consuntivi', 'Utile', 'Margine', 'Segnalazioni']
+    H = ['Commessa', 'Tipo', 'Cliente', 'Descrizione', 'Evasa il', 'Prezzo di vendita', 'Fonte prezzo', 'Fatture al cliente', 'Ordine cliente', 'Costi consuntivi',
+         'Costi a prezzi %d' % Y, 'Costi a prezzi %d' % (Y + 1), 'Utile', 'Margine', 'Segnalazioni']
     righe, conta = [], defaultdict(int)
     for c in sorted(evase, key=lambda c: (c.get('evd') or ''), reverse=True):
         M = MM[c['code']]
@@ -184,9 +185,9 @@ def costruisci(S, Y=None):
         for x in seg:
             conta[x.split(':')[0].split(' (')[0]] += 1
         righe.append([c['code'], t, c.get('cliente') or '', c.get('desc') or '', c.get('evd') or '', M['prezzo'], (M['prezzoFonte'] or '').replace(' nel gestionale', ''),
-                      M['fatCli'], M['oc'], M['costoOggi'], M['utile'], M['marg'], '\n'.join(seg)])
-    tabella(ws, 4, H, righe, {6: EUR, 8: EUR, 9: EUR, 10: EUR, 11: EUR, 12: PCT}, st, [11, 10, 26, 30, 11, 14, 12, 14, 14, 14, 14, 9, 70],
-            evidenzia=lambda v: 'bad' if (v[10] is not None and v[10] < 0) or 'incompleto' in (v[12] or '') else ('warn' if v[12] else None))
+                      M['fatCli'], M['oc'], M['costoOggi'], M['costoIdxY'], M['costoIdxY1'], M['utile'], M['marg'], '\n'.join(seg)])
+    tabella(ws, 4, H, righe, {6: EUR, 8: EUR, 9: EUR, 10: EUR, 11: EUR, 12: EUR, 13: EUR, 14: PCT}, st, [11, 10, 26, 30, 11, 14, 12, 14, 14, 14, 14, 14, 14, 9, 70],
+            evidenzia=lambda v: 'bad' if (v[12] is not None and v[12] < 0) or 'incompleto' in (v[14] or '') else ('warn' if v[14] else None))
 
     # ---- Senza prezzo (evase di tipo commessa/variante senza prezzo o con prezzo incompleto)
     ws = wb.create_sheet('Senza prezzo')
