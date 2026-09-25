@@ -1697,6 +1697,14 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
                 return '<li>' + esc(x[0] || 'non indicata') + ' <span class="srcline">'
                   + x[1] + ' h</span></li>'; }).join('') + '</ul>';
         }
+        if ((c.ore.nd || []).length){
+          /* R33 (25/09): le ore per nodo del gestionale [nodo, ufficio, officina, esterni] */
+          h += '<h4 style="margin-top:10px">Ore per nodo</h4><ul class="plain">'
+            + c.ore.nd.slice(0, 6).map(function(x){
+                var t = (Number(x[1]) || 0) + (Number(x[2]) || 0) + (Number(x[3]) || 0);
+                return '<li>' + esc(x[0] === '-' ? 'senza nodo' : titolo(x[0])) + ' <span class="srcline">' + Math.round(t * 10) / 10 + ' h'
+                  + ' (uff. ' + (x[1] || 0) + ' · off. ' + (x[2] || 0) + (x[3] ? ' · est. ' + x[3] : '') + ')</span></li>'; }).join('') + '</ul>';
+        }
         if ((c.ore.dip || []).length){
           h += '<h4 style="margin-top:10px">Chi ci ha lavorato di più</h4><ul class="plain">'
             + c.ore.dip.slice(0, 5).map(function(x){
@@ -1705,8 +1713,8 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
         }
         h += '<p class="srcline" style="margin-top:8px">' + esc(c.ore.src || '') + '</p>';
       } else {
-        h += '<div class="ore-wait">Nessuna ora registrata su questa commessa nel file del gestionale '
-          + '(estrazione al 25/08/2026).</div>';
+        h += '<div class="ore-wait">Nessuna ora registrata su questa commessa nel file del gestionale'
+          + (S.oreG && S.oreG.agg ? ' (' + esc(S.oreG.file || 'estrazione') + ', ore fino al ' + esc(itFull(S.oreG.agg)) + ')' : '') + '.</div>';
       }
       h += '</div>';
 
