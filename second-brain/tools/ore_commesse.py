@@ -15,6 +15,9 @@ Regole (le stesse del caricamento dell'11/09, validate su 9 commesse identiche i
   python3 ore_commesse.py --csv ore.csv ...     (la scheda «Ore» del foglio Google preparato su Drive, separatore , o ;)
   python3 ore_commesse.py --pkl ore.pkl ...     ({'hdr': [...], 'rows': [[...], ...]})
 
+Codici diversi: se Luca indica che le ore di una commessa stanno sotto un altro codice progetto, si scrive nello stato
+oreG.alias = {"PS-16-14": ["CODICE-NEL-FOGLIO-ORE"], ...}: lo script somma quei progetti alla commessa a ogni giro.
+
 Un foglio «Ore» rotto (zero ore totali, un solo reparto, valorizzazione tutta in errore: e' successo con l'estrazione
 del 22/09) viene rifiutato e lo stato non si tocca.
 """
@@ -199,6 +202,23 @@ def main():
     ultima = tot['ultima'].isoformat() if tot['ultima'] else None
     nome = a.file or (a.xlsx or a.csv or a.pkl).split('/')[-1]
     src = 'Estrazione gestionale %s · ore registrate fino al %s' % (nome, '%s/%s/%s' % (ultima[8:10], ultima[5:7], ultima[:4]) if ultima else '—')
+    # alias indicati da Luca: {codice commessa: [codici progetto del foglio Ore da sommare]}, conservati nello stato
+    alias = {norm_code(k): [norm_code(x) for x in (v if isinstance(v, list) else [v]) if norm_code(x)]
+             for k, v in ((S.get('oreG') or {}).get('alias') or {}).items()}
+    usati = set()
+    for code, altri in alias.items():
+        for q in altri:
+            if q in P and q != code:
+                x, y = P[code], P[q]
+                for f in ('uff', 'off', 'est', 'estEur', 'valG'):
+                    x[f] += y[f]
+                for f in ('mesi', 'dip', 'att'):
+                    for kk, vv in y[f].items():
+                        x[f][kk] += vv
+                for kk, vv in y['nd'].items():
+                    for j in range(3):
+                        x['nd'][kk][j] += vv[j]
+                usati.add(q)
     stat = {'aperte': [0, 0], 'sospese': [0, 0], 'evase': [0, 0]}
     senza = []
     codici = set()
@@ -214,8 +234,8 @@ def main():
         else:
             c['ore'] = {'uff': None, 'off': None, 'est': None, 'storia': [], 'src': 'Nessuna ora registrata su questa commessa: ' + src}
             senza.append((chi, c.get('code')))
-    fuori = sorted(((p, r1(x['uff'] + x['off'] + x['est'])) for p, x in P.items() if p not in codici), key=lambda t: -t[1])
-    S['oreG'] = {'agg': ultima, 'file': nome + ' · foglio «Ore»',
+    fuori = sorted(((p, r1(x['uff'] + x['off'] + x['est'])) for p, x in P.items() if p not in codici and p not in usati), key=lambda t: -t[1])
+    S['oreG'] = {'agg': ultima, 'alias': (S.get('oreG') or {}).get('alias') or {}, 'file': nome + ' · foglio «Ore»',
                  'fonte': 'ore per commessa: uff = reparti UFF+TEC ditta P&B; off = reparti OFF+ART ditta P&B; est/estEur = righe con ditta diversa da P&B; valG = valorizzazione totale. Aggiornate su tutte le commesse (aperte, sospese, evase).',
                  'controllo': {'righe': tot['righe'], 'ore': round(tot['ore']), 'valorizzazione': round(tot['val']),
                                'reparti': sorted(tot['reparti']), 'ditte': sorted(tot['ditte']), 'progetti': len(P),
