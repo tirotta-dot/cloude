@@ -59,25 +59,33 @@ def elenco(S, oggi):
     lim = (oggi + dt.timedelta(days=30)).isoformat()
     out = []
     for c in S.get('commesse') or []:
-        if c.get('ev') or cm_altro(c):
+        if cm_altro(c):
             continue
         for v in (c.get('pag') or {}).get('voci') or []:
             imp = float(v.get('imp') or 0)
-            if not imp or v.get('inc') or v.get('st') == 'incassato':
+            if v.get('inc') or v.get('st') == 'incassato':
                 continue
             att = v.get('att') if iso(v.get('att')) else ''
             pa = v.get('pa') or {}
+            scaduta = bool(att and att < oggi.isoformat())
+            # commessa evasa o rata senza importo: entra solo se gia' scaduta (i soldi mancano comunque) o gia' in discussione
+            if (c.get('ev') or not imp) and not (scaduta or pa):
+                continue
             if not ((att and att <= lim) or v.get('st') in ('da_verificare', 'scaduto') or pa):
                 continue
             sit = []
             if att:
-                sit.append(('scaduta il ' if att < oggi.isoformat() else 'attesa il ') + gm(att))
+                sit.append(('scaduta il ' if scaduta else 'attesa il ') + gm(att))
+            if not imp:
+                sit.append('importo da recuperare')
             if v.get('st') == 'da_verificare':
                 sit.append('incasso da verificare')
             if c.get('sp'):
                 sit.append('commessa sospesa')
+            if c.get('ev'):
+                sit.append('commessa evasa')
             out.append({'id': voce_id(c['code'], v), 'tipo': 'Da contratto', 'cm': c['code'], 'cli': c.get('cliente') or '',
-                        'desc': re.sub(r'\s+', ' ', str(v.get('c') or '')).strip()[:180], 'imp': round(imp, 2), 'att': att,
+                        'desc': re.sub(r'\s+', ' ', str(v.get('c') or '')).strip()[:180], 'imp': round(imp, 2) if imp else None, 'att': att,
                         'sit': ' · '.join(sit), 'ultima': ultima_txt(pa), 'ord': (0, att or '9999')})
     for b in S.get('billing') or []:
         if b.get('d') or b.get('st') not in BILL_ST:
@@ -155,6 +163,7 @@ def foglio(a):
     dv.add('K%d:K%d' % (hr + 1, last))
     dd = DataValidation(type='date', operator='greaterThan', formula1='DATE(2020,1,1)', allow_blank=True,
                         errorTitle='Data non valida', error='Scrivi una data (gg/mm/aaaa)')
+    dd.showErrorMessage = True
     ws.add_data_validation(dd)
     dd.add('L%d:L%d' % (hr + 1, last))
     for col, w in zip('ABCDEFGHIJKLM', (5, 18, 16, 11, 26, 52, 13, 12, 34, 26, 16, 14, 30)):
@@ -182,10 +191,13 @@ def applica(a):
     S = json.load(open(a.state, encoding='utf-8'))
     oggi = oggi_di(a)
     ris = json.load(open(a.risposte, encoding='utf-8'))
-    per_n = {}
+    V = {}
     if a.voci:
         V = json.load(open(a.voci, encoding='utf-8'))
-        per_n = {r['n']: r['id'] for r in V.get('voci') or []}
+    per_n = {int(r['n']): r['id'] for r in V.get('voci') or []}
+    per_id = {r['id']: r for r in V.get('voci') or []}
+    # la settimana del foglio in uso (senza --voci: il lunedi' di questa settimana)
+    sett = V.get('settimana') or (oggi - dt.timedelta(days=oggi.weekday())).isoformat()
     # indice id → oggetto nello stato
     idx = {}
     for c in S.get('commesse') or []:
@@ -193,11 +205,38 @@ def applica(a):
             idx[voce_id(c['code'], v)] = ('C', c, v)
     for b in S.get('billing') or []:
         idx['F-' + str(b.get('id'))] = ('F', None, b)
-    rep = {'applicate': [], 'ignorate': [], 'sollecitare': [], 'conflitti': []}
+    rep = {'applicate': [], 'ignorate': [], 'sollecitare': [], 'conflitti': [], 'ricondotte': []}
+
+    def ripiego(rid):
+        """Il testo della rata e' cambiato dopo il foglio (e con lui l'id): la ritrovo per commessa, importo e data attesa."""
+        r = per_id.get(rid)
+        if not r or r.get('tipo') != 'Da contratto':
+            return None
+        cand = [k for k, (t, c, v) in idx.items() if t == 'C' and c['code'] == r['cm']
+                and round(float(v.get('imp') or 0)) == round(float(r.get('imp') or 0))
+                and (v.get('att') or '') == (r.get('att') or '')]
+        return cand[0] if len(cand) == 1 else None
+
     # la risposta piu' recente per id vince; risposte diverse nello stesso giorno sono un conflitto da segnalare
     migliori = {}
     for x in ris:
-        rid = x.get('id') or per_n.get(x.get('n'))
+        n = x.get('n')
+        try:
+            n = int(str(n).strip()) if n not in (None, '') else None
+        except ValueError:
+            n = None
+        if not x.get('id') and n is not None:
+            # il numero di riga vale solo per il foglio di questa settimana: una risposta a un foglio precedente
+            # punterebbe a un'altra rata
+            if (x.get('settimana') and x.get('settimana') != sett) or (not x.get('settimana') and str(x.get('quando') or '9999') < sett):
+                rep['ignorate'].append({'risposta': x, 'motivo': 'numero di riga di un foglio di una settimana precedente'})
+                continue
+        rid = x.get('id') or per_n.get(n)
+        if rid and rid not in idx:
+            alt = ripiego(rid)
+            if alt:
+                rep['ricondotte'].append({'da': rid, 'a': alt})
+                rid = alt
         r = norm_risposta(x.get('risposta'))
         if not rid or rid not in idx or not r:
             rep['ignorate'].append({'risposta': x, 'motivo': 'riga non trovata' if (not rid or rid not in idx) else 'risposta non riconosciuta'})
@@ -223,9 +262,22 @@ def applica(a):
         S.setdefault('groups', []).append(grp)
     for rid, y in migliori.items():
         tipo, c, o = idx[rid]
-        prima = o.get('pa') or {}
-        if (prima.get('r'), prima.get('d')) == (y['r'], y['d']):
-            continue  # stessa risposta gia' registrata (il foglio si rilegge ogni giorno): non la riapplico
+        storia = o.get('paStoria') or ([o['pa']] if o.get('pa') else [])
+        # il foglio si rilegge ogni giorno: la stessa risposta gia' registrata in questa settimana non si riapplica
+        # (ne' scavalca una risposta diversa arrivata dopo per mail). La stessa risposta di una settimana precedente
+        # invece e' una nuova conferma.
+        if any((h.get('r'), h.get('d')) == (y['r'], y['d']) and str(h.get('quando') or '') >= sett for h in storia):
+            continue
+        ultima = storia[-1] if storia else {}
+        if ultima and str(ultima.get('quando') or '') > y['quando']:
+            rep['conflitti'].append({'id': rid, 'a': ultima, 'b': y, 'motivo': 'risposta piu\' vecchia di quella gia\' registrata: non applicata'})
+            continue
+        # una rata gia' incassata non torna aperta da sola: lo segnalo a Danilo
+        gia = (tipo == 'C' and (o.get('inc') or o.get('st') == 'incassato')) or (tipo == 'F' and o.get('d'))
+        if gia and y['r'] != 'pagato':
+            rep['conflitti'].append({'id': rid, 'a': {'r': 'pagato', 'inc': o.get('inc') or o.get('dd')}, 'b': y,
+                                     'motivo': 'risulta gia\' incassata: non la riapro, decide Danilo'})
+            continue
         o['pa'] = {k: y[k] for k in ('r', 'd', 'chi', 'quando', 'nota', 'fonte')}
         o.setdefault('paStoria', []).append(o['pa'])
         o['paStoria'] = o['paStoria'][-10:]
@@ -251,10 +303,22 @@ def applica(a):
             elif y['r'] == 'arrivo':
                 o['att'] = y['d']
             o['stx'] = (str(o.get('stx') or '') + segno).strip(' ·')
+        base = 'pgs-' + re.sub(r'[^A-Za-z0-9]+', '', rid)[-14:]
+        aperti = [t for t in grp['tasks'] if (t.get('id') == base or str(t.get('id') or '').startswith(base + '-')) and not t.get('d')]
+        if y['r'] in ('pagato', 'arrivo'):
+            # il sollecito non serve piu': chiudo il task aperto
+            for t in aperti:
+                t['d'] = True
+                t['dd'] = y['quando']
+                t['s'] = (str(t.get('s') or '') + ' · chiuso: %s (%s, %s)' % (testo, y['chi'], gm(y['quando']))).strip(' ·')
         if y['r'] == 'sollecitare':
-            tid = 'pgs-' + re.sub(r'[^A-Za-z0-9]+', '', rid)[-14:]
-            aperto = [t for t in grp['tasks'] if t.get('id') == tid and not t.get('d')]
-            if not aperto:
+            usati = {t.get('id') for t in grp['tasks']}
+            tid = base if base not in usati else base + '-' + y['quando'].replace('-', '')[2:]
+            k = 2
+            while tid in usati:
+                tid = base + '-' + y['quando'].replace('-', '')[2:] + '-' + str(k)
+                k += 1
+            if not aperti:
                 grp['tasks'].append({'id': tid, 't': 'Sollecitare %s: %s' % (nome, desc), 'o': y['quando'],
                                      's': 'Foglio pagamenti · %s · %s segnala «da sollecitare»%s' % (gm(y['quando']), y['chi'], (' · ' + y['nota']) if y['nota'] else ''),
                                      'd': False, 'n': '', 'nq': [], 'p': 1})
@@ -262,7 +326,7 @@ def applica(a):
         rep['applicate'].append({'id': rid, 'tipo': 'rata del contratto' if tipo == 'C' else 'da fatturare/incassare', 'chi': nome,
                                  'desc': desc, 'risposta': testo, 'da': y['chi'], 'quando': y['quando'], 'fonte': y['fonte'], 'nota': y['nota']})
     if a.voci:
-        risposte_ids = {r['id'] for r in rep['applicate']} | {rid for rid, (t, c, o) in idx.items() if (o.get('pa') or {}).get('quando', '') >= V.get('settimana', '9999')}
+        risposte_ids = set(migliori) | {r['da'] for r in rep['ricondotte']} | {rid for rid, (t, c, o) in idx.items() if str((o.get('pa') or {}).get('quando') or '') >= sett}
         rep['senzaRisposta'] = [{'n': r['n'], 'id': r['id'], 'cm': r['cm'], 'cli': r['cli'], 'desc': r['desc'][:90], 'att': r['att']}
                                 for r in V.get('voci') or [] if r['id'] not in risposte_ids]
     json.dump(S, open(a.out, 'w', encoding='utf-8'), ensure_ascii=False, separators=(',', ':'))

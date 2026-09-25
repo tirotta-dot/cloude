@@ -301,8 +301,10 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
   /* Copia locale e documento: le note sono lavoro di Danilo, quindi non se ne perde nessuna (anche
      quelle scritte da un altro dispositivo), e dove la routine ha gia' scritto l'esito vince il
      documento. */
-  function nqUnisci(doc, loc){
-    var perK = {}, visti = {}, out = [];
+  /* R34: le note cancellate da Danilo (chiavi in nqX) non tornano dal documento, salvo che la routine le abbia gia' applicate */
+  function nqUnisci(doc, loc, del){
+    var perK = {}, visti = {}, out = [], via = {};
+    (del || []).forEach(function(k){ via[k] = 1; });
     (doc || []).forEach(function(y){ perK[nqChiave(y)] = y; });
     (loc || []).forEach(function(x){
       var k = nqChiave(x), y = perK[k];
@@ -310,7 +312,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
       visti[k] = 1;
       out.push(y && (notaFatta(y) || y.r) ? y : x);
     });
-    (doc || []).forEach(function(y){ if (!visti[nqChiave(y)]){ visti[nqChiave(y)] = 1; out.push(y); } });
+    (doc || []).forEach(function(y){ var k = nqChiave(y); if (!visti[k] && (!via[k] || notaFatta(y) || y.r)){ visti[k] = 1; out.push(y); } });
     return out.sort(function(a, b){ return String(a.d || '') < String(b.d || '') ? -1 : String(a.d || '') > String(b.d || '') ? 1 : 0; });
   }
   function migraNote(){
@@ -429,6 +431,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
   function eliminaNota(host, idx){
     var o = find(host.getAttribute('data-id'));
     if (!o || !o.nq || !o.nq[idx] || notaFatta(o.nq[idx])) return;
+    o.nqX = (o.nqX || []).concat([nqChiave(o.nq[idx])]).slice(-30);
     o.nq.splice(idx, 1);
     ridisegnaNote(host, o);
     salvaSubito('nota eliminata');
@@ -723,7 +726,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
         + '<span class="bstat">' + bst(b.st).l + '</span>'
         + '<div class="bnote">' + esc(b.stx) + '</div>'
         + '<div class="bnote"><em>Prossimo passo:</em> ' + esc(b.nx) + '</div>'
-        + '<span class="bsrc">' + esc(b.s) + ' · aperta da ' + days(b.o, new Date()) + ' gg</span>'
+        + '<span class="bsrc">' + esc(b.s) + (isoIn(b.o) ? ' · aperta da ' + days(isoIn(b.o), new Date()) + ' gg' : '') + '</span>'
         + noteBox(b) + '</div></article>';
     });
     stage.innerHTML = shown
@@ -1240,8 +1243,15 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     ['arrivo_materiale','Arrivo materiale'],['conto_lavoro','Conto lavoro'],['spedizione','Spedizione'],
     ['installazione','Installazione'],['montaggio','Montaggio'],['garanzia','Garanzia']];
 
-  function itFull(x){ var d = new Date(x);
+  /* R34 (25/09): una data AAAA-MM-GG si costruisce come data civile (d0), e un testo che non e' una data
+     (es. «10 mesi dal primo acconto» nel contratto) si mostra com'e' invece di «aN/aN/NaN». */
+  function itFull(x){
+    if (x == null || x === '') return '\u2014';
+    var d = (typeof x === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(x)) ? d0(x) : new Date(x);
+    if (isNaN(d.getTime())) return String(x);
     return ('0'+d.getDate()).slice(-2) + '/' + ('0'+(d.getMonth()+1)).slice(-2) + '/' + d.getFullYear(); }
+  /* la prima data AAAA-MM-GG dentro un testo (consegna o data del contratto scritte a parole) */
+  function isoIn(s){ var m = String(s == null ? '' : s).match(/\d{4}-\d{2}-\d{2}/); return m ? m[0] : null; }
   function eur(n){ return n == null ? '—' : new Intl.NumberFormat('it-IT').format(n) + ' €'; }
   function CM(){ return S.commesse || []; }
   function CMv(){ return CM().filter(function(c){
@@ -2232,8 +2242,9 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     var o = c.ore || {};
     var uff = o.uff || 0, off = o.off || 0, est = o.est || 0;
     var noto = (o.uff != null || o.off != null || o.est != null);
+    /* R34: le ore esterne senza valorizzazione nel gestionale (estSU ufficio, estSO produzione) valgono le tariffe */
     return {uff:uff, off:off, est:est, tot:uff+off+est, noto:noto,
-            eur: uff * cfg().tUff + off * cfg().tOff + (o.estEur || 0)};
+            eur: uff * cfg().tUff + off * cfg().tOff + (o.estEur || 0) + (o.estSU || 0) * cfg().tUff + (o.estSO || 0) * cfg().tOff};
   }
   function margine(c){
     var val = (c.eco && c.eco.valore) || null;
@@ -2968,7 +2979,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
           + '<span class="bstat">' + bst(b.st).l + '</span>'
           + '<div class="bnote">' + esc(b.stx) + '</div>'
           + '<div class="bnote"><em>Prossimo passo:</em> ' + esc(b.nx) + '</div>'
-          + '<span class="bsrc">' + esc(b.s) + ' · aperta da ' + days(b.o, new Date()) + ' gg</span>'
+          + '<span class="bsrc">' + esc(b.s) + (isoIn(b.o) ? ' · aperta da ' + days(isoIn(b.o), new Date()) + ' gg' : '') + '</span>'
           + noteBox(b) + '</div></article>';
       });
       h += '</div>';
@@ -3342,8 +3353,9 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     var dc = cfDc(c), kS = cfKS(c), sp = cfp(c).sped || {}, out = [], tot = 0, g = dc ? d0(dc).getDate() : 15, avv = null;
     function data(k){ return (dc && k === ymKey(d0(dc))) ? d0(dc) : ymData(k, g); }
     Object.keys(sp).sort().forEach(function(k){ var p = Number(sp[k]) || 0; if (p > 0 && /^\d{4}-\d{2}$/.test(k)){ out.push({k: k, pct: p, d: data(k)}); tot += p; } });
-    if (tot > 100.5){ out.forEach(function(s){ s.pct = s.pct * 100 / tot; }); avv = 'le percentuali di spedizione sommano ' + pctIt(tot) + ': le ho riportate a 100%'; }
-    else if (tot < 99.5 && kS){
+    /* R34: ogni scarto da 100 si corregge (prima fra 99,5 e 100,5 restava com'era: 33,3 × 3 perdeva lo 0,1% della rata) */
+    if (tot > 100.001){ out.forEach(function(s){ s.pct = s.pct * 100 / tot; }); avv = 'le percentuali di spedizione sommano ' + pctIt(tot) + ': le ho riportate a 100%'; }
+    else if (tot < 99.999 && kS){
       var resto = 100 - tot, hit = out.filter(function(s){ return s.k === kS; })[0];
       if (hit){ hit.pct += resto; hit.auto = true; } else out.push({k: kS, pct: resto, d: data(kS), auto: true});
       out.sort(function(a, b){ return a.k < b.k ? -1 : 1; });
@@ -3352,23 +3364,35 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     return {righe: out, tot: tot, avviso: avv};
   }
   function cfVoceKey(v){ return Math.round(+v.imp || 0) + '|' + String(v.c || '').replace(/\s+/g, ' ').trim().slice(0, 40); }
+  /* R34: impostazioni della rata; se l'importo e' cambiato (rata che era «da recuperare») le ritrovo dal testo, se e' uno solo */
+  function cfVoceSalvata(c, v){
+    var vv = cfp(c).voci || {}, k = cfVoceKey(v); if (vv[k]) return vv[k];
+    var t = k.slice(k.indexOf('|') + 1), hit = Object.keys(vv).filter(function(x){ return x.slice(x.indexOf('|') + 1) === t; });
+    return hit.length === 1 ? vv[hit[0]] : null;
+  }
   /* evento dedotto dal testo della rata: lo propongo, Danilo lo conferma nella scheda */
+  function cfEvDaTesto(t){
+    if (/install|commission|montaggio|messa in servizio|avviamento|start.?up/.test(t)) return 'inst';
+    if (/collaud|accettazion|acceptance|\bsat\b|handover|hand over|consegna definitiva|definitive receipt/.test(t)) return 'acc';
+    if (/spediz|shipment|shipping|b\/l|bill of lading|polizza di carico|imbarco|lettera di credito|letter of credit|\bl\/c\b|pronta per la spedizione|ready for shipment|delivery/.test(t)) return 'sped';
+    if (/pittur|verniciat|painting/.test(t)) return 'pitt';
+    if (/saldatur|welding/.test(t)) return 'sald';
+    if (/disegn|drawing|documentazion|documenti/.test(t)) return 'doc';
+    return null;
+  }
+  /* R34: prima il testo della rata e la sua categoria, le note solo se non dicono nulla (una rata «contro documenti di
+     spedizione» con una nota sul post-commissioning finiva all'installazione) */
   function cfAuto(c, v){
     var t = (String(v.c || '') + ' ' + String(v.n || '')).toLowerCase(), a = 'fissa', cat = catIncasso(v);
     if (cat === 'acconto') a = 'fissa';
-    else if (/install|commission|montaggio|messa in servizio|avviamento|start.?up/.test(t)) a = 'inst';
-    else if (/collaud|accettazion|acceptance|handover|hand over|consegna definitiva|definitive receipt/.test(t)) a = 'acc';
-    else if (cat === 'sped' || cat === 'sped_parz' || /spediz|shipment|shipping|b\/l|bill of lading|polizza di carico|imbarco|lettera di credito|letter of credit|\bl\/c\b|pronta per la spedizione|ready for shipment|delivery/.test(t)) a = 'sped';
-    else if (/pittur|verniciat|painting/.test(t)) a = 'pitt';
-    else if (/saldatur|welding/.test(t)) a = 'sald';
-    else if (/disegn|drawing|documentazion|documenti/.test(t)) a = 'doc';
+    else a = cfEvDaTesto(String(v.c || '').toLowerCase()) || ((cat === 'sped' || cat === 'sped_parz') ? 'sped' : null) || cfEvDaTesto(String(v.n || '').toLowerCase()) || 'fissa';
     var gg = 0, m = t.match(/(?:entro|within)\s+(\d{1,3})\s*(?:giorni|gg|days)/) || t.match(/(\d{1,3})\s*(?:giorni|gg|days)\s+(?:dalla|dal|dopo|from|after)/);
     if (a !== 'fissa' && m) gg = +m[1];
     else if (a === 'sped' && v.att && cfDc(c)){ var x = days(d0(cfDc(c)), d0(v.att)); if (x > 0 && x <= 120) gg = x; }
     return {a: a, gg: gg};
   }
   function cfVoceCfg(c, v){
-    var s = (cfp(c).voci || {})[cfVoceKey(v)], au = cfAuto(c, v);
+    var s = cfVoceSalvata(c, v), au = cfAuto(c, v);
     if (!s || !s.a) return {a: au.a, gg: au.gg, d: null, auto: true};
     return {a: s.a, gg: Number(s.gg) || 0, d: isoOk(s.d) ? s.d : null, auto: false};
   }
@@ -3381,7 +3405,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     else if (q.a === 'sped'){
       var fatto = 0;
       SP.righe.forEach(function(s){ fatto += s.pct; add(s.d, imp * s.pct / 100, 'spedizione di ' + ymLabel(s.k) + ' · ' + pctIt(s.pct) + (s.auto ? ' (data di contratto)' : ''), false); });
-      if (fatto < 99.5) add(isoOk(v.att) ? d0(v.att) : null, imp * (100 - fatto) / 100, 'manca la data di spedizione: uso la data attesa dal contratto', true, true);
+      if (fatto < 99.999) add(isoOk(v.att) ? d0(v.att) : null, imp * (100 - fatto) / 100, 'manca la data di spedizione: uso la data attesa dal contratto', true, true);
     } else {
       var ev = CF_EV.filter(function(e){ return e[0] === q.a; })[0], de = ev && ev[2] ? cfp(c)[ev[2]] : null;
       if (isoOk(de)) add(d0(de), imp, cfEvLabel(q.a) + ' il ' + itFull(de), false);
@@ -3390,7 +3414,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     return out;
   }
   function cfModello(c){
-    var oggi = today(), k0 = ymKey(oggi), iso0 = isoDi(oggi), t0 = ymData(k0, 1);
+    var oggi = today(), k0 = ymKey(oggi), iso0 = isoDi(oggi);
     var R = {}, prima = {}, senza = {}, mesi = {}, det = [], avvisi = [];
     CF_R.forEach(function(r){ R[r[0]] = {}; prima[r[0]] = 0; senza[r[0]] = 0; });
     var pm = cfPianoMesi(c); pm.forEach(function(k){ mesi[k] = 1; });
@@ -3410,7 +3434,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
       r.parti.forEach(function(p){
         var d = p.d, nota = p.nota, row = row0;
         /* data passata e nessun incasso registrato: riga a parte, nel mese corrente, perche' il consulente non la scambi per un incasso sicuro */
-        if (!p.inc && d && d < t0){ nota += ' · attesa il ' + itFull(isoDi(d)) + ', non risulta incassata'; p.scad = true; d = oggi; row = 'incScad'; scad = true; }
+        if (!p.inc && d && isoDi(d) < iso0){ nota += ' · attesa il ' + itFull(isoDi(d)) + ', non risulta incassata'; p.scad = true; d = oggi; row = 'incScad'; scad = true; }
         put(row, d, p.imp, {chi: c.cliente || '', rif: String(r.v.c || '').replace(/\s+/g, ' ').slice(0, 110), term: r.q.gg ? '+' + r.q.gg + ' gg dall\'evento' : '',
           nota: nota, tipo: p.inc ? 'CONTRATTO · incassata' : row === 'incScad' ? 'CONTRATTO · scaduta, da verificare' : p.stim ? 'CONTRATTO · data stimata' : 'CONTRATTO'});
       });
@@ -3418,6 +3442,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
       if (!r.v.inc && r.q.a !== 'fissa' && r.q.a !== 'sped'){ var ev = CF_EV.filter(function(e){ return e[0] === r.q.a; })[0]; if (ev && !isoOk(cfp(c)[ev[2]])) avvisi.push('manca la data di ' + ev[1] + ' (serve alla rata «' + String(r.v.c || '').slice(0, 40) + '»)'); }
     });
     if (!rate.length) avvisi.push('nessun piano pagamenti del contratto: incassi non previsti');
+    rate.forEach(function(r){ if (!(+r.v.imp)) avvisi.push('rata «' + String(r.v.c || '').replace(/\s+/g, ' ').slice(0, 50) + '» senza importo: non è nel cash flow'); });
     /* budget: nodo del gestionale → riga del budget */
     var B = bdgModello(c), gmap = {};
     B.righe.forEach(function(r){ (r.gest || []).forEach(function(nd){ gmap[nd === '-' ? '-' : normNodo(nd)] = r.id; }); });
@@ -3489,7 +3514,8 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
   function cfTab(M){
     var haPrima = CF_R.some(function(r){ return Math.round(M.prima[r[0]]); }), haSenza = CF_R.some(function(r){ return Math.round(M.senza[r[0]]); }), righe = [];
     CF_R.forEach(function(r){
-      var key = r[0], s = r[2], vals = M.mesi.map(function(k){ return s * (M.R[key][k] || 0); }), pr = s * M.prima[key], se = s * M.senza[key];
+      /* R34: celle in euro interi e totali come somma delle celle, cosi' le colonne tornano anche nell'Excel */
+      var key = r[0], s = r[2], vals = M.mesi.map(function(k){ return Math.round(s * (M.R[key][k] || 0)); }), pr = Math.round(s * M.prima[key]), se = Math.round(s * M.senza[key]);
       var tot = pr + se; vals.forEach(function(v){ tot += v; });
       if (!Math.round(pr) && !Math.round(se) && !vals.some(function(v){ return Math.round(v); })) return;
       righe.push({key: key, lab: r[1], fonte: r[3], s: s, prima: pr, vals: vals, senza: se, tot: tot});
@@ -3864,17 +3890,19 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
   function cfCardHtml(c){
     if (c.ev || cmAltro(c)) return '';
     var M = cfModello(c), P = cfp(c), dc = cfDc(c), kS = cfKS(c), sp = P.sped || {}, vuoto = !Object.keys(sp).some(function(k){ return Number(sp[k]) > 0; });
-    var h = '<div class="cmb cfz" data-cfz="' + esc(c.code) + '"><h4>Cash flow · date chiave e incassi</h4>'
+    var passato = 0; Object.keys(sp).forEach(function(k){ if (k < M.pm[0] && Number(sp[k]) > 0) passato += Number(sp[k]); });
+    var h = '<div class="cmb cfz" data-cfz="' + esc(c.code) + '" data-cfprev="' + passato + '"><h4>Cash flow · date chiave e incassi</h4>'
       + '<p class="srcline" style="margin:0 0 10px">Spedizione da contratto: <b>' + (dc ? esc(itFull(dc)) : 'non indicata') + '</b>. Queste date servono al cash flow per il consulente: quando incassi ogni rata e quanto spedisci ogni mese.' + (P.agg ? ' Aggiornate il ' + esc(itFull(P.agg)) + '.' : '') + '</p>';
     h += '<div class="cfdate">' + CF_DATE.map(function(x){ return '<label>' + esc(x[1]) + '<input type="date" data-cfd="' + x[0] + '" value="' + esc(isoOk(P[x[0]]) ? P[x[0]] : '') + '"></label>'; }).join('') + '</div>';
     h += '<div class="cfsp"><div class="cfsph">Quanto spedisci ogni mese, in % del totale <span class="osub">' + (vuoto ? 'vuoto = tutto alla data di contratto' : 'se la somma non fa 100, il resto va al mese di contratto') + ' · fino a 4 mesi dopo la spedizione</span></div><div class="cfgrid">'
       + M.pm.map(function(k){ return '<label' + (k === kS ? ' class="ctr" title="mese della spedizione da contratto"' : '') + '>' + ymLabel(k) + '<input type="text" inputmode="decimal" data-cfs="' + k + '" value="' + esc(Number(sp[k]) > 0 ? numEd(sp[k]) : '') + '" placeholder="' + (k === kS && vuoto ? '100' : '') + '"></label>'; }).join('')
-      + '</div><div class="osub" data-cfstot></div></div>';
+      + '</div>' + (passato ? '<div class="osub">Già spedito nei mesi passati: ' + pctIt(passato) + ' (' + Object.keys(sp).filter(function(k){ return k < M.pm[0] && Number(sp[k]) > 0; }).sort().map(function(k){ return ymLabel(k) + ' ' + pctIt(Number(sp[k])); }).join(', ') + ')</div>' : '')
+      + '<div class="osub" data-cfstot></div></div>';
     if (M.rate.length){
       h += '<div class="cfratew"><table class="cfrate"><thead><tr><th>Rata del contratto</th><th class="num">Importo</th><th>Si incassa a</th><th class="num">+ giorni</th><th>Data (se fissa)</th><th>Nel cash flow</th></tr></thead><tbody>';
       M.rate.forEach(function(r){
         var v = r.v, q = r.q, fissa = q.a === 'fissa';
-        h += '<tr data-cfv="' + esc(cfVoceKey(v)) + '"><td>' + esc(String(v.c || '').replace(/\s+/g, ' ').slice(0, 120)) + (q.auto && !v.inc ? '<span class="osub">evento dedotto dal contratto: controllalo e salva</span>' : '') + '</td>'
+        h += '<tr data-cfv="' + esc(cfVoceKey(v)) + '" data-att="' + esc(isoOk(v.att) ? v.att : '') + '"><td>' + esc(String(v.c || '').replace(/\s+/g, ' ').slice(0, 120)) + (q.auto && !v.inc ? '<span class="osub">evento dedotto dal contratto: controllalo e salva</span>' : '') + '</td>'
           + '<td class="num mono">' + eur(Math.round(+v.imp || 0)) + '</td>'
           + (v.inc ? '<td colspan="3"><i>incassata il ' + esc(itFull(v.inc)) + '</i></td>'
              : '<td><select data-cfa aria-label="Evento della rata">' + CF_EV.map(function(e){ return '<option value="' + e[0] + '"' + (e[0] === q.a ? ' selected' : '') + '>' + esc(e[1]) + '</option>'; }).join('') + '</select></td>'
@@ -3888,8 +3916,8 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     return h;
   }
   function cfSpedTot(box){
-    var t = 0; box.querySelectorAll('[data-cfs]').forEach(function(i){ var x = numIt(i.value.replace('%', '')); if (x > 0) t += x; });
-    var o = box.querySelector('[data-cfstot]'); if (o) o.textContent = t ? 'Totale indicato: ' + pctIt(t) + (Math.abs(t - 100) < 0.5 ? ' ✓' : t > 100 ? ' — supera 100: verrà riproporzionato' : ' — il restante ' + pctIt(100 - t) + ' va al mese di contratto') : '';
+    var t = Number(box.getAttribute('data-cfprev')) || 0; box.querySelectorAll('[data-cfs]').forEach(function(i){ var x = numIt(i.value.replace('%', '')); if (x > 0) t += x; });
+    var o = box.querySelector('[data-cfstot]'); if (o) o.textContent = t ? 'Totale indicato: ' + pctIt(t) + (Math.abs(t - 100) < 0.001 ? ' ✓' : t > 100 ? ' — supera 100: verrà riproporzionato' : ' — il restante ' + pctIt(100 - t) + ' va al mese di contratto') : '';
   }
   function wireCfz(){
     document.querySelectorAll('[data-cfz]').forEach(function(box){
@@ -3916,12 +3944,17 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     box.querySelectorAll('[data-cfg]').forEach(function(i){ var v = i.value.trim(); i.classList.remove('err'); if (v && !(numIt(v) >= 0 && numIt(v) <= 365)){ bad = true; i.classList.add('err'); } });
     if (bad){ if (msg){ msg.className = 'msg err'; msg.textContent = 'Controlla i campi in rosso: percentuali tra 0 e 100, giorni tra 0 e 365.'; } return; }
     P.sped = sp;
-    var voci = P.voci || {};
+    var voci = P.voci || {}, attuali = {}; ((c.pag && c.pag.voci) || []).forEach(function(v){ attuali[cfVoceKey(v)] = 1; });
     box.querySelectorAll('[data-cfv]').forEach(function(tr){
       var a = tr.querySelector('[data-cfa]'); if (!a) return;
       var g = numIt(tr.querySelector('[data-cfg]').value), d = tr.querySelector('[data-cff]').value, o = {a: a.value, gg: g > 0 ? Math.round(g) : 0};
-      if (a.value === 'fissa' && isoOk(d)) o.d = d;
-      voci[tr.getAttribute('data-cfv')] = o;
+      /* R34: la data proposta e' quella del contratto; la salvo come data di Danilo solo se l'ha cambiata,
+         altrimenti una nuova data attesa (es. «In arrivo il» dell'amministrazione) verrebbe ignorata */
+      if (a.value === 'fissa' && isoOk(d) && d !== tr.getAttribute('data-att')) o.d = d;
+      var key = tr.getAttribute('data-cfv'), txt = key.slice(key.indexOf('|') + 1);
+      /* impostazioni rimaste sotto il vecchio importo della stessa rata: le tolgo */
+      Object.keys(voci).forEach(function(k){ if (k !== key && !attuali[k] && k.slice(k.indexOf('|') + 1) === txt) delete voci[k]; });
+      voci[key] = o;
     });
     P.voci = voci; P.agg = isoDi(today()); P.ts = new Date().toISOString();
     c.cfp = P;
@@ -3930,6 +3963,8 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
   }
 
   /* ---- Budget: piano mensile della spesa per nodo (c.bdg.nodi[].mesi) ---- */
+  /* R34: valori scritti e non ancora salvati, per commessa ({'id|mese': testo}): un ridisegno del budget non li perde */
+  var PIANO_PEND = {};
   function bdgPianoHtml(M){
     var c = M.c; if (c.ev || cmAltro(c)) return '';
     var CF = cfModello(c), pm = CF.pm, nodi = CF.nodi, kS = cfKS(c);
@@ -3938,16 +3973,18 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     h += '<p class="srcline" style="margin:0 0 8px">Scrivi nei mesi quanto prevedi di spendere per ogni nodo. Nel cash flow va solo la parte <b>da spendere</b> (budget meno fatture, DDT e ordini aperti), divisa sui mesi nella stessa proporzione del tuo piano: quando arriva un ordine, la stima cala da sola. Senza piano la divido in parti uguali fino alla spedizione.</p>';
     h += '<div class="otab cf bdgpt"><table><thead><tr><th>Nodo</th><th class="num">Budget</th><th class="num">Fatture e DDT</th><th class="num">Ordini aperti</th><th class="num">Da spendere</th>'
       + pm.map(function(k){ return '<th class="num' + (k === kS ? ' ctr' : '') + '"' + (k === kS ? ' title="spedizione da contratto"' : '') + '>' + ymLabel(k) + '</th>'; }).join('') + '<th class="num">Piano</th></tr></thead><tbody>';
+    var pend = PIANO_PEND[c.code] || null;
+    function pv(n, k){ if (pend){ var t = pend[n.id + '|' + k]; return t == null ? '' : t; } var v = Number(n.piano[k]) || 0; return v ? numEd(v) : ''; }
     nodi.forEach(function(n){
-      var tp = 0; pm.forEach(function(k){ tp += Number(n.piano[k]) || 0; });
+      var tp = 0; pm.forEach(function(k){ var x = pend ? numIt(pv(n, k)) : Number(n.piano[k]); tp += x > 0 ? x : 0; });
       h += '<tr><td><b>' + esc(n.n) + '</b></td><td class="num mono">' + eur(Math.round(n.ext)) + '</td><td class="num mono">' + eur(Math.round(n.doc)) + '</td><td class="num mono">' + eur(Math.round(n.ord)) + '</td><td class="num mono"><b>' + eur(Math.round(n.res)) + '</b></td>'
-        + pm.map(function(k){ var v = Number(n.piano[k]) || 0; return '<td class="num"><input type="text" inputmode="decimal" data-pn="' + esc(n.id) + '" data-pk="' + k + '" value="' + (v ? esc(numEd(v)) : '') + '" aria-label="' + esc(n.n + ' ' + ymLabel(k)) + '"></td>'; }).join('')
+        + pm.map(function(k){ return '<td class="num"><input type="text" inputmode="decimal" data-pn="' + esc(n.id) + '" data-pk="' + k + '" value="' + esc(pv(n, k)) + '" aria-label="' + esc(n.n + ' ' + ymLabel(k)) + '"></td>'; }).join('')
         + '<td class="num mono" data-ptot="' + esc(n.id) + '">' + (tp ? eur(Math.round(tp)) : '') + '</td></tr>';
     });
     h += '<tr class="tot cfst"><td>Stima nel cash flow</td><td></td><td></td><td></td><td class="num mono">' + eur(Math.round(CF.stTot)) + '</td>'
       + pm.map(function(k){ var t = 0; nodi.forEach(function(n){ t += n.dist[k] || 0; }); return '<td class="num mono">' + (Math.round(t) ? eur(Math.round(t)) : '') + '</td>'; }).join('') + '<td></td></tr>';
     h += '<tr class="osubrow"><td>Spedizioni (dalla scheda)</td><td colspan="4"></td>' + pm.map(function(k){ var s = CF.SP.righe.filter(function(x){ return x.k === k; })[0]; return '<td class="num">' + (s ? pctIt(s.pct) : '') + '</td>'; }).join('') + '<td></td></tr>';
-    h += '</tbody></table></div><div class="actions"><button class="btn" data-psave>Salva piano</button><button class="chip" data-pfill>Riempi: da spendere in parti uguali fino alla spedizione</button><button class="chip" data-pclear>Svuota</button><span class="msg" data-pmsg></span></div></div>';
+    h += '</tbody></table></div><div class="actions"><button class="btn" data-psave>Salva piano</button><button class="chip" data-pfill>Riempi: da spendere in parti uguali fino alla spedizione</button><button class="chip" data-pclear>Svuota</button><span class="msg" data-pmsg>' + (pend ? 'modifiche non salvate' : '') + '</span></div></div>';
     return h;
   }
   function wirePiano(){
@@ -3955,15 +3992,16 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
       var code = box.getAttribute('data-piano'), msg = box.querySelector('[data-pmsg]');
       function totali(){ var per = {}; box.querySelectorAll('[data-pn]').forEach(function(i){ var x = numIt(i.value); if (x > 0) per[i.getAttribute('data-pn')] = (per[i.getAttribute('data-pn')] || 0) + x; });
         box.querySelectorAll('[data-ptot]').forEach(function(td){ var v = per[td.getAttribute('data-ptot')]; td.textContent = v ? eur(Math.round(v)) : ''; }); }
-      box.addEventListener('input', function(e){ if (e.target.hasAttribute && e.target.hasAttribute('data-pn')){ totali(); if (msg){ msg.className = 'msg'; msg.textContent = 'modifiche non salvate'; } } });
+      function tieni(){ var p = {}; box.querySelectorAll('[data-pn]').forEach(function(i){ p[i.getAttribute('data-pn') + '|' + i.getAttribute('data-pk')] = i.value; }); PIANO_PEND[code] = p; }
+      box.addEventListener('input', function(e){ if (e.target.hasAttribute && e.target.hasAttribute('data-pn')){ totali(); tieni(); if (msg){ msg.className = 'msg'; msg.textContent = 'modifiche non salvate'; } } });
       var s = box.querySelector('[data-psave]'); if (s) s.addEventListener('click', function(){ pianoSalva(code, box); });
       var f = box.querySelector('[data-pfill]'); if (f) f.addEventListener('click', function(){
         var c = findCm(code); if (!c) return; var CF = cfModello(c), kS = cfKS(c), k0 = ymKey(today()), mesi = ymRange(k0, kS || ymAdd(k0, 5));
         CF.nodi.forEach(function(n){ var q = mesi.length ? Math.round(n.res / mesi.length) : 0;
           box.querySelectorAll('[data-pn="' + n.id + '"]').forEach(function(i){ i.value = (q && mesi.indexOf(i.getAttribute('data-pk')) >= 0) ? numEd(q) : ''; }); });
-        totali(); if (msg){ msg.className = 'msg'; msg.textContent = 'riempito: controlla e salva'; }
+        totali(); tieni(); if (msg){ msg.className = 'msg'; msg.textContent = 'riempito: controlla e salva'; }
       });
-      var cl = box.querySelector('[data-pclear]'); if (cl) cl.addEventListener('click', function(){ box.querySelectorAll('[data-pn]').forEach(function(i){ i.value = ''; }); totali(); if (msg){ msg.className = 'msg'; msg.textContent = 'svuotato: salva per confermare'; } });
+      var cl = box.querySelector('[data-pclear]'); if (cl) cl.addEventListener('click', function(){ box.querySelectorAll('[data-pn]').forEach(function(i){ i.value = ''; }); totali(); tieni(); if (msg){ msg.className = 'msg'; msg.textContent = 'svuotato: salva per confermare'; } });
     });
   }
   function pianoSalva(code, box){
@@ -3989,6 +4027,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
       if (Object.keys(nuovo).length) b.mesi = nuovo; else delete b.mesi;
     });
     c.bdg.pianoAgg = c.bdg.ts = new Date().toISOString();
+    delete PIANO_PEND[code];
     salvaSubito('piano mensile salvato · il cash flow si aggiorna'); dashboard();
     var el = document.getElementById('bdg-' + code); if (el) el.scrollIntoView({block: 'start', behavior: 'smooth'});
   }
@@ -4002,7 +4041,9 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     var out = [], codes = {};
     list.forEach(function(c){ codes[c.code] = 1;
       (c.scad || []).forEach(function(x){ out.push({d:x.d, cm:c.code, t:x.c, tipo:'scheda commessa', k:'c'}); });
-      if (c.ctr && c.ctr.cons) out.push({d:c.ctr.cons, cm:c.code, t:'Consegna contrattuale' + (c.ctr.inco ? ' · ' + c.ctr.inco : ''), tipo:'contratto', k:'k'});
+      /* R34: la consegna del contratto a volte e' un testo: vale la prima data che contiene, il testo resta visibile */
+      if (c.ctr && c.ctr.cons){ var dcx = isoIn(c.ctr.cons);
+        if (dcx) out.push({d:dcx, cm:c.code, t:'Consegna contrattuale' + (c.ctr.inco ? ' · ' + c.ctr.inco : '') + (dcx !== String(c.ctr.cons).trim() ? ' · «' + String(c.ctr.cons).slice(0, 90) + '»' : ''), tipo:'contratto', k:'k'}); }
     });
     (S.enti || []).forEach(function(e){ if (e.scad && (!e.cm || codes[e.cm]))
       out.push({d:e.scad, cm:e.cm || '', t:(e.ente || 'Ente') + ': ' + (e.cosa || ''), tipo:'ente' + (e.stato ? ' · ' + e.stato : ''), k:'e'}); });
@@ -4297,13 +4338,14 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
       + '<div class="cm-kpi' + (senza ? ' hot' : '') + '"><b>' + senza + '</b><span>senza contratto caricato</span><small>manca il file oppure non è ancora stato letto</small></div></div>';
     h += '<div class="otab"><table><thead><tr><th>Commessa</th><th>Contratto</th><th>Incoterm</th><th>Consegna contrattuale</th><th>Garanzia</th><th>Penali</th><th>Foro / legge</th><th>Da verificare</th></tr></thead><tbody>';
     rows.forEach(function(c){
-      var k = c.ctr || {}, gg = k.cons ? days(t, k.cons) : null;
+      var k = c.ctr || {}, kc = isoIn(k.cons), gg = kc ? days(t, kc) : null;
       var att = Array.isArray(k.att) ? k.att : (k.att ? [String(k.att)] : []);
       h += '<tr' + (!k.n ? ' class="warn"' : (gg != null && gg < 0 && !c.ev) ? ' class="bad"' : '') + '>'
         + '<td class="mono"><b>' + esc(c.code) + '</b><span class="osub">' + esc(c.cliente || '') + '</span></td>'
-        + '<td>' + (k.n ? esc(k.n) + (k.rev ? ' · ' + esc(k.rev) : '') + (k.data ? '<span class="osub">' + esc(itFull(k.data)) + (k.file ? ' · ' + esc(k.file) : '') + '</span>' : '') : '<i>non caricato</i>') + '</td>'
+        + '<td>' + (k.n ? esc(k.n) + (k.rev ? ' · ' + esc(k.rev) : '') + (k.data ? '<span class="osub">' + esc(isoIn(k.data) === String(k.data).trim() ? itFull(k.data) : String(k.data).slice(0, 90)) + (k.file ? ' · ' + esc(k.file) : '') + '</span>' : '') : '<i>non caricato</i>') + '</td>'
         + '<td class="ctrtxt">' + esc(k.inco || '—') + '</td>'
-        + '<td class="mono">' + (k.cons ? esc(itFull(k.cons)) + '<span class="osub">' + (gg < 0 ? Math.abs(gg) + ' gg fa' : gg === 0 ? 'oggi' : 'tra ' + gg + ' gg') + '</span>' : '—') + '</td>'
+        + '<td class="mono">' + (kc ? esc(itFull(kc)) + '<span class="osub">' + (gg < 0 ? Math.abs(gg) + ' gg fa' : gg === 0 ? 'oggi' : 'tra ' + gg + ' gg') + '</span>' : '')
+          + (k.cons && kc !== String(k.cons).trim() ? '<span class="osub ctrtxt">' + esc(String(k.cons).slice(0, 90)) + '</span>' : '') + (k.cons ? '' : '—') + '</td>'
         + '<td class="ctrtxt" title="' + esc(k.gar || '') + '">' + esc(String(k.gar || '—').slice(0, 90)) + '</td>'
         + '<td class="ctrtxt" title="' + esc(k.pen || '') + '">' + esc(String(k.pen || '—').slice(0, 90)) + '</td>'
         + '<td class="ctrtxt" title="' + esc(k.foro || '') + '">' + esc(String(k.foro || '—').slice(0, 70)) + '</td>'
@@ -4728,7 +4770,9 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     });
     tot.sc = tot.imp - tot.ext; tot.pct = tot.ext > 0 ? tot.imp / tot.ext : null;
     tot.stato = tot.ext > 0 ? (tot.pct > 1 ? 'bad' : tot.pct > 0.9 ? 'warn' : 'ok') : 'nob';
-    var ore = c.ore || {}, cU = Number(ore.uff) || 0, cO = Number(ore.off) || 0, cE = Number(ore.est) || 0, cEeur = Number(ore.estEur) || 0;
+    /* R34: ore esterne senza valorizzazione (estSU/estSO) alle tariffe di ufficio e produzione */
+    var ore = c.ore || {}, cU = Number(ore.uff) || 0, cO = Number(ore.off) || 0, cE = Number(ore.est) || 0,
+      cESV = (Number(ore.estSU) || 0) + (Number(ore.estSO) || 0), cEeur = (Number(ore.estEur) || 0) + (Number(ore.estSU) || 0) * tU + (Number(ore.estSO) || 0) * tO;
     var oreCons = cU * tU + cO * tO + cEeur;
     var bU = tot.hu + hCm.u, bO = tot.ho + hCm.o, oreBdg = bU * tU + bO * tO;
     var valore = bdgNum(c.eco && c.eco.valore), oc = (cc.ric && cc.ric.oc) ? Number(cc.ric.oc) : null, fatCli = (cc.ric && cc.ric.fat) ? Number(cc.ric.fat) : null;
@@ -4741,7 +4785,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     var haBudget = tot.ext > 0 || bU > 0 || bO > 0;
     var m = {c: c, nodi: nodi, proposta: proposta, conf: !!(c.bdg && c.bdg.conf), righe: tutte, tot: tot, Y: Y, tU: tU, tO: tO,
       rif: P ? P.rif : [], simili: P ? P.simili : [], rifMode: P ? P.mode : null, propTot: P ? P.tot : 0, nOre: P ? P.nOre : 0,
-      ore: {bU: bU, bO: bO, cU: cU, cO: cO, cE: cE, cEeur: cEeur, bEur: oreBdg, cEur: oreCons, hCm: hCm},
+      ore: {bU: bU, bO: bO, cU: cU, cO: cO, cE: cE, cESV: cESV, cEeur: cEeur, bEur: oreBdg, cEur: oreCons, hCm: hCm},
       prezzo: prezzo, prezzoFonte: prezzoFonte, oc: oc, valore: valore, fatCli: fatCli, haBudget: haBudget, chiusa: !!c.ev,
       budgetTot: tot.ext + oreBdg, costoOggi: tot.imp + oreCons};
     /* R29 (20/09): consuntivo a prezzi di oggi e dell'anno prossimo (richiesta di Danilo): costi esterni indicizzati
@@ -4815,7 +4859,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     var o = M.ore, prop = M.proposta && M.nOre > 0;
     function riga(nome, bh, ch, ce, t, soloCons){
       var be = bh * t, sc = ce - be, pct = be > 0 ? ce / be : null;
-      return '<tr class="' + (be > 0 ? (pct > 1 ? 'bad' : pct > 0.9 ? 'warn' : 'ok') : '') + '"><td class="nodo"><b>' + nome + '</b><span class="osub">' + (soloCons ? 'costo dal file ore' : t + ' €/h') + '</span></td>'
+      return '<tr class="' + (be > 0 ? (pct > 1 ? 'bad' : pct > 0.9 ? 'warn' : 'ok') : '') + '"><td class="nodo"><b>' + nome + '</b><span class="osub">' + (soloCons ? 'costo dal file ore' + (o.cESV ? ' + ' + oreTxt(o.cESV) + ' senza valorizzazione alle tariffe' : '') : t + ' €/h') + '</span></td>'
         + '<td class="num mono' + (prop && bh ? ' prop' : '') + '">' + (soloCons ? '<span class="osub">nei costi esterni</span>' : bh ? oreTxt(bh) : '<span class="osub">' + (M.chiusa ? '—' : 'da inserire') + '</span>') + '</td><td class="num mono">' + (soloCons ? '—' : eurR(be)) + '</td>'
         + '<td class="num mono">' + (ch ? oreTxt(ch) : '—') + '</td><td class="num mono"><b>' + eurR(ce) + '</b></td>'
         + '<td class="num mono' + (be > 0 && sc > 0 ? ' bad' : '') + '">' + (be > 0 ? (sc > 0 ? '+' : '') + eurR(sc) : '—') + '</td><td class="num mono pct">' + pctTxt(pct) + '</td></tr>';
@@ -4828,7 +4872,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
       + '<tr class="tot"><td class="nodo"><b>Totale ore</b></td><td class="num mono">' + (o.bU + o.bO ? oreTxt(o.bU + o.bO) : '—') + '</td><td class="num mono">' + eurR(o.bEur) + '</td>'
       + '<td class="num mono">' + (o.cU + o.cO + o.cE ? oreTxt(o.cU + o.cO + o.cE) : '—') + '</td><td class="num mono"><b>' + eurR(o.cEur) + '</b></td>'
       + '<td class="num mono">' + (o.bEur > 0 ? (o.cEur - o.bEur > 0 ? '+' : '') + eurR(o.cEur - o.bEur) : '—') + '</td><td class="num mono pct">' + pctTxt(o.bEur > 0 ? o.cEur / o.bEur : null) + '</td></tr>'
-      + '</tbody></table></div><p class="srcline">Il file ore del gestionale non riporta il nodo: le ore si confrontano per commessa. Le ore delle ditte esterne valgono il costo registrato nel file ore. Tariffe in Denaro → Tariffe.</p></details>';
+      + '</tbody></table></div><p class="srcline">Il file ore del gestionale non riporta il nodo: le ore si confrontano per commessa. Le ore delle ditte esterne valgono il costo registrato nel file ore; quelle senza costo nel gestionale (#ERRORE) valgono le tariffe di ufficio o produzione. Tariffe in Denaro → Tariffe.</p></details>';
     return h;
   }
   /* R30: nel KPI delle evase i due consuntivi rivalutati; con le ore, scomposti come la riga storica (esterni + ore) */
@@ -5019,7 +5063,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     rows.push([]); rows.push(['Ore', 'Budget h', 'Budget €', 'Consuntivo h', 'Consuntivo €', 'Note']);
     rows.push(['Ufficio', oreCsv(o.bU), Math.round(o.bU * M.tU), oreCsv(o.cU), Math.round(o.cU * M.tU), o.hCm.u ? 'di cui ' + oreCsv(o.hCm.u) + ' h per l\'intera commessa' : '']);
     rows.push(['Produzione', oreCsv(o.bO), Math.round(o.bO * M.tO), oreCsv(o.cO), Math.round(o.cO * M.tO), o.hCm.o ? 'di cui ' + oreCsv(o.hCm.o) + ' h per l\'intera commessa' : '']);
-    if (o.cE || o.cEeur) rows.push(['Ditte esterne', '', '', oreCsv(o.cE), Math.round(o.cEeur), 'costo dal file ore']);
+    if (o.cE || o.cEeur) rows.push(['Ditte esterne', '', '', oreCsv(o.cE), Math.round(o.cEeur), 'costo dal file ore' + (o.cESV ? '; ' + oreCsv(o.cESV) + ' h senza valorizzazione alle tariffe' : '')]);
     rows.push(['Totale', oreCsv(o.bU + o.bO), Math.round(o.bEur), oreCsv(o.cU + o.cO + o.cE), Math.round(o.cEur), '']);
     return rows;
   }
@@ -5073,6 +5117,8 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     var base = M.nodi || [], cambiato = nodi.length !== base.length || nodi.some(function(n, i){ var b = base[i]; return !b || String(n.n || '') !== String(b.n || '') || bdgNum(n.ext) !== bdgNum(b.ext) || bdgNum(n.hu) !== bdgNum(b.hu) || bdgNum(n.ho) !== bdgNum(b.ho); })
       || (M.ore && M.ore.hCm && (bdgNum(ore.hu) !== bdgNum(M.ore.hCm.u) || bdgNum(ore.ho) !== bdgNum(M.ore.hCm.o)));
     if (M.proposta && M.rif.length) fonte = 'proposto dalle commesse ' + M.rif.map(function(s){ return s.code; }).join(', ') + ' (indicizzato al ' + M.Y + ')' + (conferma ? (cambiato ? ', modificato e confermato da Danilo' : ', confermato da Danilo') : (cambiato ? ', modificato da Danilo' : ', salvato da Danilo'));
+    else if (conferma && /^proposto dalle commesse/.test(prima.fonte || ''))
+      fonte = String(prima.fonte).replace(/, (salvato col piano mensile|salvato da Danilo|modificato da Danilo)$/, '') + (cambiato ? ', modificato e confermato da Danilo' : ', confermato da Danilo');
     else fonte = prima.fonte && !conferma ? prima.fonte : 'inserito da Danilo dalla pagina';
     /* R31: il piano mensile della spesa (nodi[].mesi) resta attaccato al suo nodo */
     var pianoPrima = {}; (prima.nodi || []).forEach(function(b){ if (b.mesi) pianoPrima[b.id] = b.mesi; });
@@ -5410,14 +5456,14 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
       var e = {}, creati = [];
       S.groups.forEach(function(g){ g.tasks.forEach(function(t){
         e[t.id] = {tipo:'task', gruppo:g.code, d:!!t.d, dd:t.dd || null, n:t.n || '',
-                   nq:t.nq || [], p:t.p == null ? null : t.p, dg:t.dg || null,
+                   nq:t.nq || [], nqX:t.nqX || [], p:t.p == null ? null : t.p, dg:t.dg || null,
                    dgd:t.dgd || null, auto:!!t.auto};
         /* Senza tid non nasce da una mail: e' roba mia o di una nota vocale, e se la
            pubblicazione non e' passata nel documento non c'e'. La conservo intera. */
         if (!t.tid) creati.push({gruppo:g.code, task:t});
       }); });
       (S.billing || []).forEach(function(b){
-        e[b.id] = {tipo:'billing', d:!!b.d, dd:b.dd || null, n:b.n || '', nq:b.nq || []};
+        e[b.id] = {tipo:'billing', d:!!b.d, dd:b.dd || null, n:b.n || '', nq:b.nq || [], nqX:b.nqX || []};
       });
       var cm = (S.commesse || []).map(function(c){
         return {code:c.code, ev:!!c.ev, evd:c.evd || null, sp:!!c.sp, spd:c.spd || null, bdg:c.bdg || null, cfp:c.cfp || null,
@@ -5464,8 +5510,9 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
         if (e.n) t.n = e.n; else delete t.n;
         segna((e.n ? 'nota su: ' : 'nota togliata da: ') + (t.t || t.id).slice(0, 60));
       }
+      if (ha(e, 'nqX') && e.nqX.length){ var xT = {}; (t.nqX || []).concat(e.nqX).forEach(function(k){ xT[k] = 1; }); t.nqX = Object.keys(xT).slice(-30); }
       if (ha(e, 'nq')){
-        var nqT = nqUnisci(t.nq, e.nq);
+        var nqT = nqUnisci(t.nq, e.nq, t.nqX);
         if (JSON.stringify(t.nq || []) !== JSON.stringify(nqT)){
           if (nqT.length) t.nq = nqT; else delete t.nq;
           segna('note su: ' + (t.t || t.id).slice(0, 60));
@@ -5498,8 +5545,9 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
         if (e.n) b.n = e.n; else delete b.n;
         segna('nota su: ' + (b.cli || b.id));
       }
+      if (ha(e, 'nqX') && e.nqX.length){ var xB = {}; (b.nqX || []).concat(e.nqX).forEach(function(k){ xB[k] = 1; }); b.nqX = Object.keys(xB).slice(-30); }
       if (ha(e, 'nq')){
-        var nqB = nqUnisci(b.nq, e.nq);
+        var nqB = nqUnisci(b.nq, e.nq, b.nqX);
         if (JSON.stringify(b.nq || []) !== JSON.stringify(nqB)){
           if (nqB.length) b.nq = nqB; else delete b.nq;
           segna('note su: ' + (b.cli || b.id));

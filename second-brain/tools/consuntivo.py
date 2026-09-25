@@ -373,6 +373,7 @@ def main():
     ap.add_argument('--solo-doc', action='store_true',
                     help='con --state: aggiunge soltanto cons.cm[codice].doc (fatture e DDT datati delle commesse in corso) '
                          'senza ricalcolare il resto del consuntivo')
+    ap.add_argument('--forza', action='store_true', help='con --solo-doc: accetta un dettaglio piu\' vecchio o molto piu\' piccolo del precedente')
     a = ap.parse_args()
     try:
         anno_agg = int(a.agg[:4])
@@ -394,6 +395,16 @@ def main():
             sys.exit('nello stato non c\'è un consuntivo a cui aggiungere il dettaglio')
         in_corso = codici_in_corso(stato)
         doc = dettaglio_documenti(righe, in_corso)
+        # un'estrazione arrivata a meta' o piu' vecchia cancellerebbe fatture e DDT gia' caricati: la rifiuto
+        if cons.get('docAgg') and a.agg < cons['docAgg'] and not a.forza:
+            sys.exit('estrazione del %s piu\' vecchia del dettaglio gia\' caricato (%s): stato NON toccato (--forza per farlo apposta)'
+                     % (a.agg, cons['docAgg']))
+        prima_cm = sum(1 for c in cons['cm'].values() if c.get('doc'))
+        prima_righe = sum(len(c.get('doc') or []) for c in cons['cm'].values())
+        dopo_righe = sum(len(v) for v in doc.values())
+        if prima_righe and not a.forza and (dopo_righe < 0.8 * prima_righe or len(doc) < 0.8 * prima_cm):
+            sys.exit('dettaglio sospetto: %d commesse / %d righe contro %d / %d del caricamento precedente. '
+                     'Probabile estrazione parziale: stato NON toccato (--forza per accettarla).' % (len(doc), dopo_righe, prima_cm, prima_righe))
         for p, c in cons['cm'].items():
             # lista vuota = commessa in corso senza fatture/DDT: diverso da «dettaglio mai caricato»
             if p in in_corso:

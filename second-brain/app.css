@@ -2017,3 +2017,10 @@ body[data-view="v-offerte"] .bar-in > .seg button[aria-pressed="true"]{backgroun
 .otab.bdgpt tr.osubrow td{font-size:11px;color:var(--muted)}
 @media (max-width:640px){ .cfbar{padding:10px} .cfbtns{width:100%} .cfbtns .btn,.cfbtns .chip{flex:1 1 auto} }
 html[data-sb-theme="jarvis"] .otab.cf2 tr.cfst td:first-child,html[data-sb-theme="jarvis"] .otab.bdgpt tr.cfst td:first-child{background:#1B1A12}
+
+/* R34 (25/09/2026): nel tema scuro l'effetto di comparsa (.rv, rotateX in prospettiva) di un blocco molto alto
+   — calendario, Da fatturare, tabelle lunghe — ne proiettava la parte bassa fuori dallo schermo e la pagina
+   scorreva di lato anche sul computer. Ogni contenuto largo ha gia' il suo contenitore che scorre (.otab, .tw):
+   fuori da quelli non deve uscire niente. */
+#root{overflow-x:clip;max-width:100%}
+@supports not (overflow:clip){ #root{overflow-x:hidden} }
