@@ -1757,7 +1757,10 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
             + ' <span class="pill ' + ps.k + '">' + ps.txt + '</span>'
             + (v.inc ? '<span class="srcline"> incassato il ' + esc(itFull(v.inc)) + '</span>'
                : v.att ? '<span class="srcline"> atteso il ' + esc(itFull(v.att)) + '</span>' : '')
-            + (v.n ? '<small>' + esc(v.n) + '</small>' : '') + '</li>';
+            + (v.n ? '<small>' + esc(v.n) + '</small>' : '')
+            + (v.pa ? '<span class="srcline"> amministrazione (' + esc(v.pa.chi || '') + ', ' + esc(itFull(v.pa.quando)) + '): '
+                + esc(v.pa.r === 'pagato' ? 'pagato' : v.pa.r === 'sollecitare' ? 'da sollecitare' : 'in arrivo il ' + itFull(v.pa.d)) + '</span>' : '')
+            + '</li>';
         }).join('') + '</ul>';
         if (pagAlert(c)) h += '<p class="srcline" style="margin:10px 0 0">Le voci da chiarire sono anche '
           + 'nei task, gruppo PAGAMENTI: rispondimi lì e aggiorno lo scadenzario.</p>';
