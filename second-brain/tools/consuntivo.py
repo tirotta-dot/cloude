@@ -42,7 +42,8 @@ from collections import defaultdict
 
 CAMPI = ['Cliente/fornitore', 'Tipo di costo', 'Cod. documento', 'Progetto', 'Data consegna', 'Anno',
          'Ricavo', 'Costo', 'TipoDocumento', 'Nodo']
-CAMPI_OPZ = ['Cod. fornitore', 'Codice articolo', 'Descrizione', 'Qt. acquistate', 'N° Doc.']
+CAMPI_OPZ = ['Cod. fornitore', 'Codice articolo', 'Descrizione', 'Qt. acquistate', 'N° Doc.', 'Ragione sociale']
+DOC_STADI = ('fat', 'con', 'ddt', 'alt')
 STADI = ('fat', 'con', 'ddt', 'ord', 'int', 'alt')
 LEGENDA = {
     'fat': 'fatture fornitore (note di credito con il loro segno)',
@@ -291,6 +292,34 @@ def finalizza(cm):
     return out
 
 
+def dettaglio_documenti(righe, codici):
+    """Per il cash flow delle commesse in corso: fatture, costi contabilizzati, DDT e altri documenti con la loro
+    data e il fornitore, così la pagina li colloca nel mese di pagamento (data + termini del fornitore).
+    Gli ordini aperti restano fuori: arrivano dall'elenco settimanale `ordf`.
+    Ritorna {codice: [[nodo, 'AAAA-MM-GG' o '', fornitore, stadio, importo], ...]} sommando per nodo, data,
+    fornitore e stadio."""
+    per = defaultdict(float)
+    for riga in righe:
+        p = norm_code(riga.get('Progetto'))
+        if p not in codici:
+            continue
+        st = stadio(riga)
+        if st is None or st[0] not in DOC_STADI or not st[1]:
+            continue
+        d = data_di(riga)
+        forn = re.sub(r'\s+', ' ', str(riga.get('Ragione sociale') or '').strip())
+        per[(p, nodo_di(riga), d.isoformat() if d else '', forn, st[0])] += st[1]
+    out = {}
+    for (p, nd, d, forn, k), imp in sorted(per.items()):
+        if abs(imp) >= 0.005:
+            out.setdefault(p, []).append([nd, d, forn, k, round(imp, 2)])
+    return out
+
+
+def codici_in_corso(stato):
+    return {norm_code(c.get('code')) for c in stato.get('commesse', []) if not c.get('ev') and not c.get('sp')}
+
+
 def aggrega_csv(path):
     """CSV aggregato (Progetto;Nodo;Anno;Stadio;Costo;Righe) prodotto dall'Apps Script: separatore riconosciuto
     (; o ,), intestazione controllata; si ferma con un messaggio chiaro se il file non è quello atteso."""
@@ -341,17 +370,44 @@ def main():
     ap.add_argument('--file', default='', help='nome del file di origine, per la nota')
     ap.add_argument('--all', action='store_true', help='tieni tutti i progetti, non solo le commesse dello stato')
     ap.add_argument('--quiet', action='store_true')
+    ap.add_argument('--solo-doc', action='store_true',
+                    help='con --state: aggiunge soltanto cons.cm[codice].doc (fatture e DDT datati delle commesse in corso) '
+                         'senza ricalcolare il resto del consuntivo')
     a = ap.parse_args()
     try:
         anno_agg = int(a.agg[:4])
     except ValueError:
         sys.exit('--agg deve essere AAAA-MM-GG')
 
-    log = {}
+    righe = None
     if a.pkl:
-        cm = aggrega(righe_da_pkl(a.pkl), anno_agg, log)
+        righe = list(righe_da_pkl(a.pkl))
     elif a.xlsx:
-        cm = aggrega(righe_da_xlsx(a.xlsx, a.foglio), anno_agg, log)
+        righe = list(righe_da_xlsx(a.xlsx, a.foglio))
+
+    if a.solo_doc:
+        if not (a.state and righe is not None):
+            sys.exit('--solo-doc vuole --state e una sorgente con le date delle righe (--pkl o --xlsx)')
+        stato = json.load(open(a.state, encoding='utf-8'))
+        cons = stato.get('cons') or {}
+        if not cons.get('cm'):
+            sys.exit('nello stato non c\'è un consuntivo a cui aggiungere il dettaglio')
+        in_corso = codici_in_corso(stato)
+        doc = dettaglio_documenti(righe, in_corso)
+        for p, c in cons['cm'].items():
+            # lista vuota = commessa in corso senza fatture/DDT: diverso da «dettaglio mai caricato»
+            if p in in_corso:
+                c['doc'] = doc.get(p, [])
+            else:
+                c.pop('doc', None)
+        cons['docAgg'] = a.agg
+        json.dump(stato, open(a.state, 'w', encoding='utf-8'), ensure_ascii=False, separators=(',', ':'))
+        print('dettaglio documenti: %d commesse in corso, %d righe' % (len(doc), sum(len(v) for v in doc.values())))
+        return
+
+    log = {}
+    if righe is not None:
+        cm = aggrega(righe, anno_agg, log)
     else:
         cm = aggrega_csv(a.csv)
 
@@ -390,8 +446,24 @@ def main():
             controlli = prev['controlli']
             note = [x for x in (prev.get('note') or []) if 'senza data' not in x and 'non ricalcolati' not in x] + note
             note.append('controlli non ricalcolati: consuntivo dal foglio aggregato, segnalazioni dell\'estrazione completa del %s' % (prev.get('agg') or '—'))
+    doc_agg = None
+    if stato is not None:
+        prev_cm = (stato.get('cons') or {}).get('cm') or {}
+        if righe is not None:
+            in_corso = codici_in_corso(stato)
+            doc = dettaglio_documenti(righe, in_corso)
+            for p, c in cm.items():
+                if p in in_corso:
+                    c['doc'] = doc.get(p, [])
+            doc_agg = a.agg
+        else:
+            # dal foglio aggregato (senza date) il dettaglio non si ricalcola: resta quello dell'ultima estrazione completa
+            for p, c in cm.items():
+                if (prev_cm.get(p) or {}).get('doc') is not None:
+                    c['doc'] = prev_cm[p]['doc']
+            doc_agg = (stato.get('cons') or {}).get('docAgg')
     cons = {
-        'agg': a.agg, 'file': a.file,
+        'agg': a.agg, 'file': a.file, 'docAgg': doc_agg,
         'fonte': 'estrazione completa del gestionale (tutti i tipi di documento), aggregata per commessa, nodo e anno',
         'gen': dt.datetime.now().isoformat(timespec='seconds'),
         'tipi': LEGENDA, 'note': note, 'controlli': controlli,

@@ -293,9 +293,32 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
   function getDraft(id){ return drafts()[id] || ''; }
   function nlist(o){ if (!o.nq) o.nq = []; return o.nq; }
   function ntxt(o){ return (o.nq || []).map(function(x){ return x.x; }).join(' ') + ' ' + (o.n || ''); }
+  /* 25/09/2026: una nota su cui la routine ha scritto l'esito «✓applicata» e' applicata anche se
+     ha dimenticato di cambiarle lo stato (s:'f'). Prima restava «in attesa» per sempre e sembrava
+     che Claude non leggesse le note: erano 22 cosi'. */
+  function notaFatta(x){ return !!x && (x.s === 'f' || /^\s*\u2713\s*applicat/i.test(String(x.r || ''))); }
+  function nqChiave(x){ return String((x && x.x) || '') + '|' + String((x && x.d) || ''); }
+  /* Copia locale e documento: le note sono lavoro di Danilo, quindi non se ne perde nessuna (anche
+     quelle scritte da un altro dispositivo), e dove la routine ha gia' scritto l'esito vince il
+     documento. */
+  function nqUnisci(doc, loc){
+    var perK = {}, visti = {}, out = [];
+    (doc || []).forEach(function(y){ perK[nqChiave(y)] = y; });
+    (loc || []).forEach(function(x){
+      var k = nqChiave(x), y = perK[k];
+      if (visti[k]) return;
+      visti[k] = 1;
+      out.push(y && (notaFatta(y) || y.r) ? y : x);
+    });
+    (doc || []).forEach(function(y){ if (!visti[nqChiave(y)]){ visti[nqChiave(y)] = 1; out.push(y); } });
+    return out.sort(function(a, b){ return String(a.d || '') < String(b.d || '') ? -1 : String(a.d || '') > String(b.d || '') ? 1 : 0; });
+  }
   function migraNote(){
     function m(o){
       if (!o.nq) o.nq = [];
+      o.nq.forEach(function(x){
+        if (x && x.s !== 'f' && notaFatta(x)){ x.s = 'f'; if (!x.dd) x.dd = String(x.d || '').slice(0, 10) || todayISO(); }
+      });
       var v = (o.n || '').trim();
       if (v){
         var fatta = /\u2713\s*applicata\s*$/.test(v);
@@ -366,10 +389,11 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     if (l.length){
       h += '<div class="nlist">';
       for (var i = l.length - 1; i >= 0; i--){
-        var x = l[i], ok = x.s === 'f';
+        var x = l[i], ok = notaFatta(x);
         h += '<span class="nchip ' + (ok ? 'ok' : 'wait') + '">'
           + '<b>' + esc(x.x) + '</b>'
-          + '<em>' + (ok ? 'applicata' + (x.dd ? ' il ' + esc(itFull(x.dd)) : '') : 'in attesa') + '</em>'
+          + '<em>' + (ok ? 'applicata' + (x.dd ? ' il ' + esc(itFull(x.dd)) : '')
+              : x.r ? 'serve una tua risposta' : 'in attesa \u00b7 la applico al giro delle 8:20 o delle 13:20') + '</em>'
           + (x.r ? '<i>' + esc(x.r) + '</i>' : '')
           + (ok ? '' : '<button class="ndel" type="button" data-nd="' + i + '" title="Elimina la nota">\u00d7</button>')
           + '</span>';
@@ -404,7 +428,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
   }
   function eliminaNota(host, idx){
     var o = find(host.getAttribute('data-id'));
-    if (!o || !o.nq || !o.nq[idx] || o.nq[idx].s === 'f') return;
+    if (!o || !o.nq || !o.nq[idx] || notaFatta(o.nq[idx])) return;
     o.nq.splice(idx, 1);
     ridisegnaNote(host, o);
     salvaSubito('nota eliminata');
@@ -1389,8 +1413,9 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     else h += nsel ? cmCards(selected()) : cmTable(list);
     stage.innerHTML = h;
     if (cmode === 'cash') wireCash();
-    if (cmode === 'bdg') wireBdg();
+    if (cmode === 'bdg'){ wireBdg(); wirePiano(); }
     if (cmode === 'scad') wireScad();
+    wireCfz();
     if (cmode === 'ordini'){ var oc = document.getElementById('ord-clear'); if (oc) oc.addEventListener('click', function(){ ordQ = ''; dashboard(); }); }
 
     document.querySelectorAll('#pgz button').forEach(function(b){
@@ -1742,6 +1767,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
           + 'se non so se ha pagato, te lo chiedo con un task nel gruppo PAGAMENTI.</div>';
       }
       h += '</div>';
+      h += cfCardHtml(c);
 
       if ((c.nodi || []).length)
         h += '<div class="cmb"><h4>Nodi da contratto · ' + c.nodi.length + '</h4>'
@@ -3256,99 +3282,267 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     return 'altro';
   }
   function ordiniPer(code){ return ((S.ordf && S.ordf.voci) || []).filter(function(v){ return v.cm === code; }); }
-  var CF_RIGHE = [['acconto','Incasso acconto',1],['forn','Pagamento fornitori',-1],
-    ['fornDa','Pagamento fornitori · termini da confermare (messi alla consegna)',-1],
-    ['sped_parz','Incasso spedizioni parziali',1],['sped','Incasso alla spedizione',1],['saldo','Saldo finale',1],['altro','Altri incassi',1]];
-  function cfVuoto(){ var R = {}, Z = {}; CF_RIGHE.forEach(function(r){ R[r[0]] = {}; Z[r[0]] = 0; }); return {righe:R, senza:Z}; }
-  function cashModello(c){
-    var M = cfVuoto(), mesi = {}, righe = M.righe, senza = M.senza;
-    function put(r, d, imp){ if (!imp) return; if (!d){ senza[r] += imp; return; } var k = ymKey(d); mesi[k] = 1; righe[r][k] = (righe[r][k] || 0) + imp; }
-    ((c.pag && c.pag.voci) || []).forEach(function(v){
-      var d = v.inc || v.att; put(catIncasso(v), d ? d0(d) : null, +v.imp || 0);
-    });
-    var gruppi = {}, forn = {};
-    ordiniPer(c.code).forEach(function(v){
-      var k = v.n + '|' + v.f + '|' + (v.dp || '');
-      gruppi[k] = gruppi[k] || {n:v.n, f:v.f, dp:v.dp, imp:0};
-      gruppi[k].imp += +v.imp || 0;
-    });
-    Object.keys(gruppi).forEach(function(k){
-      var g = gruppi[k], t = termineDi(g.f), d = dataPagamento(g.dp, t);
-      forn[g.f] = forn[g.f] || {f:g.f, t:t, imp:0, n:0, noto:true};
-      forn[g.f].imp += g.imp; forn[g.f].n++;
-      if (d) put('forn', d, g.imp);
-      else { forn[g.f].noto = false; put('fornDa', g.dp ? d0(g.dp) : null, g.imp); }
-    });
-    return {c:c, mesi:mesiTra(Object.keys(mesi).sort()), righe:righe, senza:senza,
-      forn:Object.keys(forn).map(function(k){ return forn[k]; }).sort(function(x, y){ return y.imp - x.imp; })};
+  /* ---------- R31 (25/09/2026): CASH FLOW DELLE COMMESSE IN CORSO, per il consulente (richiesta di Danilo) ----------
+     INCASSI: le rate del piano pagamenti del contratto (c.pag.voci). Ogni rata e' legata a un evento che Danilo
+     conferma nella scheda commessa (c.cfp): data fissa, spedizione (segue le % spedite mese per mese, da prima
+     della data di contratto fino a 4 mesi dopo), installazione e commissioning, invio documenti, inizio
+     saldatura, inizio pittura, collaudo; piu' i giorni di pagamento dopo l'evento. Una rata gia' incassata sta
+     alla sua data; una scaduta e non incassata finisce nel mese corrente, segnalata.
+     USCITE, in righe che il consulente deve poter distinguere: fatture e DDT dal gestionale (data del
+     documento + termini del fornitore), ordini aperti (consegna prevista + termini), e la STIMA = budget del
+     nodo meno quello che e' gia' in fatture, DDT e ordini, distribuita sui mesi secondo il piano che Danilo
+     scrive nel Budget (c.bdg.nodi[].mesi). Quando arriva un ordine la stima di quel nodo cala da sola, mese per
+     mese nella stessa proporzione. Dove i termini del fornitore non sono noti la voce resta in una riga a
+     parte «termini da confermare», alla data del documento (regola del 16/09). Solo costi esterni: niente ore. */
+  var CF_R = [
+    ['inc', 'Incassi da contratto · date fisse', 1, 'Contratto'],
+    ['incSp', 'Incassi alla spedizione (seguono le % spedite)', 1, 'Contratto · % spedizioni'],
+    ['incEv', 'Incassi a eventi (installazione, documenti, lavorazioni, collaudo)', 1, 'Contratto · date chiave'],
+    ['incScad', 'Incassi già scaduti e non registrati come incassati (da verificare)', 1, 'Contratto · data passata, messi in questo mese'],
+    ['fat', 'Fornitori · fatture ricevute', -1, 'Fattura (gestionale)'],
+    ['ddt', 'Fornitori · merce consegnata, fattura da ricevere (DDT)', -1, 'DDT (gestionale)'],
+    ['ord', 'Fornitori · ordini aperti', -1, 'Ordine (gestionale)'],
+    ['fornDa', 'Fornitori · termini di pagamento da confermare', -1, 'Fattura, DDT o ordine · alla data del documento'],
+    ['stima', 'Fornitori · STIMA del budget non ancora ordinato', -1, 'Stima di Danilo (budget per nodo)']
+  ];
+  var CF_EV = [['fissa', 'data fissa', null], ['sped', 'spedizione (segue le %)', null], ['inst', 'installazione e commissioning', 'dInst'],
+    ['doc', 'invio documenti', 'dDoc'], ['sald', 'inizio saldatura', 'dSald'], ['pitt', 'inizio pittura', 'dPitt'], ['acc', 'collaudo / accettazione', 'dAcc']];
+  var CF_DATE = [['dInst', 'Installazione e commissioning'], ['dDoc', 'Invio documenti'], ['dSald', 'Inizio saldatura'], ['dPitt', 'Inizio pittura'], ['dAcc', 'Collaudo / accettazione']];
+  var CF_DOC = {fat: 'Fattura', con: 'Registrazione contabile', ddt: 'DDT', alt: 'Altro documento'};
+  var CF_TIPO = {inc: 'CONTRATTO', incSp: 'CONTRATTO', incEv: 'CONTRATTO', incScad: 'CONTRATTO · scaduta, da verificare', fat: 'FATTURA', ddt: 'DDT', ord: 'ORDINE', fornDa: 'DOCUMENTO · termini da confermare', stima: 'STIMA'};
+  var XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  function cfEvLabel(a){ var e = CF_EV.filter(function(x){ return x[0] === a; })[0]; return e ? e[1] : a; }
+  function ymAdd(k, n){ var p = k.split('-'), m = (+p[0]) * 12 + (+p[1] - 1) + n; return Math.floor(m / 12) + '-' + ('0' + (m % 12 + 1)).slice(-2); }
+  function ymRange(a, b){ var out = []; if (!a || !b) return out; for (var k = a; k <= b && out.length < 120; k = ymAdd(k, 1)) out.push(k); return out; }
+  function ymData(k, g){ var p = k.split('-'), fm = new Date(+p[0], +p[1], 0).getDate(); return new Date(+p[0], +p[1] - 1, Math.min(g || 15, fm)); }
+  function isoOk(s){ return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s); }
+  function pctIt(p){ return new Intl.NumberFormat('it-IT', {maximumFractionDigits: 1}).format(p) + '%'; }
+  function cfp(c){ return (c && c.cfp) || {}; }
+  /* spedizione da contratto: dc, altrimenti la prima data AAAA-MM-GG del testo del contratto */
+  function cfDc(c){
+    if (isoOk(c.dc)) return c.dc;
+    var m = String((c.ctr && c.ctr.cons) || '').match(/\d{4}-\d{2}-\d{2}/); return m ? m[0] : null;
   }
-  function cashAggrega(modelli){
-    var A = cfVuoto(), mesi = {};
-    modelli.forEach(function(M){
+  /* mese di spedizione per il piano: quello del contratto, o questo mese se la data e' gia' passata */
+  function cfKS(c){ var dc = cfDc(c), k0 = ymKey(today()); if (!dc) return null; var k = ymKey(d0(dc)); return k < k0 ? k0 : k; }
+  /* mesi del piano: da questo mese a 4 mesi dopo la spedizione da contratto (regola di Danilo) */
+  function cfPianoMesi(c){ var k0 = ymKey(today()), kS = cfKS(c); return ymRange(k0, kS ? ymAdd(kS, 4) : ymAdd(k0, 11)); }
+  function cfSped(c){
+    var dc = cfDc(c), kS = cfKS(c), sp = cfp(c).sped || {}, out = [], tot = 0, g = dc ? d0(dc).getDate() : 15, avv = null;
+    function data(k){ return (dc && k === ymKey(d0(dc))) ? d0(dc) : ymData(k, g); }
+    Object.keys(sp).sort().forEach(function(k){ var p = Number(sp[k]) || 0; if (p > 0 && /^\d{4}-\d{2}$/.test(k)){ out.push({k: k, pct: p, d: data(k)}); tot += p; } });
+    if (tot > 100.5){ out.forEach(function(s){ s.pct = s.pct * 100 / tot; }); avv = 'le percentuali di spedizione sommano ' + pctIt(tot) + ': le ho riportate a 100%'; }
+    else if (tot < 99.5 && kS){
+      var resto = 100 - tot, hit = out.filter(function(s){ return s.k === kS; })[0];
+      if (hit){ hit.pct += resto; hit.auto = true; } else out.push({k: kS, pct: resto, d: data(kS), auto: true});
+      out.sort(function(a, b){ return a.k < b.k ? -1 : 1; });
+      if (tot > 0) avv = 'spedizioni indicate per il ' + pctIt(tot) + ': il restante ' + pctIt(resto) + ' è al mese della spedizione da contratto';
+    }
+    return {righe: out, tot: tot, avviso: avv};
+  }
+  function cfVoceKey(v){ return Math.round(+v.imp || 0) + '|' + String(v.c || '').replace(/\s+/g, ' ').trim().slice(0, 40); }
+  /* evento dedotto dal testo della rata: lo propongo, Danilo lo conferma nella scheda */
+  function cfAuto(c, v){
+    var t = (String(v.c || '') + ' ' + String(v.n || '')).toLowerCase(), a = 'fissa', cat = catIncasso(v);
+    if (cat === 'acconto') a = 'fissa';
+    else if (/install|commission|montaggio|messa in servizio|avviamento|start.?up/.test(t)) a = 'inst';
+    else if (/collaud|accettazion|acceptance|handover|hand over|consegna definitiva|definitive receipt/.test(t)) a = 'acc';
+    else if (cat === 'sped' || cat === 'sped_parz' || /spediz|shipment|shipping|b\/l|bill of lading|polizza di carico|imbarco|lettera di credito|letter of credit|\bl\/c\b|pronta per la spedizione|ready for shipment|delivery/.test(t)) a = 'sped';
+    else if (/pittur|verniciat|painting/.test(t)) a = 'pitt';
+    else if (/saldatur|welding/.test(t)) a = 'sald';
+    else if (/disegn|drawing|documentazion|documenti/.test(t)) a = 'doc';
+    var gg = 0, m = t.match(/(?:entro|within)\s+(\d{1,3})\s*(?:giorni|gg|days)/) || t.match(/(\d{1,3})\s*(?:giorni|gg|days)\s+(?:dalla|dal|dopo|from|after)/);
+    if (a !== 'fissa' && m) gg = +m[1];
+    else if (a === 'sped' && v.att && cfDc(c)){ var x = days(d0(cfDc(c)), d0(v.att)); if (x > 0 && x <= 120) gg = x; }
+    return {a: a, gg: gg};
+  }
+  function cfVoceCfg(c, v){
+    var s = (cfp(c).voci || {})[cfVoceKey(v)], au = cfAuto(c, v);
+    if (!s || !s.a) return {a: au.a, gg: au.gg, d: null, auto: true};
+    return {a: s.a, gg: Number(s.gg) || 0, d: isoOk(s.d) ? s.d : null, auto: false};
+  }
+  /* una rata → uno o piu' pezzi {d, imp, nota, stim, inc} */
+  function cfRata(c, v, SP){
+    var imp = +v.imp || 0, q = cfVoceCfg(c, v), out = []; if (!imp) return out;
+    if (v.inc || v.st === 'incassato'){ var di = isoOk(v.inc) ? v.inc : isoOk(v.att) ? v.att : null; return [{d: di ? d0(di) : null, imp: imp, nota: di ? 'incassata il ' + itFull(di) : 'incassata', inc: true}]; }
+    function add(d, x, nota, stim, senzaGg){ out.push({d: d ? addGiorni(d, senzaGg ? 0 : (q.gg || 0)) : null, imp: x, nota: nota, stim: !!stim}); }
+    if (q.a === 'fissa'){ var fd = q.d || v.att; add(isoOk(fd) ? d0(fd) : null, imp, fd ? (q.d ? 'data indicata da Danilo' : 'data attesa dal contratto') : 'data mancante', !q.d); }
+    else if (q.a === 'sped'){
+      var fatto = 0;
+      SP.righe.forEach(function(s){ fatto += s.pct; add(s.d, imp * s.pct / 100, 'spedizione di ' + ymLabel(s.k) + ' · ' + pctIt(s.pct) + (s.auto ? ' (data di contratto)' : ''), false); });
+      if (fatto < 99.5) add(isoOk(v.att) ? d0(v.att) : null, imp * (100 - fatto) / 100, 'manca la data di spedizione: uso la data attesa dal contratto', true, true);
+    } else {
+      var ev = CF_EV.filter(function(e){ return e[0] === q.a; })[0], de = ev && ev[2] ? cfp(c)[ev[2]] : null;
+      if (isoOk(de)) add(d0(de), imp, cfEvLabel(q.a) + ' il ' + itFull(de), false);
+      else add(isoOk(v.att) ? d0(v.att) : null, imp, cfEvLabel(q.a) + ': data da indicare nella scheda' + (v.att ? ' (intanto uso la stima del contratto)' : ''), true, true);
+    }
+    return out;
+  }
+  function cfModello(c){
+    var oggi = today(), k0 = ymKey(oggi), iso0 = isoDi(oggi), t0 = ymData(k0, 1);
+    var R = {}, prima = {}, senza = {}, mesi = {}, det = [], avvisi = [];
+    CF_R.forEach(function(r){ R[r[0]] = {}; prima[r[0]] = 0; senza[r[0]] = 0; });
+    var pm = cfPianoMesi(c); pm.forEach(function(k){ mesi[k] = 1; });
+    function put(row, d, imp, x){
+      if (!imp) return;
+      var k = d ? ymKey(d) : '';
+      if (!k) senza[row] += imp; else if (k < k0) prima[row] += imp; else { R[row][k] = (R[row][k] || 0) + imp; mesi[k] = 1; }
+      x = x || {};
+      det.push({cm: c.code, cli: c.cliente || '', row: row, d: d ? isoDi(d) : '', k: k, imp: imp, nodo: x.nodo || '', chi: x.chi || '', rif: x.rif || '',
+        dDoc: x.dDoc || '', term: x.term || '', nota: x.nota || '', tipo: x.tipo || CF_TIPO[row]});
+    }
+    /* incassi */
+    var SP = cfSped(c); if (SP.avviso) avvisi.push(SP.avviso);
+    var rate = ((c.pag && c.pag.voci) || []).map(function(v){ return {v: v, q: cfVoceCfg(c, v), parti: cfRata(c, v, SP)}; });
+    rate.forEach(function(r){
+      var row0 = r.q.a === 'fissa' ? 'inc' : r.q.a === 'sped' ? 'incSp' : 'incEv', scad = false;
+      r.parti.forEach(function(p){
+        var d = p.d, nota = p.nota, row = row0;
+        /* data passata e nessun incasso registrato: riga a parte, nel mese corrente, perche' il consulente non la scambi per un incasso sicuro */
+        if (!p.inc && d && d < t0){ nota += ' · attesa il ' + itFull(isoDi(d)) + ', non risulta incassata'; p.scad = true; d = oggi; row = 'incScad'; scad = true; }
+        put(row, d, p.imp, {chi: c.cliente || '', rif: String(r.v.c || '').replace(/\s+/g, ' ').slice(0, 110), term: r.q.gg ? '+' + r.q.gg + ' gg dall\'evento' : '',
+          nota: nota, tipo: p.inc ? 'CONTRATTO · incassata' : row === 'incScad' ? 'CONTRATTO · scaduta, da verificare' : p.stim ? 'CONTRATTO · data stimata' : 'CONTRATTO'});
+      });
+      if (scad) avvisi.push('rata «' + String(r.v.c || '').slice(0, 50) + '» attesa e non risulta incassata');
+      if (!r.v.inc && r.q.a !== 'fissa' && r.q.a !== 'sped'){ var ev = CF_EV.filter(function(e){ return e[0] === r.q.a; })[0]; if (ev && !isoOk(cfp(c)[ev[2]])) avvisi.push('manca la data di ' + ev[1] + ' (serve alla rata «' + String(r.v.c || '').slice(0, 40) + '»)'); }
+    });
+    if (!rate.length) avvisi.push('nessun piano pagamenti del contratto: incassi non previsti');
+    /* budget: nodo del gestionale → riga del budget */
+    var B = bdgModello(c), gmap = {};
+    B.righe.forEach(function(r){ (r.gest || []).forEach(function(nd){ gmap[nd === '-' ? '-' : normNodo(nd)] = r.id; }); });
+    B.righe.forEach(function(r){ if (r.extra) return; [r.n].concat(bdgAl(r)).forEach(function(n){ if (n === '-'){ if (!gmap['-']) gmap['-'] = r.id; } else { var k = normNodo(n); if (k && !gmap[k]) gmap[k] = r.id; } }); });
+    function rigaDi(nd){ var k = normNodo(nd); if (!k || k === normNodo(c.code)) return gmap['-'] || null; return gmap[k] || null; }
+    function nodoTxt(nd){ var k = normNodo(nd); return (!k || k === normNodo(c.code)) ? 'Senza nodo' : titolo(nd); }
+    /* fatture, DDT e registrazioni dal gestionale (cons.cm[code].doc: [nodo, data, fornitore, tipo, importo]) */
+    var cc = consCm(c.code), docs = (cc && cc.doc) || [];
+    if (cc && !cc.doc) avvisi.push('dettaglio di fatture e DDT per data non ancora caricato');
+    docs.forEach(function(x){
+      var nd = x[0], dd = x[1], f = x[2], k = x[3], imp = +x[4] || 0; if (!imp) return;
+      var t = f ? termineDi(f) : null, pd = isoOk(dd) ? dataPagamento(dd, t) : null, row = k === 'ddt' ? 'ddt' : 'fat', nota = '';
+      if (!pd){
+        if (!f){ pd = isoOk(dd) ? d0(dd) : null; nota = 'registrazione senza fornitore: alla data del documento'; }
+        else { row = 'fornDa'; pd = isoOk(dd) ? d0(dd) : null; nota = 'termini del fornitore da confermare: alla data del documento'; }
+      }
+      put(row, pd, imp, {nodo: nodoTxt(nd), chi: f || '', rif: CF_DOC[k] || k, dDoc: dd || '', term: t ? (t.testo || '') : '', nota: nota,
+        tipo: row === 'fornDa' ? (CF_DOC[k] || 'Documento').toUpperCase() + ' · termini da confermare' : row === 'ddt' ? 'DDT' : 'FATTURA'});
+    });
+    /* ordini aperti (S.ordf): consegna prevista + termini; una consegna gia' passata vale da oggi */
+    var gruppi = {}, ordRiga = {};
+    ordiniPer(c.code).forEach(function(v){ var key = v.n + '|' + v.f + '|' + (v.dp || '') + '|' + (v.nd || ''); var g = gruppi[key] = gruppi[key] || {n: v.n, f: v.f, dp: v.dp, nd: v.nd || '', imp: 0}; g.imp += +v.imp || 0; });
+    Object.keys(gruppi).forEach(function(key){
+      var g = gruppi[key]; if (!g.imp) return;
+      var dpE = isoOk(g.dp) ? (g.dp < iso0 ? iso0 : g.dp) : null, t = termineDi(g.f), pd = dpE ? dataPagamento(dpE, t) : null, row = 'ord';
+      var nota = (isoOk(g.dp) && g.dp < iso0) ? 'consegna prevista il ' + itFull(g.dp) + ', già passata: la considero da oggi' : '';
+      if (!dpE) nota = 'ordine senza data di consegna';
+      else if (!pd){ row = 'fornDa'; pd = d0(dpE); nota = (nota ? nota + ' · ' : '') + 'termini del fornitore da confermare: alla data di consegna'; }
+      put(row, pd, g.imp, {nodo: nodoTxt(g.nd), chi: g.f || '', rif: 'Ordine n. ' + g.n, dDoc: g.dp || '', term: t ? (t.testo || '') : '', nota: nota,
+        tipo: row === 'fornDa' ? 'ORDINE · termini da confermare' : 'ORDINE'});
+      var id = rigaDi(g.nd); if (id) ordRiga[id] = (ordRiga[id] || 0) + g.imp;
+    });
+    /* STIMA: budget del nodo meno fatture, DDT e ordini, sui mesi del piano di Danilo (o in parti uguali fino alla spedizione) */
+    var salvati = (c.bdg && c.bdg.nodi) || [], kS = cfKS(c), def = ymRange(k0, kS || ymAdd(k0, 5)), nodi = [], stTot = 0;
+    B.righe.forEach(function(r){
+      if (r.extra || !(r.ext > 0)) return;
+      var doc = r.fat + r.con + r.ddt + r.alt, ord = ordRiga[r.id] || 0, res = Math.max(0, r.ext - doc - ord);
+      var sv = salvati.filter(function(b){ return b.id === r.id; })[0], mp = (sv && sv.mesi) || {}, w = {}, W = 0;
+      Object.keys(mp).forEach(function(k){ var x = Number(mp[k]) || 0; if (x > 0 && k >= k0){ w[k] = x; W += x; } });
+      var usaPiano = W > 0;
+      if (!usaPiano){ w = {}; def.forEach(function(k){ w[k] = 1; }); W = def.length; }
+      var dist = {};
+      Object.keys(w).sort().forEach(function(k){
+        var v = res * w[k] / W; if (!v) return; dist[k] = v;
+        put('stima', ymData(k, 15), v, {nodo: r.n, rif: 'Budget del nodo', nota: (usaPiano ? 'piano mensile di Danilo' : 'nessun piano mensile: in parti uguali fino al mese di spedizione')
+          + ' · da spendere ' + eur(Math.round(res)) + ' su budget ' + eur(Math.round(r.ext)), tipo: 'STIMA'});
+      });
+      nodi.push({id: r.id, n: r.n, ext: r.ext, doc: doc, ord: ord, res: res, piano: mp, usaPiano: usaPiano, dist: dist}); stTot += res;
+    });
+    if (!nodi.length) avvisi.push('nessun budget per nodo: manca la stima delle spese future');
+    else if (B.proposta) avvisi.push('budget proposto dalle commesse simili, non ancora confermato');
+    else if (!B.conf) avvisi.push('budget salvato ma non ancora confermato');
+    var ks = Object.keys(mesi).sort();
+    return {c: c, k0: k0, mesi: ymRange(ks[0], ks[ks.length - 1]), pm: pm, R: R, prima: prima, senza: senza, det: det, avvisi: avvisi,
+      rate: rate, SP: SP, B: B, nodi: nodi, stTot: stTot};
+  }
+  function cfAggrega(Ms){
+    var A = {c: {code: 'Tutte le commesse in corso', cliente: ''}, k0: ymKey(today()), R: {}, prima: {}, senza: {}, det: [], avvisi: [], n: Ms.length}, mesi = {};
+    CF_R.forEach(function(r){ A.R[r[0]] = {}; A.prima[r[0]] = 0; A.senza[r[0]] = 0; });
+    Ms.forEach(function(M){
       M.mesi.forEach(function(k){ mesi[k] = 1; });
-      CF_RIGHE.forEach(function(r){ var key = r[0];
-        Object.keys(M.righe[key]).forEach(function(k){ A.righe[key][k] = (A.righe[key][k] || 0) + M.righe[key][k]; });
-        A.senza[key] += M.senza[key] || 0; });
+      CF_R.forEach(function(r){ var key = r[0]; Object.keys(M.R[key]).forEach(function(k){ A.R[key][k] = (A.R[key][k] || 0) + M.R[key][k]; }); A.prima[key] += M.prima[key]; A.senza[key] += M.senza[key]; });
+      A.det = A.det.concat(M.det);
     });
-    return {c:{code:'TUTTE · ' + modelli.length + ' commesse', cliente:''}, mesi:mesiTra(Object.keys(mesi).sort()), righe:A.righe, senza:A.senza, forn:[]};
+    var ks = Object.keys(mesi).sort(); A.mesi = ks.length ? ymRange(ks[0], ks[ks.length - 1]) : [A.k0];
+    return A;
   }
-  function cashRighe(M){
-    var haSenza = Object.keys(M.senza).some(function(k){ return M.senza[k]; });
-    var head = [M.c.code].concat(M.mesi.map(ymLabel)); if (haSenza) head.push('senza data'); head.push('Totale');
-    var rows = [head], tot = {}, prog = 0;
-    CF_RIGHE.forEach(function(r){
-      var key = r[0], somma = 0, row = [r[1]], vuota = !Object.keys(M.righe[key]).length && !M.senza[key];
-      if (vuota && (key === 'altro' || key === 'fornDa' || key === 'sped_parz')) return;
-      M.mesi.forEach(function(k){ var v = Math.round(M.righe[key][k] || 0); somma += v; tot[k] = (tot[k] || 0) + r[2] * v; row.push(v || ''); });
-      if (haSenza){ var z = Math.round(M.senza[key] || 0); row.push(z || ''); somma += z; }
-      row.push(somma || ''); row.key = key; rows.push(row);
+  /* righe della tabella con il segno (incassi +, uscite −) */
+  function cfTab(M){
+    var haPrima = CF_R.some(function(r){ return Math.round(M.prima[r[0]]); }), haSenza = CF_R.some(function(r){ return Math.round(M.senza[r[0]]); }), righe = [];
+    CF_R.forEach(function(r){
+      var key = r[0], s = r[2], vals = M.mesi.map(function(k){ return s * (M.R[key][k] || 0); }), pr = s * M.prima[key], se = s * M.senza[key];
+      var tot = pr + se; vals.forEach(function(v){ tot += v; });
+      if (!Math.round(pr) && !Math.round(se) && !vals.some(function(v){ return Math.round(v); })) return;
+      righe.push({key: key, lab: r[1], fonte: r[3], s: s, prima: pr, vals: vals, senza: se, tot: tot});
     });
-    var rt = ['Totale mensile'], rp = ['Totale progressivo'], totale = 0;
-    M.mesi.forEach(function(k){ var v = tot[k] || 0; totale += v; rt.push(v); prog += v; rp.push(prog); });
-    if (haSenza){ rt.push(''); rp.push(''); }
-    rt.push(totale); rp.push(''); rt.key = 'tot'; rp.key = 'tot';
-    rows.push(rt, rp);
-    return rows;
+    function somma(seg, campo, i){ var t = 0; righe.forEach(function(r){ if (r.s === seg) t += i == null ? r[campo] : r.vals[i]; }); return t; }
+    var ent = M.mesi.map(function(k, i){ return somma(1, null, i); }), usc = M.mesi.map(function(k, i){ return somma(-1, null, i); });
+    var saldo = ent.map(function(v, i){ return v + usc[i]; }), p = 0, prog = saldo.map(function(v){ p += v; return p; });
+    return {haPrima: haPrima, haSenza: haSenza, righe: righe, ent: ent, usc: usc, saldo: saldo, prog: prog,
+      entP: somma(1, 'prima'), uscP: somma(-1, 'prima'), entS: somma(1, 'senza'), uscS: somma(-1, 'senza'), entT: somma(1, 'tot'), uscT: somma(-1, 'tot')};
   }
-  function cashTabella(M){
-    var rows = cashRighe(M);
-    var h = '<div class="otab cf"><table><thead><tr>' + rows[0].map(function(x, i){ return '<th' + (i ? ' class="num"' : '') + '>' + esc(x) + '</th>'; }).join('') + '</tr></thead><tbody>';
-    rows.slice(1).forEach(function(r){
-      h += '<tr class="' + (r.key === 'tot' ? 'tot' : r.key === 'fornDa' ? 'bad' : '') + '">' + r.map(function(x, i){
-        if (!i) return '<td>' + esc(x) + '</td>';
-        return '<td class="num mono">' + (x === '' ? '' : eur(x)) + '</td>'; }).join('') + '</tr>';
+  function cfNum(v){ var r = Math.round(v); return r ? (r < 0 ? '−' : '') + eur(Math.abs(r)) : ''; }
+  function cfTabellaHtml(M){
+    var T = cfTab(M), h = '<div class="otab cf cf2"><table><thead><tr><th>Voce</th>'
+      + (T.haPrima ? '<th class="num" title="incassato o pagato prima di questo mese">Prima di ' + ymLabel(M.k0) + '</th>' : '')
+      + M.mesi.map(function(k){ return '<th class="num">' + ymLabel(k) + '</th>'; }).join('') + (T.haSenza ? '<th class="num">Senza data</th>' : '') + '<th class="num">Totale</th></tr></thead><tbody>';
+    function td(v, cls){ return '<td class="num mono' + (cls || '') + '">' + cfNum(v) + '</td>'; }
+    T.righe.forEach(function(r){
+      h += '<tr class="' + (r.key === 'stima' ? 'cfst' : (r.key === 'fornDa' || r.key === 'incScad') ? 'bad' : r.s > 0 ? 'cfin' : 'cfout') + '"><td>' + esc(r.lab) + '<span class="osub">' + esc(r.fonte) + '</span></td>'
+        + (T.haPrima ? td(r.prima) : '') + r.vals.map(function(v){ return td(v); }).join('') + (T.haSenza ? td(r.senza) : '') + td(r.tot) + '</tr>';
     });
+    h += '<tr class="tot"><td>Saldo del mese</td>' + (T.haPrima ? td(T.entP + T.uscP) : '') + T.saldo.map(function(v){ return td(v, v < 0 ? ' late' : ''); }).join('')
+      + (T.haSenza ? td(T.entS + T.uscS) : '') + td(T.entT + T.uscT) + '</tr>';
+    h += '<tr class="tot"><td>Progressivo da ' + ymLabel(M.k0) + '</td>' + (T.haPrima ? '<td></td>' : '') + T.prog.map(function(v){ return td(v, v < 0 ? ' late' : ''); }).join('')
+      + (T.haSenza ? '<td></td>' : '') + '<td></td></tr>';
     return h + '</tbody></table></div>';
+  }
+  function cfAperte(){ return CM().filter(function(c){ return !c.ev && !c.sp && !cmAltro(c); }); }
+  function cfConsulente(){ var x = (S.cfg && S.cfg.consulente) || {}; return {nome: x.nome || 'Claudio Orsini', titolo: x.titolo || 'Dott.', email: x.email || 'c.orsini@studiassociato.it'}; }
+  function cfUltimoInvio(){
+    var u = null; (S.groups || []).forEach(function(g){ (g.tasks || []).forEach(function(t){ if (String(t.id || '').indexOf('mlcf') === 0 && t.dd && (!u || t.dd > u)) u = t.dd; }); }); return u;
+  }
+  function cfBarHtml(n){
+    var u = cfUltimoInvio(), C = cfConsulente();
+    return '<div class="cfbar"><div class="cfbar-t"><b>File per il consulente</b> · le ' + n + ' commesse in corso: riepilogo, un foglio per commessa, dettaglio riga per riga e legenda. Per ogni cifra c\'è la fonte: <b>contratto</b>, <b>fattura</b>, <b>DDT</b>, <b>ordine</b> o <b>stima</b>.'
+      + '<span class="osub">' + (u ? 'Ultimo invio a ' + esc(C.nome) + ': ' + esc(itFull(u)) : 'Mai inviato da qui') + ' · destinatario ' + esc(C.email) + '</span></div>'
+      + '<div class="cfbtns"><button class="btn" data-cfx="orsini">Invia a ' + esc(C.nome) + '</button><button class="chip" data-cfx="me">Mandalo a me per controllo</button><button class="chip" data-cfx="csv">Scarica .csv</button></div>'
+      + '<div class="cfconf" id="cfconf" hidden></div><div class="srcline" id="cfmsg"></div></div>';
   }
   var CF_CACHE = {};
   function cashHtml(list, nsel){
-    var h = '', modelli = list.map(cashModello);
+    var aperte = list.filter(function(c){ return !c.ev && !c.sp && !cmAltro(c); }), h = '';
     CF_CACHE = {};
-    modelli.forEach(function(M){ CF_CACHE[M.c.code] = M; });
+    h += '<div class="ore-wait" style="margin-bottom:14px"><b>Cash flow delle commesse in corso.</b> <b>Incassi</b>: le rate del contratto, ognuna al suo evento — anticipo, spedizione (con le % che spedisci mese per mese), installazione e commissioning, invio documenti, lavorazioni, collaudo — che imposti nella <b>scheda della commessa</b>, riquadro «Cash flow · date chiave e incassi». '
+      + '<b>Uscite</b>: fatture e DDT dal gestionale e ordini aperti, alla data in cui paghi (documento o consegna più i termini del fornitore), più la <b>stima</b> del budget non ancora ordinato, sui mesi che scrivi in <b>Budget → Piano mensile della spesa</b>: quando arriva un ordine la stima del nodo cala da sola. Solo costi esterni, niente ore.</div>';
+    h += cfBarHtml(cfAperte().length);
+    if (!aperte.length) return h + '<p class="ogempty">Nessuna commessa in corso in questa vista.</p>';
+    var Ms = aperte.map(cfModello); Ms.forEach(function(M){ CF_CACHE[M.c.code] = M; });
     if (!nsel){
-      var MA = cashAggrega(modelli); CF_CACHE['*'] = MA;
-      h += '<div class="ore-wait" style="margin-bottom:14px">Piano di cassa per commessa: incassi previsti dal contratto (scheda Denaro) e pagamenti ai fornitori calcolati dagli ordini del gestionale — <b>data di consegna più i termini di pagamento del fornitore</b>, quindi quando paghiamo davvero. Qui sotto la somma di tutte le commesse in vista: <b>seleziona una o più commesse qui sopra</b> per la tabella di ciascuna, con l\'elenco dei fornitori e dei termini usati.</div>';
-      h += '<section class="og"><h3 class="cfh"><i class="dt cy"></i>Tutte le commesse in vista<em class="oghint">' + modelli.length + ' commesse · incassi meno pagamenti, mese per mese</em>'
-        + '<span class="cfbtn"><button class="chip" data-cfcopy="*">Copia per Excel</button><button class="chip" data-cfcsv="*">Scarica .csv</button></span></h3>'
-        + (MA.mesi.length ? cashTabella(MA) : '<p class="ogempty">Nessun incasso datato e nessun ordine fornitore.</p>') + '</section>';
+      var A = cfAggrega(Ms); CF_CACHE['*'] = A;
+      h += '<section class="og"><h3 class="cfh"><i class="dt cy"></i>Tutte le commesse in vista<em class="oghint">' + Ms.length + ' commesse · incassi più, uscite meno, mese per mese</em>'
+        + '<span class="cfbtn"><button class="chip" data-cfcopy="*">Copia per Excel</button></span></h3>' + cfTabellaHtml(A)
+        + '<p class="srcline">Seleziona una o più commesse qui sopra per vedere la tabella di ciascuna con le rate, la stima per nodo e le cose che mancano.</p></section>';
       return h;
     }
-    modelli.forEach(function(M){
-      var daConf = M.forn.filter(function(f){ return !f.noto; });
-      h += '<section class="og"><h3 class="cfh"><i class="dt cy"></i>' + esc(M.c.code) + ' · ' + esc(M.c.cliente || '') + '<em class="oghint">' + esc(M.c.desc || '') + '</em>'
-        + '<span class="cfbtn"><button class="chip" data-cfcopy="' + esc(M.c.code) + '">Copia per Excel</button><button class="chip" data-cfcsv="' + esc(M.c.code) + '">Scarica .csv</button></span></h3>';
-      h += M.mesi.length ? cashTabella(M) : '<p class="ogempty">Nessun incasso datato e nessun ordine fornitore per questa commessa.</p>';
-      if (M.forn.length){
-        h += '<details class="cfforn"' + (daConf.length ? ' open' : '') + '><summary>' + M.forn.length + ' fornitori con ordini aperti · '
-          + (daConf.length ? '<b>' + daConf.length + ' con termini di pagamento da confermare</b>' : 'termini di pagamento noti per tutti') + '</summary>'
-          + '<table><thead><tr><th>Fornitore</th><th class="num">Ordini</th><th class="num">Importo</th><th>Termini di pagamento</th><th>Fonte</th></tr></thead><tbody>';
-        M.forn.forEach(function(f){
-          var t = f.t;
-          h += '<tr' + (f.noto ? '' : ' class="bad"') + '><td><b>' + esc(f.f) + '</b></td><td class="num mono">' + f.n + '</td><td class="num mono">' + eur(Math.round(f.imp)) + '</td>'
-            + '<td>' + (t ? esc(t.testo || '') + (t.rate ? '<span class="osub">' + esc(t.rate) + '</span>' : '') : '<i>non trovati nelle email: messo alla data di consegna</i>') + '</td>'
-            + '<td class="osub">' + (t && t.fonte ? esc(t.fonte) : '') + '</td></tr>';
-        });
-        h += '</tbody></table></details>';
+    Ms.forEach(function(M){
+      var c = M.c;
+      h += '<section class="og"><h3 class="cfh"><i class="dt cy"></i>' + esc(c.code) + ' · ' + esc(c.cliente || '') + '<em class="oghint">' + esc(c.desc || '') + '</em>'
+        + '<span class="cfbtn"><button class="chip" data-cfcopy="' + esc(c.code) + '">Copia per Excel</button></span></h3>';
+      if (M.avvisi.length) h += '<p class="srcline cfavv">Da completare: ' + M.avvisi.map(esc).join(' · ') + '.</p>';
+      h += cfTabellaHtml(M);
+      if (M.nodi.length){
+        h += '<details class="cfforn"><summary>Stima per nodo · da spendere ' + eur(Math.round(M.stTot)) + ' su budget ' + eur(Math.round(M.nodi.reduce(function(a, n){ return a + n.ext; }, 0))) + '</summary><table><thead><tr><th>Nodo</th><th class="num">Budget</th><th class="num">Fatture e DDT</th><th class="num">Ordini aperti</th><th class="num">Da spendere</th><th>Mesi</th></tr></thead><tbody>'
+          + M.nodi.map(function(n){ return '<tr><td><b>' + esc(n.n) + '</b></td><td class="num mono">' + eur(Math.round(n.ext)) + '</td><td class="num mono">' + eur(Math.round(n.doc)) + '</td><td class="num mono">' + eur(Math.round(n.ord)) + '</td><td class="num mono">' + eur(Math.round(n.res)) + '</td><td class="osub">' + (n.usaPiano ? 'piano mensile' : 'parti uguali fino alla spedizione') + '</td></tr>'; }).join('')
+          + '</tbody></table></details>';
       }
       h += '</section>';
     });
@@ -3356,31 +3550,436 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
   }
   function tsv(rows){ return rows.map(function(r){ return r.map(function(x){ return String(x == null ? '' : x).replace(/[\t\n]/g, ' '); }).join('\t'); }).join('\n'); }
   function csvIt(rows){ return '﻿' + rows.map(function(r){ return r.map(function(x){
-    var s = String(x == null ? '' : x); return /[;"\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }).join(';'); }).join('\r\n'); }
-  function cfFile(M, est){ return 'cashflow-' + String(M.c.code).replace(/[^A-Za-z0-9_-]+/g, '_').slice(0, 40) + '.' + est; }
+    var s = typeof x === 'number' ? String(Math.round(x * 100) / 100).replace('.', ',') : String(x == null ? '' : x); return /[;"\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }).join(';'); }).join('\r\n'); }
+  /* tabella come righe di valori (per Copia, csv ed Excel) */
+  function cfRighe(M){
+    var T = cfTab(M), head = ['Voce', 'Fonte'].concat(T.haPrima ? ['Prima di ' + ymLabel(M.k0)] : [], M.mesi.map(ymLabel), T.haSenza ? ['Senza data'] : [], ['Totale']), rows = [head];
+    function r2(v){ return Math.round(v); }
+    T.righe.forEach(function(r){ var x = [r.lab, r.fonte].concat(T.haPrima ? [r2(r.prima)] : [], r.vals.map(r2), T.haSenza ? [r2(r.senza)] : [], [r2(r.tot)]); x.key = r.key; rows.push(x); });
+    var e = ['Totale entrate', ''].concat(T.haPrima ? [r2(T.entP)] : [], T.ent.map(r2), T.haSenza ? [r2(T.entS)] : [], [r2(T.entT)]); e.key = 'sub';
+    var u = ['Totale uscite', ''].concat(T.haPrima ? [r2(T.uscP)] : [], T.usc.map(r2), T.haSenza ? [r2(T.uscS)] : [], [r2(T.uscT)]); u.key = 'sub';
+    var s = ['Saldo del mese', ''].concat(T.haPrima ? [r2(T.entP + T.uscP)] : [], T.saldo.map(r2), T.haSenza ? [r2(T.entS + T.uscS)] : [], [r2(T.entT + T.uscT)]); s.key = 'tot';
+    var p = ['Progressivo da ' + ymLabel(M.k0), ''].concat(T.haPrima ? [''] : [], T.prog.map(r2), T.haSenza ? [''] : [], ['']); p.key = 'tot';
+    rows.push(e, u, s, p);
+    return rows;
+  }
+  function cfDetRighe(det){
+    var rows = [['Commessa', 'Cliente', 'Entrata/Uscita', 'Voce', 'Fonte', 'Nodo', 'Controparte', 'Riferimento', 'Data documento', 'Termini di pagamento', 'Data prevista', 'Mese', 'Importo', 'Note']];
+    det.slice().sort(function(a, b){ return a.cm < b.cm ? -1 : a.cm > b.cm ? 1 : (a.d || '9') < (b.d || '9') ? -1 : (a.d || '9') > (b.d || '9') ? 1 : 0; }).forEach(function(x){
+      var r = CF_R.filter(function(y){ return y[0] === x.row; })[0] || ['', x.row, -1];
+      rows.push([x.cm, x.cli, r[2] > 0 ? 'Entrata' : 'Uscita', r[1], x.tipo, x.nodo, x.chi, x.rif, x.dDoc ? itFull(x.dDoc) : '', x.term, x.d ? itFull(x.d) : '', x.k ? ymLabel(x.k) : 'senza data', Math.round(r[2] * x.imp * 100) / 100, x.nota]);
+    });
+    return rows;
+  }
   function wireCash(){
     document.querySelectorAll('[data-cfcopy]').forEach(function(b){
       b.addEventListener('click', function(){
         var M = CF_CACHE[b.getAttribute('data-cfcopy')]; if (!M) return;
-        var txt = tsv(cashRighe(M));
-        var p = null; try { p = navigator.clipboard.writeText(txt); } catch(e){}
+        var txt = tsv(cfRighe(M)), p = null; try { p = navigator.clipboard.writeText(txt); } catch(e){}
         if (p) p.then(function(){ b.textContent = 'copiato · incolla in Excel'; setTimeout(function(){ b.textContent = 'Copia per Excel'; }, 3000); },
                       function(){ window.prompt('Copia queste righe e incollale in Excel:', txt); });
         else window.prompt('Copia queste righe e incollale in Excel:', txt);
       });
     });
-    document.querySelectorAll('[data-cfcsv]').forEach(function(b){
-      b.addEventListener('click', function(){
-        var M = CF_CACHE[b.getAttribute('data-cfcsv')]; if (!M) return;
-        if (!DLc){ b.textContent = DLcPronto ? 'non disponibile qui: usa Copia' : 'un attimo…'; return; }
-        var rows = cashRighe(M);
-        if (M.forn.length){ rows.push([]); rows.push(['Fornitore','Ordini','Importo','Termini','Base','Giorni','Rate','Fonte']);
-          M.forn.forEach(function(f){ var t = f.t || {}; rows.push([f.f, f.n, Math.round(f.imp), t.testo || 'da confermare', t.base || '', t.gg == null ? '' : t.gg, t.rate || '', t.fonte || '']); }); }
-        DLc.save({filename:cfFile(M, 'csv'), data:csvIt(rows)})
-          .then(function(){ b.textContent = 'scaricato'; setTimeout(function(){ b.textContent = 'Scarica .csv'; }, 3000); })
-          .catch(function(err){ b.textContent = (err && err.code === 'declined') ? 'annullato' : 'errore: ' + ((err && err.code) || err); setTimeout(function(){ b.textContent = 'Scarica .csv'; }, 4000); });
-      });
+    document.querySelectorAll('[data-cfx]').forEach(function(b){ b.addEventListener('click', function(){ cfAzione(b.getAttribute('data-cfx'), b); }); });
+  }
+  function cfMsg(t, bad){ var m = document.getElementById('cfmsg'); if (m){ m.textContent = t; m.className = 'srcline' + (bad ? ' late' : ''); } }
+  function cfAzione(tipo, b){
+    if (tipo === 'csv'){
+      if (!DLc){ cfMsg(DLcPronto ? 'Il salvataggio dei file non è disponibile in questa vista.' : 'Un attimo, riprova tra qualche secondo.', true); return; }
+      var Ms = cfAperte().map(cfModello), rows = cfRighe(cfAggrega(Ms)); rows.push([]); rows = rows.concat(cfDetRighe(cfAggrega(Ms).det));
+      DLc.save({filename: cfNomeFile().replace(/\.xlsx$/, '.csv'), data: csvIt(rows)})
+        .then(function(){ cfMsg('✓ file .csv scaricato'); })
+        .catch(function(err){ cfMsg((err && err.code) === 'declined' ? 'Download annullato.' : 'Download non riuscito: ' + ((err && err.code) || err), true); });
+      return;
+    }
+    if (tipo === 'me'){ cfInvia(ME_EMAIL, 'te', true); return; }
+    var C = cfConsulente(), box = document.getElementById('cfconf'); if (!box) return;
+    box.hidden = false;
+    box.innerHTML = 'Invio adesso dal tuo Gmail a <b>' + esc(C.titolo + ' ' + C.nome) + '</b> &lt;' + esc(C.email) + '&gt; il file <b>' + esc(cfNomeFile()) + '</b> con le ' + cfAperte().length + ' commesse in corso. Confermi?'
+      + ' <button class="btn" id="cf-si">Sì, invia adesso</button> <button class="chip" id="cf-no">Annulla</button>';
+    document.getElementById('cf-no').addEventListener('click', function(){ box.hidden = true; box.innerHTML = ''; });
+    document.getElementById('cf-si').addEventListener('click', function(){ box.hidden = true; box.innerHTML = ''; cfInvia(C.email, C.titolo + ' ' + C.nome, false); });
+  }
+  var ME_EMAIL = 'tirotta@prestonbarbieri.com', CF_INVIO = false;
+  function cfNomeFile(){ return isoDi(today()) + ' Cash flow commesse in corso.xlsx'; }
+  function cfCorpo(Ms, controllo){
+    var C = cfConsulente(), A = cfAggrega(Ms), da = ymLabel(A.mesi[0]), a = ymLabel(A.mesi[A.mesi.length - 1]);
+    return '— Messaggio preparato dal Danilo Second Brain per conto di Danilo Tirotta —\n\n'
+      + (controllo ? '[Copia di controllo: questa è la mail che parte verso ' + C.titolo + ' ' + C.nome + ' con il bottone «Invia».]\n\n' : '')
+      + 'Buongiorno ' + C.titolo + ' ' + C.nome + ',\n\n'
+      + 'in allegato il cash flow delle ' + Ms.length + ' commesse in corso di Preston & Barbieri, aggiornato al ' + itFull(isoDi(today())) + ', mese per mese da ' + da + ' a ' + a + '.\n\n'
+      + 'Nel file:\n'
+      + '- «Riepilogo»: entrate e uscite di tutte le commesse per mese, con il saldo e il progressivo, e sotto il saldo di ogni commessa;\n'
+      + '- un foglio per commessa, con le date chiave (spedizione da contratto, installazione) e le percentuali di spedizione;\n'
+      + '- «Dettaglio»: ogni importo su una riga, con la sua fonte;\n'
+      + '- «Legenda»: come è costruito ogni numero.\n\n'
+      + 'La colonna Fonte dice da dove viene ogni cifra:\n'
+      + '- CONTRATTO: rate di incasso dal piano pagamenti del contratto, alla data dell\'evento (anticipo, spedizione, installazione e commissioning, invio documenti, collaudo) più i giorni di pagamento;\n'
+      + '- FATTURA e DDT: costi già registrati nel gestionale, alla data di pagamento prevista con i termini del fornitore;\n'
+      + '- ORDINE: ordini fornitore aperti, alla data di consegna prevista più i termini del fornitore;\n'
+      + '- STIMA: la parte del budget non ancora ordinata, distribuita sui mesi secondo le mie previsioni; si riduce da sola man mano che emettiamo gli ordini.\n\n'
+      + 'Sono esclusi i costi interni (ore di ufficio e di officina). La riga «termini da confermare» raccoglie costi documentati per cui non abbiamo ancora i termini di pagamento del fornitore: sono messi alla data del documento.\n\n'
+      + 'Cordiali saluti,\nDanilo Tirotta, Program Manager, Preston & Barbieri Srl';
+  }
+  function cfOggetto(controllo){ return (controllo ? '[Controllo] ' : '') + 'Cash flow commesse in corso — aggiornamento al ' + itFull(isoDi(today())); }
+  function b64Di(u){ var s = '', CH = 0x8000; for (var i = 0; i < u.length; i += CH) s += String.fromCharCode.apply(null, u.subarray(i, i + CH)); return btoa(s); }
+  function cfInvia(to, chi, controllo){
+    if (CF_INVIO) return;
+    if (!/@/.test(to)){ cfMsg('Indirizzo del destinatario mancante.', true); return; }
+    if (!MCP){ cfMsg(MCPpronto ? 'Gmail non è collegato a questa pagina: aprila dentro Claude e consenti Gmail quando te lo chiede.' : 'Un attimo, sto collegando Gmail: riprova tra qualche secondo.', true); return; }
+    CF_INVIO = true; cfMsg('preparo il file Excel…');
+    var Ms = cfAperte().map(cfModello), nome = cfNomeFile();
+    cfExcel(Ms).catch(function(e){ throw {code: 'xlsx', message: (e && e.message) || String(e)}; }).then(function(u8){
+      cfMsg('invio a ' + to + '…');
+      return MCP.callTool('Gmail', 'send_message', {to: [to], subject: cfOggetto(controllo), body: cfCorpo(Ms, controllo),
+        attachments: [{content: b64Di(u8), filename: nome, mimeType: XLSX_MIME}]}, {cache: false});
+    }).then(function(){
+      CF_INVIO = false;
+      if (!controllo) cfRegistra(to, chi, nome, Ms.length);
+      cfMsg('✓ inviata a ' + to + ' con «' + nome + '» · la trovi in Gmail → Inviati');
+    }).catch(function(err){
+      CF_INVIO = false; var c = err && err.code;
+      if (c === 'xlsx') cfMsg('Non sono riuscito a preparare il file Excel: ' + (err.message || '') + '. Dillo a Claude.', true);
+      else if (c === 'needs_reauth') cfMsg('Gmail va ricollegato: claude.ai → Impostazioni → Connettori. Nessuna mail è partita.', true);
+      else if (c === 'server_not_connected' || c === 'selection_required' || c === 'server_not_found') cfMsg('Gmail non risulta collegato al tuo account Claude (claude.ai → Impostazioni → Connettori). Nessuna mail è partita.', true);
+      else if (c === 'not_in_manifest' || c === 'not_granted' || c === 'blocked_by_policy' || c === 'approval_required' || c === 'capability_disabled' || c === 'capability_removed')
+        cfMsg('Questa pagina non ha il permesso di inviare mail (' + c + '). Nessuna mail è partita: usa «Mandalo a me» più tardi o dillo a Claude.', true);
+      else if (c === 'tool_error' || c === 'bad_request' || c === 'transform_error') cfMsg('Gmail ha rifiutato l’invio: ' + ((err && err.message) || c) + '. Nessuna mail è partita.', true);
+      else cfMsg('Esito incerto (' + (c || 'errore') + '): prima di riprovare guarda in Gmail → Inviati se la mail è partita.', true);
     });
+  }
+  /* l'invio al consulente resta nel gruppo MAIL come task gia' chiuso */
+  function cfRegistra(to, chi, nome, n){
+    var g = (S.groups || []).filter(function(x){ return x.code === 'MAIL'; })[0];
+    if (!g){ g = {code: 'MAIL', name: 'Mail', tasks: []}; S.groups.push(g); }
+    var oggi = isoDi(today());
+    g.tasks.push({id: 'mlcf' + Date.now().toString(36), t: 'Inviato a ' + chi + ' il cash flow delle ' + n + ' commesse in corso', s: 'Cash flow · ' + it(oggi) + ' · ' + nome + ' · a ' + to + ' · inviato dal bottone della pagina',
+      o: oggi, d: true, dd: oggi, n: '', nq: []});
+    salvaSubito('invio registrato nel gruppo MAIL');
+    var o = document.querySelector('.cfbar .osub'); if (o) o.textContent = 'Ultimo invio a ' + cfConsulente().nome + ': ' + itFull(oggi) + ' · destinatario ' + to;
+  }
+
+  /* ---- Excel (.xlsx) scritto qui nel browser: fogli XML in uno zip ---- */
+  var CRC_T = null;
+  function crc32(u){
+    if (!CRC_T){ CRC_T = new Uint32Array(256); for (var n = 0; n < 256; n++){ var c = n; for (var k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; CRC_T[n] = c >>> 0; } }
+    var x = 0xFFFFFFFF; for (var i = 0; i < u.length; i++) x = CRC_T[(x ^ u[i]) & 255] ^ (x >>> 8); return (x ^ 0xFFFFFFFF) >>> 0;
+  }
+  function deflateRaw(u){
+    if (typeof CompressionStream === 'undefined' || typeof Response === 'undefined' || typeof Blob === 'undefined') return Promise.resolve(null);
+    try { var st = new Blob([u]).stream().pipeThrough(new CompressionStream('deflate-raw')); return new Response(st).arrayBuffer().then(function(b){ return new Uint8Array(b); }, function(){ return null; }); }
+    catch(e){ return Promise.resolve(null); }
+  }
+  function zipFiles(files){
+    var enc = new TextEncoder(), now = new Date();
+    var dt = ((now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1)) & 0xFFFF, dd = (((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate()) & 0xFFFF;
+    return Promise.all(files.map(function(f){ var raw = enc.encode(f.data); return deflateRaw(raw).then(function(z){ return {name: enc.encode(f.name), raw: raw, z: (z && z.length < raw.length) ? z : null, crc: crc32(raw)}; }); }))
+    .then(function(E){
+      var parts = [], cen = [], off = 0;
+      function u16(v){ return [v & 255, (v >>> 8) & 255]; }
+      function u32(v){ return [v & 255, (v >>> 8) & 255, (v >>> 16) & 255, (v >>> 24) & 255]; }
+      E.forEach(function(e){
+        var data = e.z || e.raw, meth = e.z ? 8 : 0;
+        var lh = [].concat(u32(0x04034b50), u16(20), u16(0x0800), u16(meth), u16(dt), u16(dd), u32(e.crc), u32(data.length), u32(e.raw.length), u16(e.name.length), u16(0));
+        parts.push(new Uint8Array(lh), e.name, data);
+        cen.push([].concat(u32(0x02014b50), u16(20), u16(20), u16(0x0800), u16(meth), u16(dt), u16(dd), u32(e.crc), u32(data.length), u32(e.raw.length), u16(e.name.length), u16(0), u16(0), u16(0), u16(0), u32(0), u32(off)), e.name);
+        off += lh.length + e.name.length + data.length;
+      });
+      var inizio = off, lung = 0;
+      for (var i = 0; i < cen.length; i += 2){ parts.push(new Uint8Array(cen[i]), cen[i + 1]); lung += cen[i].length + cen[i + 1].length; }
+      parts.push(new Uint8Array([].concat(u32(0x06054b50), u16(0), u16(0), u16(E.length), u16(E.length), u32(lung), u32(inizio), u16(0))));
+      var tot = 0; parts.forEach(function(p){ tot += p.length; });
+      var out = new Uint8Array(tot), o = 0; parts.forEach(function(p){ out.set(p, o); o += p.length; });
+      return out;
+    });
+  }
+  function xEsc(s){ return String(s == null ? '' : s).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+  function xCol(i){ var s = ''; i++; while (i > 0){ var m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; }
+  /* stili: 0 normale · 1 intestazione · 2 numero · 3 titolo · 4/5 stima (testo/numero) · 6/7 documenti · 8/9 totali · 10 testo a capo · 11/12 incassi · 13 corsivo grigio */
+  var XSTILI = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+    + '<numFmts count="1"><numFmt numFmtId="164" formatCode="#,##0;[Red]\\-#,##0"/></numFmts>'
+    + '<fonts count="5"><font><sz val="10"/><name val="Arial"/></font><font><b/><sz val="10"/><name val="Arial"/></font><font><b/><sz val="13"/><name val="Arial"/></font><font><i/><sz val="10"/><name val="Arial"/></font><font><i/><sz val="9"/><color rgb="FF666666"/><name val="Arial"/></font></fonts>'
+    + '<fills count="7"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>'
+    + '<fill><patternFill patternType="solid"><fgColor rgb="FFD9E1F2"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFFF2CC"/></patternFill></fill>'
+    + '<fill><patternFill patternType="solid"><fgColor rgb="FFEDEDED"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFD9D9D9"/></patternFill></fill>'
+    + '<fill><patternFill patternType="solid"><fgColor rgb="FFE2EFDA"/></patternFill></fill></fills>'
+    + '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+    + '<cellXfs count="14"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
+    + '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment wrapText="1" vertical="center"/></xf>'
+    + '<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>'
+    + '<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/>'
+    + '<xf numFmtId="0" fontId="3" fillId="3" borderId="0" xfId="0" applyFont="1" applyFill="1"/>'
+    + '<xf numFmtId="164" fontId="3" fillId="3" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1"/>'
+    + '<xf numFmtId="0" fontId="0" fillId="4" borderId="0" xfId="0" applyFill="1"/>'
+    + '<xf numFmtId="164" fontId="0" fillId="4" borderId="0" xfId="0" applyNumberFormat="1" applyFill="1"/>'
+    + '<xf numFmtId="0" fontId="1" fillId="5" borderId="0" xfId="0" applyFont="1" applyFill="1"/>'
+    + '<xf numFmtId="164" fontId="1" fillId="5" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1"/>'
+    + '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment wrapText="1" vertical="top"/></xf>'
+    + '<xf numFmtId="0" fontId="0" fillId="6" borderId="0" xfId="0" applyFill="1"/>'
+    + '<xf numFmtId="164" fontId="0" fillId="6" borderId="0" xfId="0" applyNumberFormat="1" applyFill="1"/>'
+    + '<xf numFmtId="0" fontId="4" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs>'
+    + '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>';
+  /* un foglio: righe = array di celle; cella = valore o {v, s}; opts.cols = larghezze, opts.fermo = righe/colonne bloccate */
+  function xSheet(righe, opts){
+    opts = opts || {};
+    var x = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">';
+    if (opts.fermo){ var fr = opts.fermo, ap = (fr[0] && fr[1]) ? 'bottomRight' : fr[1] ? 'topRight' : 'bottomLeft';
+      x += '<sheetViews><sheetView workbookViewId="0"><pane' + (fr[1] ? ' xSplit="' + fr[1] + '"' : '') + (fr[0] ? ' ySplit="' + fr[0] + '"' : '') + ' topLeftCell="' + xCol(fr[1] || 0) + ((fr[0] || 0) + 1) + '" activePane="' + ap + '" state="frozen"/><selection pane="' + ap + '"/></sheetView></sheetViews>'; }
+    if (opts.cols) x += '<cols>' + opts.cols.map(function(w, i){ return '<col min="' + (i + 1) + '" max="' + (i + 1) + '" width="' + w + '" customWidth="1"/>'; }).join('') + '</cols>';
+    x += '<sheetData>';
+    righe.forEach(function(r, i){
+      if (!r || !r.length){ return; }
+      x += '<row r="' + (i + 1) + '">';
+      r.forEach(function(cel, j){
+        if (cel == null || cel === '') return;
+        var v = cel, s = 0; if (typeof cel === 'object'){ v = cel.v; s = cel.s || 0; }
+        if (v == null || v === '') { if (s) x += '<c r="' + xCol(j) + (i + 1) + '" s="' + s + '"/>'; return; }
+        var ref = xCol(j) + (i + 1);
+        if (typeof v === 'number' && isFinite(v)) x += '<c r="' + ref + '"' + (s ? ' s="' + s + '"' : '') + '><v>' + v + '</v></c>';
+        else x += '<c r="' + ref + '" t="inlineStr"' + (s ? ' s="' + s + '"' : '') + '><is><t xml:space="preserve">' + xEsc(v) + '</t></is></c>';
+      });
+      x += '</row>';
+    });
+    return x + '</sheetData></worksheet>';
+  }
+  function xNomeFoglio(n, usati){
+    var b = String(n).replace(/[\[\]:*?\/\\]/g, '-').slice(0, 31) || 'Foglio', k = b, i = 2;
+    while (usati[k.toLowerCase()]) k = b.slice(0, 28) + ' ' + (i++);
+    usati[k.toLowerCase()] = 1; return k;
+  }
+  function xWorkbook(fogli){
+    var usati = {}, nomi = fogli.map(function(f){ return xNomeFoglio(f.nome, usati); });
+    var files = [
+      {name: '[Content_Types].xml', data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+        + fogli.map(function(f, i){ return '<Override PartName="/xl/worksheets/sheet' + (i + 1) + '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'; }).join('') + '</Types>'},
+      {name: '_rels/.rels', data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'},
+      {name: 'xl/workbook.xml', data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>'
+        + nomi.map(function(n, i){ return '<sheet name="' + xEsc(n) + '" sheetId="' + (i + 1) + '" r:id="rId' + (i + 1) + '"/>'; }).join('') + '</sheets></workbook>'},
+      {name: 'xl/_rels/workbook.xml.rels', data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        + fogli.map(function(f, i){ return '<Relationship Id="rId' + (i + 1) + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet' + (i + 1) + '.xml"/>'; }).join('')
+        + '<Relationship Id="rId' + (fogli.length + 1) + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>'},
+      {name: 'xl/styles.xml', data: XSTILI}
+    ];
+    fogli.forEach(function(f, i){ files.push({name: 'xl/worksheets/sheet' + (i + 1) + '.xml', data: xSheet(f.righe, f.opts)}); });
+    return zipFiles(files);
+  }
+  /* le righe di una tabella di cash flow con gli stili: stima in giallo, documenti in grigio, incassi in verde */
+  function xTabella(rows){
+    return rows.map(function(r, i){
+      if (!i) return r.map(function(v){ return {v: v, s: 1}; });
+      var k = r.key, st = k === 'stima' ? [4, 5] : (k === 'fat' || k === 'ddt' || k === 'ord' || k === 'fornDa') ? [6, 7] : (k === 'inc' || k === 'incSp' || k === 'incEv' || k === 'incScad') ? [11, 12] : (k === 'tot' || k === 'sub') ? [8, 9] : [0, 2];
+      return r.map(function(v, j){ return {v: v, s: j < 2 ? st[0] : st[1]}; });
+    });
+  }
+  function cfExcel(Ms){
+    try {
+      var A = cfAggrega(Ms), oggi = isoDi(today()), fogli = [], n = A.mesi.length, sosp = CM().filter(function(c){ return c.sp && !c.ev && !cmAltro(c); }).map(function(c){ return c.code; });
+      var agg = [(S.cons && S.cons.docAgg) ? 'fatture e DDT al ' + itFull(S.cons.docAgg) : null, (S.ordf && S.ordf.agg) ? 'ordini aperti al ' + itFull(S.ordf.agg) : null].filter(Boolean).join(', ');
+      var R = [[{v: 'Cash flow commesse in corso — Preston & Barbieri Srl', s: 3}],
+        ['Aggiornato al ' + itFull(oggi) + ' · ' + Ms.length + ' commesse in corso · importi in euro · entrate positive, uscite negative · solo costi esterni (ore interne escluse)'],
+        [{v: 'Gestionale: ' + (agg || 'date di estrazione non disponibili') + '. Colori: verde = contratto, grigio = documenti del gestionale (fattura, DDT, ordine), giallo = stima di Danilo.', s: 13}], []];
+      R = R.concat(xTabella(cfRighe(A)));
+      R.push([], [{v: 'Saldo mensile per commessa', s: 3}]);
+      var T0 = cfTab(A), hc = ['Commessa', 'Cliente'].concat(T0.haPrima ? ['Prima di ' + ymLabel(A.k0)] : [], A.mesi.map(ymLabel), T0.haSenza ? ['Senza data'] : [], ['Totale', 'Di cui stima']);
+      R.push(hc.map(function(v){ return {v: v, s: 1}; }));
+      Ms.forEach(function(M){
+        var e = [], stima = 0;
+        function saldoCm(k){ var t = 0; CF_R.forEach(function(r){ t += r[2] * (k === 'prima' ? M.prima[r[0]] : k === 'senza' ? M.senza[r[0]] : (M.R[r[0]][k] || 0)); }); return t; }
+        var tot = 0; ['prima'].concat(A.mesi, ['senza']).forEach(function(k){ tot += saldoCm(k); });
+        CF_R.forEach(function(r){ if (r[0] === 'stima'){ stima += M.prima.stima + M.senza.stima; Object.keys(M.R.stima).forEach(function(k){ stima += M.R.stima[k]; }); } });
+        e = [M.c.code, M.c.cliente || ''].concat(T0.haPrima ? [Math.round(saldoCm('prima'))] : [], A.mesi.map(function(k){ return Math.round(saldoCm(k)); }), T0.haSenza ? [Math.round(saldoCm('senza'))] : [], [Math.round(tot), -Math.round(stima)]);
+        R.push(e.map(function(v, j){ return {v: v, s: j < 2 ? 0 : 2}; }));
+      });
+      var larg = [44, 30]; for (var i = 0; i < n + 4; i++) larg.push(12);
+      fogli.push({nome: 'Riepilogo', righe: R, opts: {cols: larg, fermo: [5, 2]}});
+      /* legenda */
+      var L = [[{v: 'Come è costruito il file', s: 3}], [],
+        [{v: 'Fonte', s: 1}, {v: 'Significato', s: 1}],
+        ['CONTRATTO', {v: 'Rate di incasso dal piano pagamenti del contratto. Ogni rata è legata a un evento: data fissa (es. anticipo), spedizione (segue le percentuali di spedizione mese per mese), installazione e commissioning, invio documenti, inizio saldatura, inizio pittura, collaudo; più i giorni di pagamento dopo l\'evento. «data stimata» = l\'evento non ha ancora una data confermata da Danilo: si usa la data attesa dal contratto.', s: 10}],
+        ['FATTURA', {v: 'Fatture fornitore già registrate nel gestionale: data della fattura più i termini di pagamento del fornitore. Se il pagamento cade prima del mese corrente è nella colonna «Prima di…» (presumibilmente già pagata).', s: 10}],
+        ['DDT', {v: 'Merce consegnata e non ancora fatturata: data del DDT più i termini del fornitore.', s: 10}],
+        ['ORDINE', {v: 'Ordini fornitore aperti: data di consegna prevista più i termini del fornitore. Se la consegna prevista è già passata, si considera da oggi.', s: 10}],
+        ['Incassi scaduti da verificare', {v: 'Rate con data già passata per cui nel Second Brain non è registrato l\'incasso: possono essere già incassate (registrazione mancante) o davvero in ritardo. Sono nel mese corrente, in una riga a parte: da verificare con l\'amministrazione prima di contarle.', s: 10}],
+        ['Termini da confermare', {v: 'Costi documentati (fattura, DDT o ordine) di fornitori di cui non conosciamo ancora i termini di pagamento: sono messi alla data del documento, in una riga separata.', s: 10}],
+        ['STIMA', {v: 'Budget per nodo (costi esterni) meno quanto già in fatture, DDT e ordini aperti dello stesso nodo, distribuito sui mesi secondo il piano di spesa di Danilo; senza piano, in parti uguali fino al mese di spedizione. Quando si emette un ordine la stima di quel nodo si riduce da sola.', s: 10}],
+        [], [{v: 'Note', s: 1}, {v: '', s: 1}],
+        ['Periodo', {v: 'Da ' + ymLabel(A.mesi[0]) + ' a ' + ymLabel(A.mesi[n - 1]) + ': per ogni commessa almeno fino a 4 mesi dopo la spedizione da contratto.', s: 10}],
+        ['Esclusi', {v: 'Costi interni (ore di ufficio e di officina), IVA, costi generali non attribuiti a commessa.' + (sosp.length ? ' Commesse sospese, non incluse: ' + sosp.join(', ') + '.' : ''), s: 10}],
+        ['Gestionale', {v: agg || 'date di estrazione non disponibili', s: 10}],
+        [], [{v: 'Cose ancora da completare, per commessa', s: 1}, {v: '', s: 1}]];
+      Ms.forEach(function(M){ if (M.avvisi.length) L.push([M.c.code, {v: M.avvisi.join(' · '), s: 10}]); });
+      fogli.push({nome: 'Legenda', righe: L, opts: {cols: [24, 110]}});
+      /* un foglio per commessa */
+      Ms.forEach(function(M){
+        var c = M.c, P = cfp(c), dc = cfDc(c), F = [[{v: c.code + ' · ' + (c.cliente || ''), s: 3}], [c.desc || '']];
+        var val = bdgNum(c.eco && c.eco.valore);
+        F.push(['Valore del contratto', val != null ? {v: Math.round(val), s: 2} : 'non indicato']);
+        F.push(['Spedizione da contratto', dc ? itFull(dc) : 'non indicata']);
+        CF_DATE.forEach(function(x){ if (isoOk(P[x[0]])) F.push([x[1], itFull(P[x[0]])]); });
+        F.push(['Spedizioni (% del totale)', M.SP.righe.length ? M.SP.righe.map(function(s){ return ymLabel(s.k) + ' ' + pctIt(s.pct) + (s.auto ? ' (data di contratto)' : ''); }).join(' · ') : 'non indicate']);
+        var ext = M.nodi.reduce(function(a, x){ return a + x.ext; }, 0);
+        F.push(['Budget costi esterni', ext ? {v: Math.round(ext), s: 2} : 'nessun budget per nodo', M.B.proposta ? 'proposto dalle commesse simili, da confermare' : (M.B.conf ? 'confermato da Danilo' : 'salvato, da confermare')]);
+        F.push(['Da spendere (stima)', {v: Math.round(M.stTot), s: 2}]);
+        if (M.avvisi.length) F.push([{v: 'Da completare', s: 13}, {v: M.avvisi.join(' · '), s: 13}]);
+        F.push([]);
+        var riga0 = F.length;
+        F = F.concat(xTabella(cfRighe(M)));
+        if (M.rate.length){
+          F.push([], [{v: 'Rate di incasso', s: 3}], ['Rata', 'Importo', 'Evento', 'Giorni dopo', 'Data prevista', 'Mese', 'Stato'].map(function(v){ return {v: v, s: 1}; }));
+          M.rate.forEach(function(r){ r.parti.forEach(function(p){
+            F.push([String(r.v.c || '').replace(/\s+/g, ' ').slice(0, 160), {v: Math.round(p.imp), s: 2}, r.v.inc ? 'incassata' : cfEvLabel(r.q.a), r.q.gg || '', p.d ? itFull(isoDi(p.d)) : 'senza data', p.d ? ymLabel(ymKey(p.d)) : '', p.inc ? 'incassata' : p.stim ? 'data stimata' : p.nota]);
+          }); });
+        }
+        if (M.nodi.length){
+          F.push([], [{v: 'Stima per nodo', s: 3}], ['Nodo', 'Budget', 'Fatture e DDT', 'Ordini aperti', 'Da spendere', 'Distribuzione'].concat(M.pm.map(ymLabel)).map(function(v){ return {v: v, s: 1}; }));
+          M.nodi.forEach(function(x){ F.push([x.n, {v: Math.round(x.ext), s: 2}, {v: Math.round(x.doc), s: 2}, {v: Math.round(x.ord), s: 2}, {v: Math.round(x.res), s: 5}, x.usaPiano ? 'piano di Danilo' : 'parti uguali'].concat(M.pm.map(function(k){ return x.dist[k] ? {v: Math.round(x.dist[k]), s: 5} : ''; }))); });
+        }
+        var lc = [44, 30]; for (var j = 0; j < M.mesi.length + 4; j++) lc.push(12);
+        fogli.push({nome: c.code, righe: F, opts: {cols: lc, fermo: [0, 2]}});
+      });
+      /* dettaglio */
+      var D = cfDetRighe(A.det).map(function(r, i){
+        if (!i) return r.map(function(v){ return {v: v, s: 1}; });
+        var st = /^STIMA/.test(r[4]) ? [4, 5] : /^CONTRATTO/.test(r[4]) ? [11, 12] : [6, 7];
+        return r.map(function(v, j){ return {v: v, s: j === 12 ? st[1] : st[0]}; });
+      });
+      fogli.push({nome: 'Dettaglio', righe: D, opts: {cols: [12, 26, 10, 34, 26, 24, 30, 26, 12, 30, 12, 9, 13, 60], fermo: [1, 1]}});
+      return xWorkbook(fogli);
+    } catch(e){ return Promise.reject(e); }
+  }
+
+  /* ---- scheda commessa: date chiave, % spedizioni ed eventi delle rate ---- */
+  function cfCardHtml(c){
+    if (c.ev || cmAltro(c)) return '';
+    var M = cfModello(c), P = cfp(c), dc = cfDc(c), kS = cfKS(c), sp = P.sped || {}, vuoto = !Object.keys(sp).some(function(k){ return Number(sp[k]) > 0; });
+    var h = '<div class="cmb cfz" data-cfz="' + esc(c.code) + '"><h4>Cash flow · date chiave e incassi</h4>'
+      + '<p class="srcline" style="margin:0 0 10px">Spedizione da contratto: <b>' + (dc ? esc(itFull(dc)) : 'non indicata') + '</b>. Queste date servono al cash flow per il consulente: quando incassi ogni rata e quanto spedisci ogni mese.' + (P.agg ? ' Aggiornate il ' + esc(itFull(P.agg)) + '.' : '') + '</p>';
+    h += '<div class="cfdate">' + CF_DATE.map(function(x){ return '<label>' + esc(x[1]) + '<input type="date" data-cfd="' + x[0] + '" value="' + esc(isoOk(P[x[0]]) ? P[x[0]] : '') + '"></label>'; }).join('') + '</div>';
+    h += '<div class="cfsp"><div class="cfsph">Quanto spedisci ogni mese, in % del totale <span class="osub">' + (vuoto ? 'vuoto = tutto alla data di contratto' : 'se la somma non fa 100, il resto va al mese di contratto') + ' · fino a 4 mesi dopo la spedizione</span></div><div class="cfgrid">'
+      + M.pm.map(function(k){ return '<label' + (k === kS ? ' class="ctr" title="mese della spedizione da contratto"' : '') + '>' + ymLabel(k) + '<input type="text" inputmode="decimal" data-cfs="' + k + '" value="' + esc(Number(sp[k]) > 0 ? numEd(sp[k]) : '') + '" placeholder="' + (k === kS && vuoto ? '100' : '') + '"></label>'; }).join('')
+      + '</div><div class="osub" data-cfstot></div></div>';
+    if (M.rate.length){
+      h += '<div class="cfratew"><table class="cfrate"><thead><tr><th>Rata del contratto</th><th class="num">Importo</th><th>Si incassa a</th><th class="num">+ giorni</th><th>Data (se fissa)</th><th>Nel cash flow</th></tr></thead><tbody>';
+      M.rate.forEach(function(r){
+        var v = r.v, q = r.q, fissa = q.a === 'fissa';
+        h += '<tr data-cfv="' + esc(cfVoceKey(v)) + '"><td>' + esc(String(v.c || '').replace(/\s+/g, ' ').slice(0, 120)) + (q.auto && !v.inc ? '<span class="osub">evento dedotto dal contratto: controllalo e salva</span>' : '') + '</td>'
+          + '<td class="num mono">' + eur(Math.round(+v.imp || 0)) + '</td>'
+          + (v.inc ? '<td colspan="3"><i>incassata il ' + esc(itFull(v.inc)) + '</i></td>'
+             : '<td><select data-cfa aria-label="Evento della rata">' + CF_EV.map(function(e){ return '<option value="' + e[0] + '"' + (e[0] === q.a ? ' selected' : '') + '>' + esc(e[1]) + '</option>'; }).join('') + '</select></td>'
+               + '<td class="num"><input type="text" inputmode="numeric" data-cfg size="3" value="' + (q.gg ? q.gg : '') + '" aria-label="Giorni di pagamento dopo l\'evento"></td>'
+               + '<td><input type="date" data-cff value="' + esc(q.d || (fissa && isoOk(v.att) ? v.att : '')) + '"' + (fissa ? '' : ' disabled') + ' aria-label="Data fissa"></td>')
+          + '<td class="osub">' + r.parti.map(function(p){ return (p.scad ? 'attesa ' : '') + (p.d ? ymLabel(ymKey(p.d)) : 'senza data') + ' ' + eur(Math.round(p.imp)) + (p.scad ? ' — non risulta incassata: se l\'hai incassata dimmelo in una nota' : p.stim ? ' (stima)' : ''); }).join(' · ') + '</td></tr>';
+      });
+      h += '</tbody></table></div>';
+    } else h += '<div class="ore-wait">Piano pagamenti del contratto non ancora caricato: senza rate il cash flow non ha incassi per questa commessa.</div>';
+    h += '<div class="actions"><button class="btn" data-cfsave>Salva date e incassi</button><span class="msg" data-cfmsg></span></div></div>';
+    return h;
+  }
+  function cfSpedTot(box){
+    var t = 0; box.querySelectorAll('[data-cfs]').forEach(function(i){ var x = numIt(i.value.replace('%', '')); if (x > 0) t += x; });
+    var o = box.querySelector('[data-cfstot]'); if (o) o.textContent = t ? 'Totale indicato: ' + pctIt(t) + (Math.abs(t - 100) < 0.5 ? ' ✓' : t > 100 ? ' — supera 100: verrà riproporzionato' : ' — il restante ' + pctIt(100 - t) + ' va al mese di contratto') : '';
+  }
+  function wireCfz(){
+    document.querySelectorAll('[data-cfz]').forEach(function(box){
+      if (box.getAttribute('data-cfw')) return; box.setAttribute('data-cfw', '1');
+      cfSpedTot(box);
+      box.addEventListener('input', function(e){ if (e.target.hasAttribute && e.target.hasAttribute('data-cfs')) cfSpedTot(box); });
+      box.addEventListener('change', function(e){
+        if (!e.target.hasAttribute || !e.target.hasAttribute('data-cfa')) return;
+        var tr = e.target.closest('tr'), d = tr && tr.querySelector('[data-cff]'); if (d) d.disabled = e.target.value !== 'fissa';
+      });
+      var b = box.querySelector('[data-cfsave]'); if (b) b.addEventListener('click', function(){ cfSalvaCard(box); });
+    });
+  }
+  function cfSalvaCard(box){
+    var code = box.getAttribute('data-cfz'), c = findCm(code), msg = box.querySelector('[data-cfmsg]'); if (!c) return;
+    var P = JSON.parse(JSON.stringify(c.cfp || {})), k0 = ymKey(today()), bad = false;
+    box.querySelectorAll('[data-cfd]').forEach(function(i){ var k = i.getAttribute('data-cfd'); if (isoOk(i.value)) P[k] = i.value; else delete P[k]; });
+    var sp = {}; Object.keys(P.sped || {}).forEach(function(k){ if (k < k0) sp[k] = P.sped[k]; });
+    box.querySelectorAll('[data-cfs]').forEach(function(i){
+      var v = i.value.trim().replace('%', ''); i.classList.remove('err'); if (!v) return;
+      var x = numIt(v); if (x == null || x < 0 || x > 100){ bad = true; i.classList.add('err'); return; }
+      if (x > 0) sp[i.getAttribute('data-cfs')] = x;
+    });
+    box.querySelectorAll('[data-cfg]').forEach(function(i){ var v = i.value.trim(); i.classList.remove('err'); if (v && !(numIt(v) >= 0 && numIt(v) <= 365)){ bad = true; i.classList.add('err'); } });
+    if (bad){ if (msg){ msg.className = 'msg err'; msg.textContent = 'Controlla i campi in rosso: percentuali tra 0 e 100, giorni tra 0 e 365.'; } return; }
+    P.sped = sp;
+    var voci = P.voci || {};
+    box.querySelectorAll('[data-cfv]').forEach(function(tr){
+      var a = tr.querySelector('[data-cfa]'); if (!a) return;
+      var g = numIt(tr.querySelector('[data-cfg]').value), d = tr.querySelector('[data-cff]').value, o = {a: a.value, gg: g > 0 ? Math.round(g) : 0};
+      if (a.value === 'fissa' && isoOk(d)) o.d = d;
+      voci[tr.getAttribute('data-cfv')] = o;
+    });
+    P.voci = voci; P.agg = isoDi(today()); P.ts = new Date().toISOString();
+    c.cfp = P;
+    salvaSubito('date chiave e incassi salvati · il cash flow si aggiorna');
+    dashboard();
+  }
+
+  /* ---- Budget: piano mensile della spesa per nodo (c.bdg.nodi[].mesi) ---- */
+  function bdgPianoHtml(M){
+    var c = M.c; if (c.ev || cmAltro(c)) return '';
+    var CF = cfModello(c), pm = CF.pm, nodi = CF.nodi, kS = cfKS(c);
+    var h = '<div class="bdgpiano" data-piano="' + esc(c.code) + '"><h4 class="bdgh4">Piano mensile della spesa<em class="oghint">quando pensi di pagare i costi esterni di ogni nodo · mesi fino a 4 dopo la spedizione da contratto</em></h4>';
+    if (!nodi.length) return h + '<p class="ogempty">Serve prima un budget per nodo (costi esterni): inseriscilo o conferma quello proposto qui sotto.</p></div>';
+    h += '<p class="srcline" style="margin:0 0 8px">Scrivi nei mesi quanto prevedi di spendere per ogni nodo. Nel cash flow va solo la parte <b>da spendere</b> (budget meno fatture, DDT e ordini aperti), divisa sui mesi nella stessa proporzione del tuo piano: quando arriva un ordine, la stima cala da sola. Senza piano la divido in parti uguali fino alla spedizione.</p>';
+    h += '<div class="otab cf bdgpt"><table><thead><tr><th>Nodo</th><th class="num">Budget</th><th class="num">Fatture e DDT</th><th class="num">Ordini aperti</th><th class="num">Da spendere</th>'
+      + pm.map(function(k){ return '<th class="num' + (k === kS ? ' ctr' : '') + '"' + (k === kS ? ' title="spedizione da contratto"' : '') + '>' + ymLabel(k) + '</th>'; }).join('') + '<th class="num">Piano</th></tr></thead><tbody>';
+    nodi.forEach(function(n){
+      var tp = 0; pm.forEach(function(k){ tp += Number(n.piano[k]) || 0; });
+      h += '<tr><td><b>' + esc(n.n) + '</b></td><td class="num mono">' + eur(Math.round(n.ext)) + '</td><td class="num mono">' + eur(Math.round(n.doc)) + '</td><td class="num mono">' + eur(Math.round(n.ord)) + '</td><td class="num mono"><b>' + eur(Math.round(n.res)) + '</b></td>'
+        + pm.map(function(k){ var v = Number(n.piano[k]) || 0; return '<td class="num"><input type="text" inputmode="decimal" data-pn="' + esc(n.id) + '" data-pk="' + k + '" value="' + (v ? esc(numEd(v)) : '') + '" aria-label="' + esc(n.n + ' ' + ymLabel(k)) + '"></td>'; }).join('')
+        + '<td class="num mono" data-ptot="' + esc(n.id) + '">' + (tp ? eur(Math.round(tp)) : '') + '</td></tr>';
+    });
+    h += '<tr class="tot cfst"><td>Stima nel cash flow</td><td></td><td></td><td></td><td class="num mono">' + eur(Math.round(CF.stTot)) + '</td>'
+      + pm.map(function(k){ var t = 0; nodi.forEach(function(n){ t += n.dist[k] || 0; }); return '<td class="num mono">' + (Math.round(t) ? eur(Math.round(t)) : '') + '</td>'; }).join('') + '<td></td></tr>';
+    h += '<tr class="osubrow"><td>Spedizioni (dalla scheda)</td><td colspan="4"></td>' + pm.map(function(k){ var s = CF.SP.righe.filter(function(x){ return x.k === k; })[0]; return '<td class="num">' + (s ? pctIt(s.pct) : '') + '</td>'; }).join('') + '<td></td></tr>';
+    h += '</tbody></table></div><div class="actions"><button class="btn" data-psave>Salva piano</button><button class="chip" data-pfill>Riempi: da spendere in parti uguali fino alla spedizione</button><button class="chip" data-pclear>Svuota</button><span class="msg" data-pmsg></span></div></div>';
+    return h;
+  }
+  function wirePiano(){
+    document.querySelectorAll('[data-piano]').forEach(function(box){
+      var code = box.getAttribute('data-piano'), msg = box.querySelector('[data-pmsg]');
+      function totali(){ var per = {}; box.querySelectorAll('[data-pn]').forEach(function(i){ var x = numIt(i.value); if (x > 0) per[i.getAttribute('data-pn')] = (per[i.getAttribute('data-pn')] || 0) + x; });
+        box.querySelectorAll('[data-ptot]').forEach(function(td){ var v = per[td.getAttribute('data-ptot')]; td.textContent = v ? eur(Math.round(v)) : ''; }); }
+      box.addEventListener('input', function(e){ if (e.target.hasAttribute && e.target.hasAttribute('data-pn')){ totali(); if (msg){ msg.className = 'msg'; msg.textContent = 'modifiche non salvate'; } } });
+      var s = box.querySelector('[data-psave]'); if (s) s.addEventListener('click', function(){ pianoSalva(code, box); });
+      var f = box.querySelector('[data-pfill]'); if (f) f.addEventListener('click', function(){
+        var c = findCm(code); if (!c) return; var CF = cfModello(c), kS = cfKS(c), k0 = ymKey(today()), mesi = ymRange(k0, kS || ymAdd(k0, 5));
+        CF.nodi.forEach(function(n){ var q = mesi.length ? Math.round(n.res / mesi.length) : 0;
+          box.querySelectorAll('[data-pn="' + n.id + '"]').forEach(function(i){ i.value = (q && mesi.indexOf(i.getAttribute('data-pk')) >= 0) ? numEd(q) : ''; }); });
+        totali(); if (msg){ msg.className = 'msg'; msg.textContent = 'riempito: controlla e salva'; }
+      });
+      var cl = box.querySelector('[data-pclear]'); if (cl) cl.addEventListener('click', function(){ box.querySelectorAll('[data-pn]').forEach(function(i){ i.value = ''; }); totali(); if (msg){ msg.className = 'msg'; msg.textContent = 'svuotato: salva per confermare'; } });
+    });
+  }
+  function pianoSalva(code, box){
+    var c = findCm(code), M = BDG_CACHE[code] || (c && bdgModello(c)), msg = box.querySelector('[data-pmsg]'); if (!c || !M) return;
+    var per = {}, bad = false;
+    box.querySelectorAll('[data-pn]').forEach(function(i){
+      var v = i.value.trim(); i.classList.remove('err'); if (!v) return;
+      var x = numIt(v); if (x == null || x < 0){ bad = true; i.classList.add('err'); return; }
+      if (x > 0) (per[i.getAttribute('data-pn')] = per[i.getAttribute('data-pn')] || {})[i.getAttribute('data-pk')] = Math.round(x);
+    });
+    if (bad){ if (msg){ msg.className = 'msg err'; msg.textContent = 'Controlla i campi in rosso: servono importi in euro.'; } return; }
+    /* un budget ancora solo proposto viene salvato (non confermato) insieme al piano */
+    if (!(c.bdg && c.bdg.nodi)){
+      c.bdg = {nodi: M.nodi.map(function(b){ return {id: b.id, n: b.n, d: b.d || '', al: bdgAl(b), ext: b.ext == null ? null : b.ext, hu: b.hu == null ? null : b.hu, ho: b.ho == null ? null : b.ho, note: b.note || ''}; }),
+        hu: M.ore.hCm.u || null, ho: M.ore.hCm.o || null, conf: false, agg: isoOggi(), ts: new Date().toISOString(),
+        fonte: M.rif.length ? 'proposto dalle commesse ' + M.rif.map(function(s){ return s.code; }).join(', ') + ' (indicizzato al ' + M.Y + '), salvato col piano mensile' : 'salvato col piano mensile',
+        confd: null, rif: M.rif.length ? M.rif.map(function(s){ return s.code; }) : null};
+    }
+    var k0 = ymKey(today());
+    c.bdg.nodi.forEach(function(b){
+      var nuovo = {}; Object.keys(b.mesi || {}).forEach(function(k){ if (k < k0) nuovo[k] = b.mesi[k]; });
+      Object.keys(per[b.id] || {}).forEach(function(k){ nuovo[k] = per[b.id][k]; });
+      if (Object.keys(nuovo).length) b.mesi = nuovo; else delete b.mesi;
+    });
+    c.bdg.pianoAgg = c.bdg.ts = new Date().toISOString();
+    salvaSubito('piano mensile salvato · il cash flow si aggiorna'); dashboard();
+    var el = document.getElementById('bdg-' + code); if (el) el.scrollIntoView({block: 'start', behavior: 'smooth'});
   }
 
   /* ---------- R22 (17/09/2026): SCADENZE — certificazioni, documenti, enti, contratto ----------
@@ -3704,27 +4303,27 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
 
   /* ---------- R23: CASSA 12 MESI (Denaro) ---------- */
   function cassaHtml(cm){
-    var MA = cashAggrega(cm.map(cashModello));
-    var t = today(), k0 = ymKey(t), keys = [], y = t.getFullYear(), m = t.getMonth() + 1;
-    for (var i = 0; i < 12; i++){ keys.push(y + '-' + ('0' + m).slice(-2)); m++; if (m > 12){ m = 1; y++; } }
-    var inc = ['acconto','sped_parz','sped','saldo','altro'];
-    function entrate(k){ var v = 0; inc.forEach(function(r){ v += MA.righe[r][k] || 0; }); return v; }
-    function uscite(k){ return (MA.righe.forn[k] || 0) + (MA.righe.fornDa[k] || 0); }
-    var neg = 0, prog = 0, arretrati = 0;
-    Object.keys(MA.righe).forEach(function(r){ Object.keys(MA.righe[r]).forEach(function(k){
-      if (k < k0) arretrati += (inc.indexOf(r) >= 0 ? 1 : -1) * MA.righe[r][k]; }); });
+    /* R31 (25/09): stesso modello del Cash flow delle commesse (incassi per evento, uscite per fonte, stima dal budget) */
+    var list = cm.filter(function(c){ return !c.ev && !c.sp && !cmAltro(c); });
+    var A = cfAggrega(list.map(cfModello)), k0 = A.k0, keys = ymRange(k0, ymAdd(k0, 11));
+    function v(r, k){ return A.R[r][k] || 0; }
+    function entrate(k){ return v('inc', k) + v('incSp', k) + v('incEv', k) + v('incScad', k); }
+    function uscite(k){ return v('fat', k) + v('ddt', k) + v('ord', k) + v('fornDa', k) + v('stima', k); }
+    var neg = 0, prog = 0;
     keys.forEach(function(k){ if (entrate(k) - uscite(k) < 0) neg++; });
-    var h = '<section class="og"><h3 class="cfh"><i class="dt cy"></i>Cassa nei prossimi 12 mesi<em class="oghint">incassi previsti dai contratti meno pagamenti ai fornitori (data di consegna più termini), su tutte le commesse in corso</em></h3>';
+    function riga(lab, f, cls, meno){ return '<tr' + (cls ? ' class="' + cls + '"' : '') + '><td>' + lab + '</td>' + keys.map(function(k){ var x = f(k); return '<td class="num mono">' + (Math.round(x) ? (meno ? '\u2212' : '') + eur(Math.round(x)) : '') + '</td>'; }).join('') + '</tr>'; }
+    var h = '<section class="og"><h3 class="cfh"><i class="dt cy"></i>Cassa nei prossimi 12 mesi<em class="oghint">incassi dei contratti meno pagamenti ai fornitori e stima del budget non ancora ordinato, su tutte le commesse in corso</em></h3>';
     h += '<div class="otab cf"><table><thead><tr><th>' + (neg ? '<span class="late">' + neg + (neg === 1 ? ' mese in negativo' : ' mesi in negativo') + '</span>' : 'nessun mese in negativo') + '</th>'
       + keys.map(function(k){ return '<th class="num">' + ymLabel(k) + '</th>'; }).join('') + '</tr></thead><tbody>';
-    h += '<tr><td>Incassi previsti</td>' + keys.map(function(k){ var v = entrate(k); return '<td class="num mono">' + (v ? eur(Math.round(v)) : '') + '</td>'; }).join('') + '</tr>';
-    h += '<tr><td>Pagamenti fornitori · termini noti</td>' + keys.map(function(k){ var v = MA.righe.forn[k] || 0; return '<td class="num mono">' + (v ? '−' + eur(Math.round(v)) : '') + '</td>'; }).join('') + '</tr>';
-    h += '<tr class="bad"><td>Pagamenti fornitori · termini da confermare</td>' + keys.map(function(k){ var v = MA.righe.fornDa[k] || 0; return '<td class="num mono">' + (v ? '−' + eur(Math.round(v)) : '') + '</td>'; }).join('') + '</tr>';
-    h += '<tr class="tot"><td>Saldo del mese</td>' + keys.map(function(k){ var v = entrate(k) - uscite(k); return '<td class="num mono' + (v < 0 ? ' late' : '') + '">' + eur(Math.round(v)) + '</td>'; }).join('') + '</tr>';
-    h += '<tr class="tot"><td>Progressivo</td>' + keys.map(function(k){ prog += entrate(k) - uscite(k); return '<td class="num mono' + (prog < 0 ? ' late' : '') + '">' + eur(Math.round(prog)) + '</td>'; }).join('') + '</tr>';
-    h += '</tbody></table></div><p class="srcline">'
-      + (arretrati ? 'Voci con data già passata e non chiuse: saldo ' + esc(eur(Math.round(arretrati))) + ' (incassi attesi non ancora incassati e pagamenti non confermati). ' : '')
-      + 'Il dettaglio per commessa è in Commesse → Cash flow.</p></section>';
+    h += riga('Incassi previsti', function(k){ return entrate(k) - v('incScad', k); }, 'cfin');
+    h += riga('Incassi scaduti e non registrati (da verificare)', function(k){ return v('incScad', k); }, 'bad');
+    h += riga('Fornitori · fatture e DDT', function(k){ return v('fat', k) + v('ddt', k); }, '', true);
+    h += riga('Fornitori · ordini aperti', function(k){ return v('ord', k); }, '', true);
+    h += riga('Fornitori · termini da confermare', function(k){ return v('fornDa', k); }, 'bad', true);
+    h += riga('Fornitori · stima dal budget', function(k){ return v('stima', k); }, 'cfst', true);
+    h += '<tr class="tot"><td>Saldo del mese</td>' + keys.map(function(k){ var x = entrate(k) - uscite(k); return '<td class="num mono' + (x < 0 ? ' late' : '') + '">' + cfNum(x) + '</td>'; }).join('') + '</tr>';
+    h += '<tr class="tot"><td>Progressivo</td>' + keys.map(function(k){ prog += entrate(k) - uscite(k); return '<td class="num mono' + (prog < 0 ? ' late' : '') + '">' + cfNum(prog) + '</td>'; }).join('') + '</tr>';
+    h += '</tbody></table></div><p class="srcline">Il dettaglio per commessa, le date chiave e il file per il consulente sono in Commesse \u2192 Cash flow.</p></section>';
     return h;
   }
 
@@ -4388,7 +4987,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
       h += bdgPropostaHtml(M) + bdgKpi(M);
       h += M.righe.length ? bdgTabella(M) : '<p class="ogempty">Nessun nodo: inseriscili qui sotto o conferma i proposti.</p>';
       if (avv.length) h += '<p class="srcline">Da verificare con Luca nell\'estrazione: ' + avv.join(' · ') + ' (possibili doppioni o consegne parziali; i numeri qui sopra sono quelli del gestionale).</p>';
-      h += bdgOreHtml(M) + bdgEditorHtml(M) + '</section>';
+      h += bdgPianoHtml(M) + bdgOreHtml(M) + bdgEditorHtml(M) + '</section>';
     });
     return h;
   }
@@ -4464,8 +5063,12 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
       || (M.ore && M.ore.hCm && (bdgNum(ore.hu) !== bdgNum(M.ore.hCm.u) || bdgNum(ore.ho) !== bdgNum(M.ore.hCm.o)));
     if (M.proposta && M.rif.length) fonte = 'proposto dalle commesse ' + M.rif.map(function(s){ return s.code; }).join(', ') + ' (indicizzato al ' + M.Y + ')' + (conferma ? (cambiato ? ', modificato e confermato da Danilo' : ', confermato da Danilo') : (cambiato ? ', modificato da Danilo' : ', salvato da Danilo'));
     else fonte = prima.fonte && !conferma ? prima.fonte : 'inserito da Danilo dalla pagina';
+    /* R31: il piano mensile della spesa (nodi[].mesi) resta attaccato al suo nodo */
+    var pianoPrima = {}; (prima.nodi || []).forEach(function(b){ if (b.mesi) pianoPrima[b.id] = b.mesi; });
+    nodi.forEach(function(n){ if (pianoPrima[n.id]) n.mesi = pianoPrima[n.id]; });
     c.bdg = {nodi: nodi, hu: ore.hu, ho: ore.ho, conf: conferma ? true : !!prima.conf, agg: isoOggi(), ts: new Date().toISOString(), fonte: fonte, confd: conferma ? isoOggi() : (prima.confd || null),
       rif: M.proposta && M.rif.length ? M.rif.map(function(s){ return s.code; }) : (prima.rif || null)};
+    if (prima.pianoAgg) c.bdg.pianoAgg = prima.pianoAgg;
     /* R26: il prezzo di vendita scritto nell'editor finisce in c.eco.valore (da qui non si cancella mai) */
     bdgScriviPrezzo(c, bdgLeggiPrezzo(code));
     delete BDG_PEND[code]; delete BDG_DIRTY[code];
@@ -4806,7 +5409,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
         e[b.id] = {tipo:'billing', d:!!b.d, dd:b.dd || null, n:b.n || '', nq:b.nq || []};
       });
       var cm = (S.commesse || []).map(function(c){
-        return {code:c.code, ev:!!c.ev, evd:c.evd || null, sp:!!c.sp, spd:c.spd || null, bdg:c.bdg || null,
+        return {code:c.code, ev:!!c.ev, evd:c.evd || null, sp:!!c.sp, spd:c.spd || null, bdg:c.bdg || null, cfp:c.cfp || null,
           eco:(c.eco && c.eco.valTs) ? {valore:c.eco.valore, val:c.eco.val || null, valFonte:c.eco.valFonte || null, valTs:c.eco.valTs} : null};
       });
       localStorage.setItem(LS, JSON.stringify({
@@ -4850,9 +5453,12 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
         if (e.n) t.n = e.n; else delete t.n;
         segna((e.n ? 'nota su: ' : 'nota togliata da: ') + (t.t || t.id).slice(0, 60));
       }
-      if (ha(e, 'nq') && JSON.stringify(t.nq || []) !== JSON.stringify(e.nq)){
-        if (e.nq.length) t.nq = e.nq; else delete t.nq;
-        segna('note su: ' + (t.t || t.id).slice(0, 60));
+      if (ha(e, 'nq')){
+        var nqT = nqUnisci(t.nq, e.nq);
+        if (JSON.stringify(t.nq || []) !== JSON.stringify(nqT)){
+          if (nqT.length) t.nq = nqT; else delete t.nq;
+          segna('note su: ' + (t.t || t.id).slice(0, 60));
+        }
       }
       if (ha(e, 'p') && (t.p == null ? null : t.p) !== e.p){
         if (e.p == null) delete t.p; else t.p = e.p;
@@ -4881,9 +5487,12 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
         if (e.n) b.n = e.n; else delete b.n;
         segna('nota su: ' + (b.cli || b.id));
       }
-      if (ha(e, 'nq') && JSON.stringify(b.nq || []) !== JSON.stringify(e.nq)){
-        if (e.nq.length) b.nq = e.nq; else delete b.nq;
-        segna('note su: ' + (b.cli || b.id));
+      if (ha(e, 'nq')){
+        var nqB = nqUnisci(b.nq, e.nq);
+        if (JSON.stringify(b.nq || []) !== JSON.stringify(nqB)){
+          if (nqB.length) b.nq = nqB; else delete b.nq;
+          segna('note su: ' + (b.cli || b.id));
+        }
       }
     });
 
@@ -4895,6 +5504,7 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
           segna((x.ev ? 'evasa: ' : 'riattivata: ') + c.code);
         }
         if (x.bdg && (!c.bdg || (x.bdg.ts || x.bdg.agg || '') > (c.bdg.ts || c.bdg.agg || ''))){ c.bdg = x.bdg; segna('budget: ' + c.code); }
+        if (x.cfp && x.cfp.ts && (!c.cfp || !c.cfp.ts || x.cfp.ts > c.cfp.ts)){ c.cfp = x.cfp; segna('date chiave e incassi: ' + c.code); }
         if (x.eco && x.eco.valTs && (!c.eco || !c.eco.valTs || x.eco.valTs > c.eco.valTs)){
           c.eco = (c.eco && typeof c.eco === 'object') ? c.eco : {};
           c.eco.valore = x.eco.valore; if (x.eco.val) c.eco.val = x.eco.val; c.eco.valFonte = x.eco.valFonte; c.eco.valTs = x.eco.valTs; segna('prezzo: ' + c.code);
@@ -5034,12 +5644,12 @@ window.addEventListener('unhandledrejection', function (e) { try { var r = e.rea
     if (b) b.addEventListener('click', function(){
       var out = [];
       S.groups.forEach(function(g){ g.tasks.forEach(function(t){
-        var nn = (t.nq || []).filter(function(x){ return x.s !== 'f'; })
+        var nn = (t.nq || []).filter(function(x){ return !notaFatta(x); })
           .map(function(x){ return x.x; }).join(' // ');
         if (nn || t.d) out.push(g.code + ' | ' + t.t + ' | ' + (t.d ? 'FATTO' : 'aperto')
           + (nn ? ' | nota: ' + nn : '')); }); });
       (S.billing || []).forEach(function(b){
-        var nn = (b.nq || []).filter(function(x){ return x.s !== 'f'; })
+        var nn = (b.nq || []).filter(function(x){ return !notaFatta(x); })
           .map(function(x){ return x.x; }).join(' // ');
         if (nn || b.d) out.push('DA FATTURARE | ' + b.cli
         + ' | ' + b.w + ' | ' + (b.d ? 'FATTO' : 'aperto') + (nn ? ' | nota: ' + nn : '')); });
