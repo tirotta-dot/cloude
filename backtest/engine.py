@@ -80,6 +80,7 @@ class Trade:
     side: str
     ret_pct: float
     reason: str
+    pnl_cash: float = 0.0  # P&L in denaro: pesa il trade per la size reale
 
 
 @dataclass
@@ -124,11 +125,13 @@ def run_backtest(df: pd.DataFrame, sig: StrategySignals, symbol: str,
         if is_long:
             cash = cash + qty * fill
             ret = (fill - entry_px) / entry_px * 100
+            pnl = qty * (fill - entry_px)
         else:
             # short: pnl in cash sul nozionale
             cash = cash + qty * (entry_px - fill)
             ret = (entry_px - fill) / entry_px * 100
-        trades.append(Trade(dates[entry_i], dates[i], entry_px, fill, sig.side, ret, reason))
+            pnl = qty * (entry_px - fill)
+        trades.append(Trade(dates[entry_i], dates[i], entry_px, fill, sig.side, ret, reason, pnl))
         qty = 0.0
         entry_i = -1
 
@@ -169,13 +172,16 @@ def run_backtest(df: pd.DataFrame, sig: StrategySignals, symbol: str,
             trail_px = -np.inf if is_long else np.inf
             pending_entry = False
 
-        # stop fisso attivo gia' sulla barra di ingresso (protezione dai
-        # crolli nel giorno stesso dell'entrata, come strategy.exit in Pine)
-        if qty != 0 and i == entry_i and not np.isnan(stop_px):
-            if is_long and l[i] <= stop_px:
+        # stop fisso e take profit attivi gia' sulla barra di ingresso, come
+        # per un bot live che piazza gli ordini subito dopo il fill; se la
+        # barra tocca entrambi i livelli vince lo stop (esito conservativo)
+        if qty != 0 and i == entry_i:
+            if not np.isnan(stop_px) and ((is_long and l[i] <= stop_px)
+                                          or (not is_long and h[i] >= stop_px)):
                 close_position(i, stop_px, "stop")
-            elif not is_long and h[i] >= stop_px:
-                close_position(i, stop_px, "stop")
+            elif not np.isnan(tp_px) and ((is_long and h[i] >= tp_px)
+                                          or (not is_long and l[i] <= tp_px)):
+                close_position(i, tp_px, "take_profit")
 
         # 2) gestione intrabar di SL/TP/trailing sulla barra corrente.
         #    Il trailing usato qui e' quello calcolato fino alla barra
@@ -235,17 +241,21 @@ def compute_metrics(eq: pd.Series, trades: list, initial: float) -> dict:
     max_dd = dd.min()
     daily_ret = eq.pct_change().dropna()
     sharpe = (daily_ret.mean() / daily_ret.std() * np.sqrt(365)) if daily_ret.std() > 0 else 0.0
-    downside = daily_ret[daily_ret < 0].std()
-    sortino = (daily_ret.mean() / downside * np.sqrt(365)) if downside and downside > 0 else 0.0
+    # semideviazione target-0 standard: tutte le osservazioni, non solo
+    # la dispersione dei giorni negativi attorno alla loro media
+    downside = float(np.sqrt((np.minimum(daily_ret, 0.0) ** 2).mean())) if len(daily_ret) else 0.0
+    sortino = (daily_ret.mean() / downside * np.sqrt(365)) if downside > 0 else 0.0
     calmar = cagr / abs(max_dd) if max_dd < 0 else float("inf")
-    wins = [t for t in trades if t.ret_pct > 0]
-    losses = [t for t in trades if t.ret_pct <= 0]
-    gross_win = sum(t.ret_pct for t in wins)
-    gross_loss = -sum(t.ret_pct for t in losses)
+    # statistiche per trade sul P&L in denaro: con il sizing a rischio la
+    # frazione investita varia trade per trade e ret_pct non pesato mente
+    wins = [t for t in trades if t.pnl_cash > 0]
+    losses = [t for t in trades if t.pnl_cash <= 0]
+    gross_win = sum(t.pnl_cash for t in wins)
+    gross_loss = -sum(t.pnl_cash for t in losses)
     # massima serie di perdite consecutive
     max_consec = streak = 0
     for t in trades:
-        streak = streak + 1 if t.ret_pct <= 0 else 0
+        streak = streak + 1 if t.pnl_cash <= 0 else 0
         max_consec = max(max_consec, streak)
     return {
         "total_return_pct": round(total_ret, 2),
@@ -257,9 +267,20 @@ def compute_metrics(eq: pd.Series, trades: list, initial: float) -> dict:
         "n_trades": len(trades),
         "win_rate_pct": round(len(wins) / len(trades) * 100, 1) if trades else 0.0,
         "profit_factor": round(gross_win / gross_loss, 2) if gross_loss > 0 else float("inf"),
-        "avg_trade_pct": round(np.mean([t.ret_pct for t in trades]), 2) if trades else 0.0,
+        "avg_trade_usd": round(float(np.mean([t.pnl_cash for t in trades])), 2) if trades else 0.0,
         "max_consec_losses": max_consec,
     }
+
+
+def period_returns(eq: pd.Series, freq: str) -> pd.Series:
+    """Rendimenti percentuali per periodo (freq 'ME'/'YE') da close a close
+    di fine periodo: il giorno di confine non viene perso e il prodotto dei
+    periodi ricompone esattamente il rendimento totale. Il primo periodo e'
+    ancorato all'equity iniziale."""
+    last = eq.resample(freq).last()
+    rets = last.pct_change()
+    rets.iloc[0] = last.iloc[0] / eq.iloc[0] - 1
+    return rets * 100
 
 
 def load_csv(path: str) -> pd.DataFrame:

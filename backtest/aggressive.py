@@ -104,9 +104,9 @@ def charts(data, res_base, res_x):
     fig, axes = plt.subplots(2, 1, figsize=(12, 8), sharex=True,
                              gridspec_kw={"height_ratios": [3, 1]})
     axes[0].plot(res_x.equity.index, res_x.equity, lw=1.7, color="#6a1b9a",
-                 label="APEX-X aggressiva (CAGR 111%)")
+                 label=f"APEX-X aggressiva (CAGR {res_x.metrics['cagr_pct']:.0f}%)")
     axes[0].plot(res_base.equity.index, res_base.equity, lw=1.5, color="#1565c0",
-                 label="APEX base (CAGR 83%)")
+                 label=f"APEX base (CAGR {res_base.metrics['cagr_pct']:.0f}%)")
     axes[0].plot(btc_bh.index, btc_bh, lw=1.1, color="#9e9e9e", label="Buy & Hold BTC")
     axes[0].set_yscale("log")
     axes[0].set_title("APEX vs APEX-X - equity (scala log) | 10.000$ iniziali, costi e funding inclusi")

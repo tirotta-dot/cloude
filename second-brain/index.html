@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Danilo Second Brain</title>
+<link id="tipi" rel="stylesheet" media="print" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+<link id="app" rel="stylesheet" href="app.css">
+<style>
+#boot-msg{font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#cfd8e3;background:#0b1220;min-height:100vh;margin:0;padding:28px 20px;box-sizing:border-box}
+#boot-msg b{color:#fff;font-size:17px}#boot-msg code{color:#fca5a5;word-break:break-word}
+#boot-msg .bar{height:6px;background:#1e293b;border-radius:3px;margin:12px 0;max-width:420px;overflow:hidden}
+#boot-msg .bar i{display:block;height:100%;width:0;background:#38bdf8;transition:width .3s}
+#boot-msg button{margin-top:14px;padding:8px 14px;border:1px solid #38bdf8;background:transparent;color:#fff;border-radius:6px;font:inherit;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="root"><div id="boot-msg"><b>Danilo Second Brain</b><div>sto caricando i dati…</div><div class="bar"><i id="boot-bar"></i></div><div id="boot-det">avvio</div></div></div>
+<script id="state" type="application/json"></script>
+<script id="vmap" type="application/json"></script>
+<script id="vgeo" type="application/json"></script>
+<script id="boot">
+(function(){
+  var det = document.getElementById('boot-det'), bar = document.getElementById('boot-bar');
+  var attesi = {'state.json': 2260000, 'vmap.json': 270000, 'vgeo.json': 5000, 'app.js': 905000}, ricevuti = {};
+  var partito = false, tPrimo = Date.now();
+  function avanz(){
+    var d = 0, t = 0, k;
+    for (k in attesi){ t += attesi[k]; d += Math.min(ricevuti[k] || 0, attesi[k]); }
+    if (bar) bar.style.width = Math.round(100 * d / t) + '%';
+    if (det) det.textContent = Math.round(d / 1024) + ' KB su circa ' + Math.round(t / 1024) + ' KB';
+  }
+  function leggi(u){
+    return fetch(u).then(function(r){
+      if (!r.ok) throw new Error(u + ': risposta ' + r.status);
+      if (!r.body || !r.body.getReader) return r.text().then(function(t){ ricevuti[u] = t.length; avanz(); return t; });
+      var rd = r.body.getReader(), dec = new TextDecoder(), out = '', n = 0;
+      function passo(){
+        return rd.read().then(function(x){
+          if (x.done){ out += dec.decode(); ricevuti[u] = Math.max(n, attesi[u] || 0); avanz(); return out; }
+          n += x.value.length; ricevuti[u] = n; avanz();
+          out += dec.decode(x.value, {stream: true});
+          return passo();
+        });
+      }
+      return passo();
+    });
+  }
+  function html(s){ return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+  function mostra(msg){
+    var r = document.getElementById('root');
+    if (r) r.innerHTML = '<div id="boot-msg"><b>Danilo Second Brain</b><div>' + msg + '</div><button onclick="location.reload()">Ricarica</button></div>';
+  }
+  function bootVisibile(){ return !!document.getElementById('boot-msg'); }
+  /* Un errore nel codice prima del primo disegno resterebbe invisibile: lo scrivo nella pagina. */
+  window.addEventListener('error', function(e){
+    if (partito || !bootVisibile()) return;
+    mostra('La pagina si è fermata durante l’avvio: <code>' + html(e && e.message || e) + '</code><br>Copia questo testo e mandalo a Claude.');
+  });
+  var lento = setTimeout(function(){ if (!partito && det) det.textContent += ' · la connessione è lenta, attendo ancora…'; }, 15000);
+  var fermo = setTimeout(function(){ if (!partito && bootVisibile()) mostra('Il caricamento non è finito in 75 secondi (rete lenta o file non raggiungibile). Prova a ricaricare; se persiste, dillo a Claude.'); }, 75000);
+  Promise.all([leggi('state.json'), leggi('vmap.json'), leggi('vgeo.json'), leggi('app.js')]).then(function(t){
+    clearTimeout(lento); clearTimeout(fermo);
+    if (det) det.textContent = 'dati arrivati in ' + Math.round((Date.now() - tPrimo) / 100) / 10 + ' s, avvio la pagina…';
+    try { JSON.parse(t[0]); } catch(e){ throw new Error('state.json non è un JSON valido: ' + e.message); }
+    document.getElementById('state').textContent = t[0];
+    document.getElementById('vmap').textContent = t[1];
+    document.getElementById('vgeo').textContent = t[2];
+    var s = document.createElement('script'); s.id = 'app-js';
+    s.textContent = t[3] + '\n//# sourceURL=app.js';
+    document.body.appendChild(s);
+    partito = !bootVisibile();
+    if (!partito){
+      var mo = new MutationObserver(function(){ if (!bootVisibile()){ partito = true; mo.disconnect(); } });
+      mo.observe(document.getElementById('root'), {childList: true, subtree: true});
+      setTimeout(function(){ if (!partito && bootVisibile()) mostra('Il codice è arrivato ma la pagina non si è disegnata entro 20 secondi. Ricarica; se persiste, dillo a Claude.'); }, 20000);
+    }
+  }).catch(function(e){
+    clearTimeout(lento); clearTimeout(fermo);
+    mostra('Non riesco a caricare i dati della pagina: <code>' + html(e && e.message || e) + '</code><br>Ricarica; se persiste, dillo a Claude.');
+  });
+})();
+</script>
+</body>
+</html>

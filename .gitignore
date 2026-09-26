@@ -1,2 +1,15 @@
 data/raw/
 __pycache__/
+.claude/settings.local.json
+# Second Brain: dati personali e output di verifica restano fuori dal repo
+second-brain/state.json
+second-brain/vmap.json
+second-brain/shots/
+# output degli strumenti e verifiche: contengono dati aziendali
+second-brain/export/
+second-brain/export-*/
+second-brain/shots*/
+second-brain/*.pkl
+second-brain/**/*.xlsx
+second-brain/*.log
+second-brain/tools/*.csv
