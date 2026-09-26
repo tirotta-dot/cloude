@@ -318,7 +318,9 @@ var VZ = (function(){
   try { window.__sbCodiciCommessa = (S.commesse || []).map(function (c) { return c.code; }); } catch (e) {}
   var art = null, ro = false, timer = null, dirty = false;
   var ritenta = null, tentativi = 0;   /* R10: ritentativi limitati e distanziati */
-  var view = 'oggi', filter = 'all', urgent = false, query = '', prionly = false, dlgonly = false;
+  /* R36: Task parte sugli aperti (il «?» lo prometteva, il 10/09 Danilo l'ha chiesto); fScelto e' il filtro
+     scelto a mano con Tutti/Aperti/Fatti, che vince quando si entra in Task dal menu */
+  var view = 'oggi', filter = 'open', urgent = false, query = '', prionly = false, dlgonly = false, fScelto = '';
   var DAY = 86400000;
   /* R12 (08/09/2026): questo array e quello dei nomi lunghi si chiamavano entrambi MESI
      nello stesso scope: una sola variabile, e vinceva l'assegnazione piu' in basso. Tutti
@@ -350,8 +352,8 @@ var VZ = (function(){
     + '<button id="v-pers" aria-pressed="false">Persone</button>'
     + '<button id="v-trip" aria-pressed="false">Viaggi</button></div>'
     + '<span id="tfilters" style="display:contents">'
-    + '<button class="chip" id="f-all" aria-pressed="true">Tutti</button>'
-    + '<button class="chip" id="f-open" aria-pressed="false">Aperti</button>'
+    + '<button class="chip" id="f-all" aria-pressed="false">Tutti</button>'
+    + '<button class="chip" id="f-open" aria-pressed="true">Aperti</button>'
     + '<button class="chip" id="f-done" aria-pressed="false">Fatti</button>'
     + '<button class="chip alert" id="f-urg" aria-pressed="false">Con scadenza</button>'
     + '<button class="chip pri" id="f-pri" aria-pressed="false">Priorit&agrave;</button>'
@@ -454,17 +456,79 @@ var VZ = (function(){
     return '<button class="prio p' + p + '" data-prio="' + t.id
       + '" title="Clicca per cambiare priorità">' + PLAB[p] + '</button>';
   }
+  /* R36 (26/09/2026): prima ogni task aperto aveva una <select> con tutti i 22 nomi di S.team
+     (quasi 10.000 nodi in Task, il 46% della vista). Adesso e' un bottone: i nomi stanno in un
+     solo pannello condiviso (dlgApri), scritto quando lo apri. Il suggerimento t.sdg resta sul bottone. */
   function dlgCtl(t){
     if (t.d) return '';
-    if (t.dg) return '<button class="dlgoff" data-dlgoff="' + t.id
+    if (t.dg) return '<button class="dlgoff" data-dlgoff="' + esc(t.id)
       + '" title="Riprendi il task">riprendi</button>';
-    var opts = '<option value="">' + (t.sdg ? 'Delega \u00b7 sugg. ' + esc(t.sdg) : 'Delega\u2026')
-      + '</option>';
-    (S.team || []).forEach(function(m){
-      opts += '<option value="' + esc(m.n) + '">' + esc(m.n)
-        + (m.r ? ' \u00b7 ' + esc(m.r) : '') + '</option>';
+    return '<button type="button" class="dlgbtn" data-dlgpop="' + esc(t.id) + '" aria-haspopup="true" aria-expanded="false"'
+      + ' title="Delega il task a una persona del team">'
+      + (t.sdg ? 'Delega \u00b7 sugg. ' + esc(t.sdg) : 'Delega\u2026') + '</button>';
+  }
+  var DLGP = null, dlgId = null, dlgDa = null;
+  function dlgChiudi(){
+    if (!DLGP || DLGP.hidden) return;
+    DLGP.hidden = true;
+    if (dlgDa){ dlgDa.setAttribute('aria-expanded', 'false'); if (dlgDa.isConnected && DLGP.contains(document.activeElement)) dlgDa.focus(); }
+    dlgId = null; dlgDa = null;
+  }
+  function dlgScegli(nome){
+    var td = dlgId ? find(dlgId) : null;
+    dlgChiudi();
+    if (!td || !nome) return;
+    td.dg = nome;
+    td.dgd = todayISO();
+    delete td.sdg;
+    save(); render();
+  }
+  function dlgApri(btn){
+    var id = btn.getAttribute('data-dlgpop'), t = find(id);
+    if (!t) return;
+    if (!DLGP){
+      DLGP = document.createElement('div');
+      DLGP.id = 'dlgpop'; DLGP.className = 'dlgpop'; DLGP.hidden = true;
+      DLGP.setAttribute('role', 'menu'); DLGP.setAttribute('aria-label', 'Delega a');
+      document.body.appendChild(DLGP);
+      DLGP.addEventListener('click', function(e){
+        var b = e.target.closest('[data-dlgnome]');
+        if (b) dlgScegli(b.getAttribute('data-dlgnome'));
+      });
+      DLGP.addEventListener('keydown', function(e){
+        var l = [].slice.call(DLGP.querySelectorAll('[data-dlgnome]')), i = l.indexOf(document.activeElement);
+        if (e.key === 'Escape'){ e.preventDefault(); dlgChiudi(); }
+        else if (e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+          e.preventDefault();
+          var n = l[(i + (e.key === 'ArrowDown' ? 1 : -1) + l.length) % l.length]; if (n) n.focus();
+        }
+      });
+      document.addEventListener('click', function(e){
+        if (DLGP && !DLGP.hidden && !DLGP.contains(e.target) && !(e.target.closest && e.target.closest('[data-dlgpop]'))) dlgChiudi();
+      }, true);
+      window.addEventListener('resize', dlgChiudi);
+    }
+    if (!DLGP.hidden && dlgId === id){ dlgChiudi(); return; }
+    dlgChiudi();
+    dlgId = id; dlgDa = btn;
+    var sug = String(t.sdg || '').toLowerCase(), h = '<div class="dlgh">Delega a<small>parte una mail a tuo nome alla prossima sincronizzazione</small></div>';
+    var team = (S.team || []).slice().sort(function(a, b){
+      return (String(b.n).toLowerCase() === sug) - (String(a.n).toLowerCase() === sug); });
+    team.forEach(function(m){
+      var s = sug && String(m.n).toLowerCase() === sug;
+      h += '<button type="button" role="menuitem" data-dlgnome="' + esc(m.n) + '"' + (s ? ' class="sug"' : '') + '>'
+        + '<b>' + esc(m.n) + '</b>' + (s ? '<em>suggerito</em>' : '') + (m.r ? '<span>' + esc(m.r) + '</span>' : '') + '</button>';
     });
-    return '<select class="dlgsel" data-dlg="' + t.id + '" aria-label="Delega a">' + opts + '</select>';
+    if (!team.length) h += '<p class="dlgvuoto">Nessuna persona nel team.</p>';
+    DLGP.innerHTML = h;
+    DLGP.hidden = false;
+    btn.setAttribute('aria-expanded', 'true');
+    var r = btn.getBoundingClientRect(), W = DLGP.offsetWidth, H = DLGP.offsetHeight;
+    var vw = document.documentElement.clientWidth, x = Math.max(8, Math.min(r.left, vw - W - 8));
+    var y = (r.bottom + H + 8 > window.innerHeight && r.top - H - 6 > 8) ? r.top - H - 6 : r.bottom + 6;
+    DLGP.style.left = Math.round(x + (window.scrollX || 0)) + 'px';
+    DLGP.style.top = Math.round(y + (window.scrollY || 0)) + 'px';
+    var f = DLGP.querySelector('[data-dlgnome]'); if (f) f.focus({preventScroll: true});
   }
   function drIsInt(t){
     var all = ((t.to || '') + ',' + (t.cc || '')).split(/[,;]+/)
@@ -480,17 +544,21 @@ var VZ = (function(){
     return t.dm ? 'https://mail.google.com/mail/u/0/#drafts/' + encodeURIComponent(String(t.dm))
       : 'https://mail.google.com/mail/u/0/#drafts';
   }
+  /* R36: l'anteprima della bozza si scrive solo quando la apri (lazyApri) */
   function drBox(t){
     if (!t.dr || t.d) return '';
-    var o = '<details class="rif mailprev"><summary>anteprima della mail'
-      + '<span class="rifn">' + (drIsInt(t) ? 'interna' : 'esterna') + '</span></summary><div class="rifb">';
+    return '<details class="rif mailprev" data-lazy="dr" data-lid="' + esc(t.id) + '"><summary>anteprima della mail'
+      + '<span class="rifn">' + (drIsInt(t) ? 'interna' : 'esterna') + '</span></summary></details>';
+  }
+  function drCorpo(t){
+    var o = '<div class="rifb">';
     if (t.to)  o += '<div class="mp"><b>A:</b> ' + esc(t.to) + '</div>';
     if (t.cc)  o += '<div class="mp"><b>Cc:</b> ' + esc(t.cc) + '</div>';
     if (t.sub) o += '<div class="mp"><b>Oggetto:</b> ' + esc(t.sub) + '</div>';
     o += t.bd ? '<pre class="mpbody">' + esc(t.bd) + '</pre>'
       : '<div class="mpmuted">Anteprima non ancora caricata: arriva al prossimo giro.</div>';
     o += '<a class="gml" href="' + drUrl(t) + '" target="_blank" rel="noopener">Apri la bozza in Gmail \u2197</a>'
-      + '</div></details>';
+      + '</div>';
     return o;
   }
   function autoCtl(t){
@@ -536,14 +604,28 @@ var VZ = (function(){
     if (t.due) o += '<span class="tag due ' + dueClass(t) + '">scad. ' + esc(it(t.due)) + '</span>';
     return o;
   }
-  function match(g,t){
-    var hay = (g.code + ' ' + g.name + ' ' + t.t + ' ' + ntxt(t)
-      + ' ' + riList(t).join(' ')).toLowerCase();
-    return (filter === 'all' || (filter === 'open' && !t.d) || (filter === 'done' && t.d))
-        && (!urgent || !!t.due)
+  /* R36: il testo in cui cerca #q si prepara una volta per task e si rifà solo se cambiano
+     titolo, commessa, note o riassunto (prima si ricostruiva a ogni tasto per ogni task). */
+  var HAY = {};
+  function hayDi(g, t){
+    var nq = t.nq || [], firma = g.code + '|' + (t.t || '').length + '|' + nq.length + '|'
+      + (nq.length ? String(nq[nq.length - 1].x || '').length : 0) + '|' + (t.n || '').length + '|' + (t.ri ? String(t.ri).length : 0);
+    var c = HAY[t.id];
+    if (c && c.f === firma) return c.h;
+    var h = (g.code + ' ' + g.name + ' ' + t.t + ' ' + ntxt(t) + ' ' + riList(t).join(' ')).toLowerCase();
+    HAY[t.id] = {f: firma, h: h};
+    return h;
+  }
+  /* tutti i filtri tranne Tutti/Aperti/Fatti: servono anche per i «N fatti» in fondo alle colonne */
+  function passaAltri(g, t){
+    return (!urgent || !!t.due)
         && (!prionly || pri(t) <= 2)
         && (!dlgonly || !!t.dg)
-        && (!query || hay.indexOf(query) > -1);
+        && (!query || hayDi(g, t).indexOf(query) > -1);
+  }
+  function match(g,t){
+    return (filter === 'all' || (filter === 'open' && !t.d) || (filter === 'done' && t.d))
+        && passaAltri(g, t);
   }
   function find(id){
     for (var i = 0; i < S.groups.length; i++){
@@ -637,17 +719,114 @@ var VZ = (function(){
     if (!ri.length)
       return '<div class="rifsolo"><a class="gml" href="' + gmUrl(tid)
         + '" target="_blank" rel="noopener">Apri la mail in Gmail \u2197</a></div>';
-    return '<details class="rif"><summary>di cosa parla la mail'
-      + '<span class="rifn">' + ri.length + (ri.length === 1 ? ' punto' : ' punti') + '</span></summary>'
-      + '<div class="rifb"><ul>' + ri.map(function(x){ return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>'
+    /* R36: il riassunto si scrive quando apri la tendina (lazyApri), non per ogni riga */
+    return '<details class="rif" data-lazy="rif" data-lid="' + esc(t.id) + '"><summary>di cosa parla la mail'
+      + '<span class="rifn">' + ri.length + (ri.length === 1 ? ' punto' : ' punti') + '</span></summary></details>';
+  }
+  function rifCorpo(t){
+    var ri = riList(t), tid = t.tid;
+    return '<div class="rifb"><ul>' + ri.map(function(x){ return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>'
       + (tid ? '<a class="gml" href="' + gmUrl(tid) + '" target="_blank" rel="noopener">Apri la mail in Gmail \u2197</a>' : '')
-      + '</div></details>';
+      + '</div>';
+  }
+
+  /* ---------- R36 (26/09/2026): stato del task e storia ----------
+     La routine accodava ogni aggiornamento in t.s: mediana 274 caratteri, 147 task oltre i 500, uno di
+     6.358 caratteri, e «ricontrollata… ancora DRAFT» ripetuto 17 volte. In pagina restano la prima frase
+     e l'ultimo aggiornamento (con la data in grassetto); il resto va in «storia · N aggiornamenti»,
+     scritta solo quando la apri, con i controlli identici consecutivi fusi in una riga.
+     Campo nuovo t.sh = [{d:'AAAA-MM-GG', x:'testo'}]: se c'e', la storia viene da li' e t.s e' solo lo
+     stato corrente; la divisione del testo qui sotto serve per i task scritti prima. */
+  var S_SEP = / \u00b7 (?=agg\b|controll|ricontrollat|arrivata\b|\d{1,2}\/\d{1,2}: )/;
+  function sDM(g, m){ return ('0' + g).slice(-2) + '/' + ('0' + m).slice(-2); }
+  function sParte(raw, prima){
+    var x = raw, d = '', m = /^agg(?:iornamento)?\s+(\d{1,2})\/(\d{1,2})(?:\s*\([^)]*\))?\s*:?\s*/i.exec(raw);
+    if (m){ d = sDM(m[1], m[2]); x = raw.slice(m[0].length); }
+    else if ((m = /^((?:ri)?controll\w*\s+)?(?:il |l'|l\u2019)?(\d{1,2})\/(\d{1,2})\b\s*:?\s*/i.exec(raw))){
+      d = sDM(m[2], m[3]); x = (m[1] || '') + raw.slice(m[0].length);
+    } else if ((m = /(\d{1,2})\/(\d{1,2})/.exec(raw.slice(0, 48)))) d = sDM(m[1], m[2]);
+    x = x.trim().replace(/^(\d{1,2}[:.]\d{2})\s*:\s*/, '$1 \u00b7 ');
+    return {d: d || prima || '', x: x || raw, raw: raw};
+  }
+  /* chiave dei controlli: «ricontrollata il 13/09…: ancora DRAFT, mai spedita — …» e «controllo 22/09: la
+     bozza risulta ancora DRAFT» danno la stessa chiave e si fondono se sono uno dopo l'altro */
+  function sChiave(p){
+    if (!/^((ri)?controll|\d{1,2}\/\d{1,2}:)/i.test(p.raw)) return '';
+    var x = p.x, k = x.indexOf(': ');
+    if (k > -1 && k < 90) x = x.slice(k + 2);
+    return x.toLowerCase().replace(/\([^)]*\)/g, ' ').split(/\s[\u2014\u2013-]\s|:|;/)[0]
+      .replace(/\b(la bozza risulta|risulta|in gmail|sempre|ancora)\b/g, ' ').replace(/[^a-z\u00e0-\u00f90-9]+/g, ' ').trim();
+  }
+  function statoParti(t){
+    var s = String(t.s || '').trim(), primo = s, agg = [];
+    if (Array.isArray(t.sh) && t.sh.length){
+      agg = t.sh.filter(function(e){ return e && e.x; }).map(function(e){
+        var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(e.d || ''));
+        return {d: m ? m[3] + '/' + m[2] : '', x: String(e.x), raw: String(e.x), iso: m ? m[0] : ''};
+      }).sort(function(a, b){ return a.iso < b.iso ? -1 : a.iso > b.iso ? 1 : 0; });
+    } else if (s){
+      var p = s.split(S_SEP);
+      primo = p[0];
+      var m0 = /(\d{1,2})\/(\d{1,2})/.exec(primo), ult = m0 ? sDM(m0[1], m0[2]) : '';
+      agg = p.slice(1).map(function(r){ var q = sParte(r, ult); ult = q.d; return q; });
+    }
+    /* controlli identici consecutivi → una riga «controllata N volte dal … al …» */
+    var righe = [];
+    agg.forEach(function(q){
+      var k = sChiave(q), u = righe[righe.length - 1];
+      if (k && u && u.k === k){ u.n++; u.d2 = q.d; u.x = q.x; u.e = sEsito(q); return; }
+      righe.push({d: q.d, d2: '', n: 1, k: k, x: q.x, e: sEsito(q)});
+    });
+    var tronco = false;
+    if (primo.length > 280){
+      var cut = primo.lastIndexOf(' \u00b7 ', 250); if (cut < 120) cut = primo.lastIndexOf(' ', 250);
+      primo = primo.slice(0, cut > 0 ? cut : 250) + ' \u2026'; tronco = true;
+    }
+    return {primo: primo, intero: tronco ? String(t.s || '').split(S_SEP)[0] : '', righe: righe, n: agg.length, tronco: tronco};
+  }
+  function sEsito(p){ var k = p.x.indexOf(': '); return (k > -1 && k < 90) ? p.x.slice(k + 2) : p.x; }
+  function sRigaTxt(r){
+    return r.n > 1 ? 'controllata ' + r.n + ' volte: ' + r.e : r.x;
+  }
+  function sRigaData(r){ return r.n > 1 && r.d2 && r.d2 !== r.d ? r.d + ' \u2192 ' + r.d2 : r.d; }
+  function statoHtml(t, cls, pre){
+    var P = statoParti(t), u = P.righe[P.righe.length - 1];
+    if (!P.primo && !u) return pre ? '<span class="' + cls + '">' + pre + '</span>' : '';
+    var h = (P.primo || pre) ? '<span class="' + cls + '">' + (pre || '') + esc(P.primo) + '</span>' : '';
+    /* un ultimo aggiornamento lungo si ferma a 4 righe: per intero sta nella storia */
+    var lunga = !!u && sRigaTxt(u).length > 230;
+    if (u) h += '<span class="' + cls + ' sagg' + (lunga ? ' lunga' : '') + '">' + (sRigaData(u) ? '<b>' + esc(sRigaData(u)) + '</b> ' : '') + esc(sRigaTxt(u)) + '</span>';
+    if (P.n >= 2 || P.tronco || lunga)
+      h += '<details class="sst" data-lazy="sst" data-lid="' + esc(t.id) + '"><summary>storia'
+        + (P.n ? '<span class="rifn">' + P.n + (P.n === 1 ? ' aggiornamento' : ' aggiornamenti') + '</span>' : '') + '</summary></details>';
+    return h;
+  }
+  function storiaCorpo(t){
+    var P = statoParti(t), h = '<ol class="sstl">';
+    if (P.tronco) h += '<li><b>inizio</b><span>' + esc(P.intero) + '</span></li>';
+    P.righe.forEach(function(r){
+      h += '<li' + (r.n > 1 ? ' class="fuso"' : '') + '><b>' + esc(sRigaData(r) || '\u2014') + '</b><span>' + esc(sRigaTxt(r)) + '</span></li>';
+    });
+    return h + '</ol>';
   }
   /* Quando una mail non dice di che commessa parla, non la indovino: il task
      resta qui con una tendina e me lo dice Danilo. */
+  /* R36: la tendina nasce con la sola voce vuota; le commesse (30 gruppi + le commesse senza elenco,
+     2.600 nodi in Oggi) si scrivono quando la tocchi (askRiempi). */
   function askBox(t){
     if (!t.ask || t.d) return '';
-    var visti = {}, o = '<option value="">scegli dove metterlo\u2026</option>';
+    return '<div class="askbox"><b>di che commessa \u00e8?</b>'
+      + '<select class="askcm" data-ask="' + esc(t.id) + '" aria-label="Commessa del task">'
+      + '<option value="">scegli dove metterlo\u2026</option></select>'
+      + '<span>' + esc(t.aski || 'dalla mail non si capisce') + '</span></div>';
+  }
+  function askRiempi(sel){
+    if (!sel || sel.getAttribute('data-piena')) return;
+    sel.setAttribute('data-piena', '1');
+    sel.insertAdjacentHTML('beforeend', askOpzioni());
+  }
+  function askOpzioni(){
+    var visti = {}, o = '';
     (S.groups || []).forEach(function(g){
       visti[g.code] = 1;
       o += '<option value="' + esc(g.code) + '">' + esc(g.code)
@@ -659,33 +838,69 @@ var VZ = (function(){
         + nuove.map(function(c){ return '<option value="' + esc(c.code) + '">' + esc(c.code)
             + ' \u00b7 ' + esc(c.cliente) + '</option>'; }).join('') + '</optgroup>';
     }
-    return '<div class="askbox"><b>di che commessa \u00e8?</b>'
-      + '<select class="askcm" data-ask="' + esc(t.id) + '" aria-label="Commessa del task">'
-      + o + '</select>'
-      + '<span>' + esc(t.aski || 'dalla mail non si capisce') + '</span></div>';
+    return o;
+  }
+  /* R36: il campo nota resta sempre visibile (e' il canale di Danilo con Claude), solo piu' basso.
+     Le note applicate da piu' di 7 giorni si raccolgono in «N note applicate», scritte quando le apri. */
+  function notaVecchia(x){
+    if (!notaFatta(x)) return false;
+    var d = x.dd || x.d;
+    return !!d && days(d, new Date()) > 7;
+  }
+  function nchipHtml(x, i){
+    var ok = notaFatta(x), em = ok ? 'applicata' + (x.dd ? ' il ' + itFull(x.dd) : '')
+      : x.r ? 'serve una tua risposta' : 'in attesa \u00b7 la applico al giro delle 8:20 o delle 13:20';
+    return '<span class="nchip ' + (ok ? 'ok' : 'wait') + '">'
+      + '<b>' + esc(x.x) + '</b>'
+      + '<em' + (em.length > 26 ? ' class="em-l"' : '') + '>' + esc(em) + '</em>'
+      + (x.r ? '<i>' + esc(x.r) + '</i>' : '')
+      + (ok ? '' : '<button class="ndel" type="button" data-nd="' + i + '" title="Elimina la nota">\u00d7</button>')
+      + '</span>';
   }
   function noteBox(o){
     var h = '<div class="nbox">'
       + '<div class="nrow"><input class="note" type="text" aria-label="Nota per Claude"'
       + ' placeholder="scrivi una nota per Claude, poi Invio\u2026" value="' + esc(getDraft(o.id)) + '">'
       + '<button class="nok" type="button" title="Salva la nota (Invio)">Salva</button></div>';
-    var l = (o.nq || []);
-    if (l.length){
-      h += '<div class="nlist">';
-      for (var i = l.length - 1; i >= 0; i--){
-        var x = l[i], ok = notaFatta(x);
-        h += '<span class="nchip ' + (ok ? 'ok' : 'wait') + '">'
-          + '<b>' + esc(x.x) + '</b>'
-          + '<em>' + (ok ? 'applicata' + (x.dd ? ' il ' + esc(itFull(x.dd)) : '')
-              : x.r ? 'serve una tua risposta' : 'in attesa \u00b7 la applico al giro delle 8:20 o delle 13:20') + '</em>'
-          + (x.r ? '<i>' + esc(x.r) + '</i>' : '')
-          + (ok ? '' : '<button class="ndel" type="button" data-nd="' + i + '" title="Elimina la nota">\u00d7</button>')
-          + '</span>';
-      }
-      h += '</div>';
+    var l = (o.nq || []), vecchie = 0, righe = '';
+    for (var i = l.length - 1; i >= 0; i--){
+      if (notaVecchia(l[i])){ vecchie++; continue; }
+      righe += nchipHtml(l[i], i);
+    }
+    if (righe || vecchie){
+      h += '<div class="nlist">' + righe
+        + (vecchie ? '<details class="nold" data-lazy="nold" data-lid="' + esc(o.id) + '"><summary>'
+          + vecchie + (vecchie === 1 ? ' nota applicata' : ' note applicate') + '<span class="rifn">da pi\u00f9 di 7 giorni</span></summary></details>' : '')
+        + '</div>';
     }
     return h + '</div>';
   }
+  function noteVecchie(o){
+    var l = (o.nq || []), h = '';
+    for (var i = l.length - 1; i >= 0; i--) if (notaVecchia(l[i])) h += nchipHtml(l[i], i);
+    return h ? '<div class="nlist">' + h + '</div>' : '';
+  }
+  /* R36: un solo gestore per tutto quello che si scrive all'apertura (data-lazy): riassunto della mail,
+     anteprima della bozza, storia del task, note applicate vecchie, task fatti in fondo a una colonna */
+  document.addEventListener('toggle', function(e){
+    var d = e.target;
+    if (!d || d.tagName !== 'DETAILS' || !d.open || !d.hasAttribute('data-lazy') || d.getAttribute('data-pieno')) return;
+    var k = d.getAttribute('data-lazy'), id = d.getAttribute('data-lid'), t = id ? find(id) : null, h = '';
+    if (k === 'rif' && t) h = rifCorpo(t);
+    else if (k === 'dr' && t) h = drCorpo(t);
+    else if (k === 'sst' && t) h = storiaCorpo(t);
+    else if (k === 'nold' && t) h = noteVecchie(t);
+    else if (k === 'fatti') h = fattiCorpo(+d.getAttribute('data-g'));
+    if (!h) return;
+    d.setAttribute('data-pieno', '1');
+    d.insertAdjacentHTML('beforeend', h);
+  }, true);
+  ['focusin', 'mousedown', 'touchstart'].forEach(function(ev){
+    document.addEventListener(ev, function(e){
+      var s = e.target && e.target.closest ? e.target.closest('select.askcm') : null;
+      if (s) askRiempi(s);
+    }, {capture: true, passive: true});
+  });
   function ridisegnaNote(host, o){
     var box = host.querySelector('.nbox');
     if (!box) return;
@@ -764,9 +979,12 @@ var VZ = (function(){
         opts += '<option value="' + c + '">' + c + ' · '
           + (c === 'VARIE' ? 'Richieste varie' : 'Richieste di offerta') + '</option>';
     });
+    var nf = fermiLista().length;
     return '<div class="cm-tools"><div class="seg sub" id="tvseg">'
       + '<button data-tv="board" aria-pressed="' + (view === 'board') + '">Schede</button>'
-      + '<button data-tv="time" aria-pressed="' + (view === 'time') + '">Timeline</button></div>'
+      + '<button data-tv="time" aria-pressed="' + (view === 'time') + '">Timeline</button>'
+      + '<button data-tv="fermi" aria-pressed="' + (view === 'fermi') + '" title="Task aperti da 21 giorni o più, senza scadenza: decidi tu cosa farne">'
+      + 'Fermi da 21 gg' + (nf ? ' <b class="tvn">' + nf + '</b>' : '') + '</button></div>'
       + '<button class="btn" id="nt-apri">' + (ntAperto ? 'chiudi' : '+ Nuovo task') + '</button>'
       + '<span class="cm-hint">i task critici salgono in cima · clicca il badge per cambiare priorità'
       + '</span>'
@@ -811,9 +1029,9 @@ var VZ = (function(){
       b.addEventListener('click', function(){
         var t = b.getAttribute('data-tv');
         if (t === 'time' && filter === 'done'){
-          filter = 'all';
+          filter = 'open';
           ['all','open','done'].forEach(function(x){
-            document.getElementById('f-' + x).setAttribute('aria-pressed', String(x === 'all')); });
+            document.getElementById('f-' + x).setAttribute('aria-pressed', String(x === 'open')); });
         }
         view = t; setView(); render();
       });
@@ -847,9 +1065,14 @@ var VZ = (function(){
     if (query) f.push('ricerca \u00ab' + query + '\u00bb');
     return f;
   }
-  function avvisoFiltro(shown, tot){
+  function avvisoFiltro(shown, tot, fatti){
     var f = filtriAttivi();
     if (!f.length && shown >= tot) return '';
+    /* R36: «Aperti» e' la vista normale di Task (i fatti stanno in fondo a ogni colonna): niente allarme rosso */
+    if (f.length === 1 && filter === 'open')
+      return '<div class="fbar calmo"><span><b>' + shown + '</b> task aperti'
+        + (fatti ? ' · <b>' + fatti + '</b> fatti raccolti in fondo alle commesse' : '') + '</span>'
+        + '<button class="btn ghost" data-resetfiltri="1">mostra anche i fatti</button></div>';
     return '<div class="fbar' + (shown < tot ? ' hot' : '') + '">'
       + '<span><b>' + shown + '</b> task mostrati su ' + tot
       + (f.length ? ' \u00b7 filtro attivo: ' + esc(f.join(' + ')) : '') + '</span>'
@@ -867,8 +1090,36 @@ var VZ = (function(){
       .sort(function (a, b){ return per[b] - per[a]; })
       .map(function (k){ return k + ' (' + per[k] + '\u00d7)'; });
   }
+  /* una riga di task della bacheca (anche per i «N fatti» aperti a richiesta) */
+  function liTask(t){
+    /* R13 (08/09/2026): gli id finiscono dentro attributi, quindi passano da esc() */
+    return '<li class="p' + pri(t) + (t.d ? ' done' : '') + '" data-id="' + esc(t.id) + '">'
+      + '<input class="box" type="checkbox" id="c_' + esc(t.id) + '"' + (t.d ? ' checked' : '') + '>'
+      + '<div class="tbody"><label class="txt" for="c_' + esc(t.id) + '">' + esc(t.t) + '</label>'
+      + '<div class="meta">' + prioBtn(t) + dlgCtl(t) + autoCtl(t) + tagsFor(t) + '</div>'
+      + statoHtml(t, 'src')
+      + rifBox(t) + drBox(t) + askBox(t) + noteBox(t) + '</div></li>';
+  }
+  /* R36: «2 aperti · 21 fatti» al posto di «21/23», che si leggeva come 21 da fare */
+  function tallyTxt(g){
+    var a = 0, d = 0;
+    g.tasks.forEach(function(t){ if (t.d) d++; else a++; });
+    return a + (a === 1 ? ' aperto' : ' aperti') + ' · ' + d + (d === 1 ? ' fatto' : ' fatti');
+  }
+  function perChiusura(a, b){
+    var x = a.d ? (a.dd || '') : '', y = b.d ? (b.dd || '') : '';
+    return x < y ? 1 : x > y ? -1 : 0;
+  }
+  /* i fatti di una colonna, scritti quando apri «N fatti» (dal piu' recente) */
+  function fattiCorpo(gi){
+    var g = S.groups[gi];
+    if (!g) return '';
+    var l = g.tasks.filter(function(t){ return t.d && passaAltri(g, t); }).sort(perChiusura);
+    return l.length ? '<ul>' + l.map(liTask).join('') + '</ul>' : '';
+  }
+  var boardQ = null;   /* R36: la ricerca che le righe in pagina rispettano (per restringere senza ridisegnare) */
   function board(){
-    var html = '<div class="grid">', shown = 0, k = 0;
+    var html = '<div class="grid">', shown = 0, k = 0, fattiTot = 0;
     /* R35: nei chiusi l'ultimo chiuso sta in cima (gruppi e righe per data di chiusura, dalla più recente) */
     var soloChiusi = filter === 'done', ultimo = function(g){
       return g.tasks.reduce(function(m, t){ return t.d && t.dd && t.dd > m ? t.dd : m; }, ''); };
@@ -876,40 +1127,161 @@ var VZ = (function(){
     if (soloChiusi) gruppi.sort(function(a, b){ var x = ultimo(a.g), y = ultimo(b.g); return x < y ? 1 : x > y ? -1 : a.gi - b.gi; });
     gruppi.forEach(function(o){
       var g = o.g, gi = o.gi;
-      var gd = g.tasks.filter(function(x){return x.d;}).length, rows = '', vis = 0;
-      (soloChiusi ? g.tasks.slice().sort(function(a, b){
-        var x = a.d ? (a.dd || '') : '', y = b.d ? (b.dd || '') : '';
-        return x < y ? 1 : x > y ? -1 : 0; }) : ordina(g.tasks)).forEach(function(t){
-        var pass = match(g,t);
-        if (pass) vis++;
-        var tags = tagsFor(t);
-        rows += '<li class="p' + pri(t) + ' ' + (t.d ? 'done ' : '') + (pass ? '' : 'hide')
-          /* R13 (08/09/2026): gli id finiscono dentro attributi, quindi passano da esc() */
-          + '" data-id="' + esc(t.id) + '">'
-          + '<input class="box" type="checkbox" id="c_' + esc(t.id) + '"' + (t.d ? ' checked' : '') + '>'
-          + '<div class="tbody"><label class="txt" for="c_' + esc(t.id) + '">' + esc(t.t) + '</label>'
-          + '<div class="meta">' + prioBtn(t) + dlgCtl(t) + autoCtl(t) + tags + '</div>'
-          + '<span class="src">' + esc(t.s) + '</span>'
-          + rifBox(t) + drBox(t) + askBox(t) + noteBox(t) + '</div></li>';
+      var gd = 0, rows = '', vis = 0, fatti = 0;
+      /* R36: le righe che non passano i filtri non entrano nella pagina (prima erano nascoste con .hide);
+         con «Aperti» i fatti vanno in fondo alla colonna, in «N fatti» scritto quando lo apri */
+      (soloChiusi ? g.tasks.slice().sort(perChiusura) : ordina(g.tasks)).forEach(function(t){
+        if (t.d) gd++;
+        if (match(g, t)){ vis++; rows += liTask(t); }
+        else if (filter === 'open' && t.d && passaAltri(g, t)) fatti++;
       });
       if (!vis) return;
-      shown += vis;
+      shown += vis; fattiTot += fatti;
       /* R19: nel gruppo RICAMBI, chi torna a chiedere ricambi piu' di una volta (ancora aperto):
          un segnale di usura ricorrente da girare a produzione, non solo una lista di richieste. */
       var rip = (g.code === 'RICAMBI') ? ricambiRipetuti(g.tasks) : [];
-      html += '<section class="card' + (gd === g.tasks.length ? ' all-done' : '') + '" style="--c:' + hue(gi)
+      html += '<section class="card' + (gd === g.tasks.length ? ' all-done' : '') + '" data-gi="' + gi + '" style="--c:' + hue(gi)
         + ';animation-delay:' + (k++ * 40) + 'ms">'
         + '<header class="chead"><span class="code">' + esc(g.code) + '</span>'
         + '<span class="cname">' + esc(g.name) + '</span>'
-        + '<span class="tally">' + gd + '/' + g.tasks.length + '</span></header>'
+        + '<span class="tally">' + tallyTxt(g) + '</span></header>'
         + (rip.length ? '<p class="csub">Richieste ripetute: <b>' + esc(rip.join(', ')) + '</b></p>' : '')
-        + '<ul>' + rows + '</ul></section>';
+        + '<ul>' + rows + '</ul>'
+        + (fatti ? '<details class="cfatti" data-lazy="fatti" data-g="' + gi + '"><summary>' + fatti
+            + (fatti === 1 ? ' fatto' : ' fatti') + '<span class="rifn">dal più recente</span></summary></details>' : '')
+        + '</section>';
     });
     html += '</div>';
     var tot = tuttiTask().length;
-    stage.innerHTML = tvSeg() + avvisoFiltro(shown, tot) + (shown ? html
-      : '<p class="empty">Nessun task con questo filtro: premi \u00ab mostra tutti i task \u00bb qui sopra.</p>');
+    stage.innerHTML = tvSeg() + avvisoFiltro(shown, tot, fattiTot) + (shown ? html
+      : '<p class="empty">Nessun task con questo filtro: premi « mostra tutti i task » qui sopra.</p>');
     tvWire();
+    boardQ = query;
+  }
+  /* R36: mentre scrivi in #q la ricerca che si allunga («ma» → «mac») puo' solo togliere righe: le nascondo
+     senza ridisegnare la bacheca. Se la ricerca si accorcia, o non resta niente, ridisegno (render). */
+  function boardFiltra(){
+    if (view !== 'board' || boardQ === null || !query || query.indexOf(boardQ) < 0) return false;
+    var cards = stage.querySelectorAll('section.card[data-gi]'), shown = 0, fattiTot = 0, byId = {};
+    if (!cards.length) return false;
+    S.groups.forEach(function(g){ g.tasks.forEach(function(t){ byId[t.id] = t; }); });
+    var esiti = [];
+    for (var i = 0; i < cards.length; i++){
+      var c = cards[i], g = S.groups[+c.getAttribute('data-gi')];
+      if (!g) return false;
+      var vis = 0, righe = c.querySelectorAll(':scope > ul > li[data-id]');
+      for (var j = 0; j < righe.length; j++){
+        var t = byId[righe[j].getAttribute('data-id')], ok = !!t && match(g, t);
+        esiti.push([righe[j], ok]);
+        if (ok) vis++;
+      }
+      var fatti = filter === 'open' ? g.tasks.filter(function(x){ return x.d && passaAltri(g, x); }).length : 0;
+      esiti.push([c, vis > 0, fatti, g]);
+      if (vis){ shown += vis; fattiTot += fatti; }
+    }
+    if (!shown) return false;
+    esiti.forEach(function(e){
+      var el = e[0];
+      if (el.tagName === 'LI'){ el.classList.toggle('hide', !e[1]); return; }
+      el.style.display = e[1] ? '' : 'none';
+      var fd = el.querySelector(':scope > details.cfatti');
+      if (!fd) return;
+      fd.style.display = e[2] ? '' : 'none';
+      var sm = fd.querySelector('summary');
+      if (sm && sm.firstChild) sm.firstChild.nodeValue = e[2] + (e[2] === 1 ? ' fatto' : ' fatti');
+      fd.querySelectorAll('li[data-id]').forEach(function(li){
+        var t = byId[li.getAttribute('data-id')];
+        li.classList.toggle('hide', !(t && passaAltri(e[3], t)));
+      });
+    });
+    var fb = stage.querySelector(':scope > .fbar'), nuovo = avvisoFiltro(shown, tuttiTask().length, fattiTot);
+    if (fb) fb.outerHTML = nuovo;
+    else if (nuovo){ var tv = stage.querySelector(':scope > .cm-tools'); if (tv) tv.insertAdjacentHTML('afterend', nuovo); }
+    boardQ = query;
+    return true;
+  }
+  /* R36: un solo temporizzatore per nome: i filtri di testo aspettano 200 ms di pausa prima di ridisegnare */
+  var ritardi = {};
+  function aspettaPoi(k, ms, fn){ clearTimeout(ritardi[k]); ritardi[k] = setTimeout(fn, ms); }
+
+  /* ---------- R36: FERMI DA 21 GIORNI O PIU' ----------
+     Task aperti, senza scadenza, nati (t.o) 21 o piu' giorni fa: per regola non si chiudono da soli
+     (Danilo, 10/09), qui si decide in fretta. «tienilo» scrive t.rv = oggi e il task sparisce da qui
+     per 14 giorni; «scade tra 7 gg» scrive t.due. Entrambi passano da stash() (locMod). */
+  function fermiLista(){
+    var oggiD = today();
+    return tuttiTask().filter(function(x){
+      var t = x.t;
+      if (t.d || t.due || !t.o || days(t.o, oggiD) < 21) return false;
+      return !(t.rv && days(t.rv, oggiD) < 14);
+    });
+  }
+  function liFermo(t){
+    return '<li class="p' + pri(t) + ' fermo" data-id="' + esc(t.id) + '"><div class="tbody">'
+      + '<span class="txt">' + esc(t.t) + '</span>'
+      + '<div class="meta">' + prioBtn(t) + tagsFor(t) + '</div>'
+      + statoHtml(t, 'src')
+      + '<div class="frmact">'
+      + '<button type="button" class="frmb" data-fchiudi="1" title="Segna come fatto">✓ chiudi</button>'
+      + '<button type="button" class="frmb" data-f7="1" title="Metti la scadenza tra 7 giorni">scade tra 7 gg</button>'
+      + dlgCtl(t)
+      + '<button type="button" class="frmb" data-ftieni="1" title="Resta aperto e sparisce da qui per 14 giorni">tienilo</button></div>'
+      + rifBox(t) + askBox(t) + noteBox(t) + '</div></li>';
+  }
+  function fermi(){
+    var L = fermiLista(), per = {}, ord = [];
+    L.forEach(function(x){
+      var c = x.g.code;
+      if (!per[c]){ per[c] = {g: x.g, gi: S.groups.indexOf(x.g), r: []}; ord.push(c); }
+      per[c].r.push(x.t);
+    });
+    ord.sort(function(a, b){ return per[b].r.length - per[a].r.length || (a < b ? -1 : 1); });
+    var h = tvSeg() + '<p class="fermi-intro"><b>' + L.length + '</b> task aperti da 21 giorni o più e senza scadenza'
+      + (ord.length ? ', su <b>' + ord.length + '</b> ' + (ord.length === 1 ? 'commessa' : 'commesse') : '')
+      + '. Nessuno si chiude da solo: per ognuno scegli <em>chiudi</em>, <em>scade tra 7 gg</em>, <em>Delega…</em> '
+      + 'oppure <em>tienilo</em>, che lo toglie da qui per 14 giorni.</p>';
+    if (!L.length) h += '<p class="empty">Nessun task fermo da rivedere.</p>';
+    else {
+      h += '<div class="grid fermi">';
+      ord.forEach(function(c, k){
+        var G = per[c];
+        G.r.sort(function(a, b){ return d0(a.o) - d0(b.o); });
+        h += '<section class="card" data-fgi="' + G.gi + '" style="--c:' + hue(G.gi) + ';animation-delay:' + (k * 40) + 'ms">'
+          + '<header class="chead"><span class="code">' + esc(c) + '</span><span class="cname">' + esc(G.g.name) + '</span>'
+          + '<span class="tally">' + G.r.length + (G.r.length === 1 ? ' fermo' : ' fermi') + '</span></header><ul>'
+          + G.r.map(liFermo).join('') + '</ul></section>';
+      });
+      h += '</div>';
+    }
+    stage.innerHTML = h;
+    tvWire();
+  }
+  function fermiConta(){
+    setTimeout(function(){
+      var n = fermiLista().length, b = document.querySelector('#tvseg [data-tv="fermi"]');
+      if (b) b.innerHTML = 'Fermi da 21 gg' + (n ? ' <b class="tvn">' + n + '</b>' : '');
+      var ip = stage.querySelector('.fermi-intro > b'); if (ip) ip.textContent = n;
+      stage.querySelectorAll('.fermi section.card').forEach(function(c){
+        var k = c.querySelectorAll('li[data-id]').length, ta = c.querySelector('.tally');
+        if (ta) ta.textContent = k + (k === 1 ? ' fermo' : ' fermi');
+      });
+    }, 300);
+  }
+  function fermoAzione(b){
+    var host = b.closest('[data-id]'), t = host ? find(host.getAttribute('data-id')) : null;
+    if (!t) return;
+    var prima = {d: !!t.d, dd: t.dd, due: t.due == null ? null : t.due, rv: t.rv}, msg;
+    if (b.hasAttribute('data-fchiudi')){ t.d = true; t.dd = todayISO(); msg = 'Chiuso: ' + t.t; }
+    else if (b.hasAttribute('data-f7')){ t.due = isoDi(addGiorni(today(), 7)); locMod[t.id] = 1; msg = 'Scade il ' + it(t.due) + ': ' + t.t; }
+    else { t.rv = todayISO(); locMod[t.id] = 1; msg = 'Lo tieni, torna qui tra 14 giorni: ' + t.t; }
+    head(); save(); togliRiga(host); fermiConta();
+    toastTask(msg, function(){
+      t.d = prima.d;
+      if (prima.dd) t.dd = prima.dd; else delete t.dd;
+      t.due = prima.due;
+      if (prima.rv) t.rv = prima.rv; else delete t.rv;
+      head(); save(); render();
+    });
   }
 
   /* ---------- TIMELINE ---------- */
@@ -925,8 +1297,9 @@ var VZ = (function(){
       });
     });
     if (!rows.length){
-      stage.innerHTML = '<p class="empty">Nessuna attività aperta con questo filtro.<br>'
+      stage.innerHTML = tvSeg() + '<p class="empty">Nessuna attività aperta con questo filtro.<br>'
         + 'La timeline mostra solo quello che è ancora da fare.</p>';
+      tvWire();
       return;
     }
 
@@ -939,20 +1312,36 @@ var VZ = (function(){
     var span = t1 - t0;
     function pos(x){ return ((d0(x) - t0) / span) * 100; }
 
-    var ticks = '', bare = '', cur = new Date(t0);
+    /* R36 (26/09/2026): asse su due righe. Prima il nome del mese stava nella stessa tacca della
+       settimana («SETTEMBRE 7» e' largo ~90 px, le tacche distano ~48 px) e si leggeva «SETTEMBRE14 7»;
+       la scritta «oggi» copriva il 21. Adesso: in alto la bandierina «oggi», sotto i mesi (dal primo
+       all'ultimo giorno visibile del mese), sotto ancora i lunedi'. */
+    var ticks = '', bare = '', mesi = '', cur = new Date(t0);
     cur.setDate(cur.getDate() + ((8 - cur.getDay()) % 7));
     while (cur < t1){
       var first = cur.getDate() <= 7, cls = 'tick' + (first ? ' m' : ''), lf = pos(cur).toFixed(3);
-      ticks += '<div class="' + cls + '" style="left:' + lf + '%"><span>'
-        + (first ? MESI[cur.getMonth()].toUpperCase() + ' ' : '') + cur.getDate() + '</span></div>';
+      ticks += '<div class="' + cls + '" style="left:' + lf + '%"><span>' + cur.getDate() + '</span></div>';
       bare += '<div class="' + cls + '" style="left:' + lf + '%"></div>';
       cur = new Date(cur.getTime() + 7 * DAY);
+    }
+    var mc = new Date(t0.getFullYear(), t0.getMonth(), 1), annoOggi = today().getFullYear();
+    while (mc < t1){
+      var mf = new Date(mc.getFullYear(), mc.getMonth() + 1, 1);
+      var da = mc < t0 ? t0 : mc, a = mf > t1 ? t1 : mf, gg = Math.round((a - da) / DAY);
+      var nome = gg >= 14 ? MESI[mc.getMonth()].toUpperCase() + (mc.getFullYear() !== annoOggi ? ' ' + mc.getFullYear() : '')
+        : gg >= 5 ? MESI_BREVI[mc.getMonth()].toUpperCase() : '';
+      mesi += '<div class="tl-mese' + (mc < t0 ? ' tronco' : '') + '" style="left:' + pos(da).toFixed(3) + '%;width:'
+        + (pos(a) - pos(da)).toFixed(3) + '%" title="' + esc(MESI[mc.getMonth()] + ' ' + mc.getFullYear()) + '">'
+        + (nome ? '<span>' + esc(nome) + '</span>' : '') + '</div>';
+      mc = mf;
     }
     var tl = '<div class="today" style="left:' + pos(new Date()).toFixed(3) + '%"></div>';
 
     var html = '<div class="tl"><div class="tl-inner">'
-      + '<div class="tl-axis"><div class="lab">Attività</div><div class="track">' + ticks + tl
-      + '<span class="today-flag" style="left:' + pos(new Date()).toFixed(3) + '%">oggi</span></div></div>';
+      + '<div class="tl-axis"><div class="lab">Attività</div><div class="track tl-asse">'
+      + '<div class="tl-mesi">' + mesi + '</div><div class="tl-giorni">' + ticks + '</div>' + tl
+      + '<span class="today-flag" style="left:' + pos(new Date()).toFixed(3) + '%">oggi \u00b7 ' + today().getDate() + ' '
+      + MESI_BREVI[today().getMonth()] + '</span></div></div>';
 
     rows.forEach(function(r){
       html += '<div class="tl-group" style="--c:' + r.c + '"><div class="g">'
@@ -2345,9 +2734,12 @@ var VZ = (function(){
       cview = 'evase'; dashboard(); head(); });
 
     var q = document.getElementById('cq');
-    q.addEventListener('input', function(e){
-      cq = e.target.value.trim().toLowerCase(); dashboard();
-      var n = document.getElementById('cq'); n.focus(); n.setSelectionRange(n.value.length, n.value.length);
+    q.addEventListener('input', function(){
+      aspettaPoi('cq', 200, function(){   /* R36: ridisegna dopo 200 ms di pausa, non a ogni tasto */
+        var n0 = document.getElementById('cq'); if (!n0) return;
+        cq = n0.value.trim().toLowerCase(); dashboard();
+        var n = document.getElementById('cq'); n.focus(); n.setSelectionRange(n.value.length, n.value.length);
+      });
     });
     var s = document.getElementById('cfilt'); s.value = cfilt;
     s.addEventListener('change', function(e){ cfilt = e.target.value; dashboard(); });
@@ -3718,6 +4110,9 @@ var VZ = (function(){
   }, true);
 
   /* ================= OGGI ================= */
+  /* R36: «comprimi tutto» di Tutti gli altri task aperti. Parte sempre aperto; la scelta la ricorda
+     stashUI (campo ogc) finche' vale la fotografia della vista (6 ore, readUI). */
+  var ogComp = false;
   function oggi(){
     var oggiD = today(), h = '';
     var _gd = new Date();
@@ -3770,12 +4165,17 @@ var VZ = (function(){
       var k = days(new Date(), e.d); return k >= 0 && k <= 14; });
 
     /* R35: il riquadro «da fare adesso» conta la stessa lista della sezione (scaduti + entro 3 gg + critici) */
+    /* R36: dentro ogni blocco prima i critici, poi dalla scadenza piu' vecchia */
+    [scaduti, entro3, critici].forEach(function(l){ l.sort(ogOrdine); });
     var lista = scaduti.concat(entro3).concat(critici), urg = lista.length;
+    var critND = critici.filter(function(x){ return !x.t.due; }).length;
     var chiusi7 = tuttiTask().filter(function(x){ return x.t.d && x.t.dd && days(x.t.dd, new Date()) <= 7; }).length;
     var chiusiPrima = tuttiTask().filter(function(x){ var k = x.t.d && x.t.dd ? days(x.t.dd, new Date()) : -1; return k > 7 && k <= 14; }).length;
+    var nFermi = fermiLista().length;
     h += '<div class="cm-kpis">'
       + '<div class="cm-kpi' + (urg ? ' hot' : '') + '"><b>' + urg + '</b><span>da fare adesso</span>'
-      + '<small>' + scaduti.length + ' scaduti · ' + entro3.length + ' entro 3 gg · ' + critici.length + ' critici</small></div>'
+      + '<small>' + scaduti.length + ' scaduti · ' + entro3.length + ' entro 3 gg · ' + critici.length + ' critici'
+      + (critND ? ' (' + critND + ' senza data)' : '') + '</small></div>'
       + '<div class="cm-kpi"><b>' + attese.length + '</b><span>aspettano risposta</span>'
       + '<small>' + attese.filter(function(a){ return a.u === 'alta'; }).length + ' urgenti</small></div>'
       + '<div class="cm-kpi' + (soldi.n || soldi.bloccate.length ? ' hot' : '') + '"><b>' + (soldi.tot ? eurM(soldi.tot) : soldi.n) + '</b><span>soldi da sbloccare</span>'
@@ -3787,31 +4187,104 @@ var VZ = (function(){
       + '<small>commesse attive senza email da 60+ gg</small></div>'
       + '<div class="cm-kpi kpi-go" data-kpiopen="done" title="Apri i task chiusi, dal più recente">'
       + '<b>' + chiusi7 + '</b><span>chiusi negli ultimi 7 gg</span>'
-      + '<small>' + chiusiPrima + ' nei 7 giorni prima \u00b7 clicca per vederli</small></div></div>';
+      + '<small>' + chiusiPrima + ' nei 7 giorni prima · clicca per vederli</small></div></div>';
+    /* R36: task fermi (aperti da 21+ giorni, senza scadenza): il contatore apre il segmento in Task */
+    if (nFermi) h += '<button type="button" class="ogfermi" data-fermi="1" title="Apri Task › Fermi da 21 gg: decidi tu cosa farne">'
+      + '<b>' + nFermi + '</b> ' + (nFermi === 1 ? 'task fermo' : 'task fermi') + ' da rivedere'
+      + '<span>aperti da 21 giorni o più, senza scadenza · nessuno si chiude da solo</span><i aria-hidden="true">›</i></button>';
 
-    h += '<div class="og-grid">';
+    /* R36 (26/09/2026): nuovo ordine. Prima «In delega» stava a 68.600 px e «Aspettano una risposta» a
+       69.300 (88.000 al telefono), sotto i 246 «altri task». Adesso: a sinistra Da fare adesso, a destra
+       chi aspetta te, le deleghe, i soldi, le date, i prossimi 14 giorni; per ultimi tutti gli altri task.
+       Al telefono una colonna sola nello stesso ordine. Tutti i task restano visibili (03/09). */
+    h += '<div class="og-grid og2">';
 
-    /* colonna 1 */
+    /* colonna 1: da fare adesso */
     h += '<div class="og-col">';
-    h += '<section class="og" data-n="' + lista.length + '"><h3><i class="dt late"></i>Da fare adesso'
+    h += '<section class="og cv cv-l" data-n="' + lista.length + '"><h3><i class="dt late"></i>Da fare adesso'
       + '<em class="oghint">' + lista.length
-      + ' urgenti \u00b7 spunta per chiudere \u00b7 scrivi una nota e la leggo alla prossima sincronizzazione</em>'
+      + ' urgenti · spunta per chiudere · scrivi una nota e la leggo alla prossima sincronizzazione</em>'
       + '</h3>';
     if (!lista.length) h += '<p class="ogempty">Niente in scadenza. Buon segno.</p>';
-    lista.forEach(function(x){
-      var k = x.t.due ? days(new Date(), x.t.due) : null;
-      var w = k === null ? 'senza data' : k < 0 ? Math.abs(k) + ' gg di ritardo'
-        : k === 0 ? 'oggi' : 'tra ' + k + ' gg';
-      h += '<div class="ogrow act' + (k !== null && k < 0 ? ' bad' : '') + '" data-id="' + esc(x.t.id)
-        + '" data-goto="' + esc(x.g.code) + '">'
-        + '<input class="box" type="checkbox" aria-label="Segna come fatto" title="segna come fatto e archivia">'
-        + '<div class="ogmain"><b>' + esc(x.t.t) + '</b>'
-        + '<span>' + esc(x.g.code) + ' · ' + esc(x.g.name) + '</span>'
-        + rifBox(x.t) + noteBox(x.t) + '</div>'
-        + '<span class="ogwhen' + (k !== null && k < 0 ? ' bad' : '') + '">' + w + '</span></div>';
+    [[scaduti, 'Scaduti', ''], [entro3, 'Entro 3 giorni', ''], [critici, 'Critici', critND ? critND + ' senza data' : '']].forEach(function(B){
+      if (!B[0].length) return;
+      h += '<div class="ogsub"><b>' + B[1] + '</b><span>' + B[0].length + (B[2] ? ' · ' + B[2] : '') + '</span></div>';
+      B[0].forEach(function(x){ h += rigaAdesso(x); });
+    });
+    h += '</section></div>';
+
+    /* colonna 2 */
+    h += '<div class="og-col">';
+    h += '<section class="og cv" data-n="' + attese.length + '"><h3><i class="dt warn"></i>Aspettano una risposta da te</h3>';
+    if (!attese.length) h += '<p class="ogempty">Nessuno in attesa.</p>';
+    attese.forEach(function(a){
+      var gg = days(a.data, new Date());
+      h += '<div class="ogrow u-' + esc(a.u) + '">'
+        + '<div class="ogmain"><b>' + esc(a.chi) + ' <em>' + esc(a.az) + '</em></b>'
+        + '<span>' + esc(a.chiede) + '</span>'
+        + (a.perche ? '<span class="why">' + esc(a.perche) + '</span>' : '')
+        + '</div><span class="ogwhen' + (gg > 14 ? ' bad' : '') + '">' + (gg > 14 ? '<i aria-hidden="true">⚠</i>' : '') + gg + ' gg'
+        + (a.tid ? ' <a class="gml" href="https://mail.google.com/mail/#all/' + esc(a.tid)
+           + '" target="_blank" rel="noopener" title="Apri il thread in Gmail">Gmail ↗</a>' : '')
+        + (a.dm ? ' <a class="gml bz" href="' + drUrl(a) + '" target="_blank" rel="noopener" title="Bozza di risposta già preparata: aprila, controlla e manda">bozza pronta ↗</a>' : '')
+        + '</span></div>';
     });
     h += '</section>';
 
+    h += delegaSez(delegati);
+    h += soldiHtml(soldi).replace('<section class="og og-soldi"', '<section class="og og-soldi cv"');
+
+    h += '<section class="og cv" data-n="' + rischio.length + '"><h3><i class="dt late"></i>Date a rischio'
+      + (rischio.length > 10 ? '<em class="oghint">le prime 10 di ' + rischio.length + '</em>' : '') + '</h3>';
+    if (!rischio.length) h += '<p class="ogempty">Nessuna consegna a rischio.</p>';
+    rischio.slice(0, 10).forEach(function(c){
+      var t = c.de || c.dc, k = days(new Date(), t);
+      h += '<div class="ogrow' + (k < 0 ? ' bad' : '') + '" data-cm="' + esc(c.code) + '">'
+        + '<div class="ogmain"><b>' + esc(c.code) + ' · ' + esc(c.cliente) + '</b>'
+        + '<span>' + prog(c) + '% avanzamento · ' + esc(c.desc) + '</span></div>'
+        + ogWhen(k, k < 0 ? 'scaduta ' + Math.abs(k) + ' gg' : 'tra ' + k + ' gg') + '</div>';
+    });
+    h += '</section>';
+
+    h += '<section class="og cv" data-n="' + prossimi.length + '"><h3><i class="dt cy"></i>Prossimi 14 giorni'
+      + (prossimi.length > 12 ? '<em class="oghint">i primi 12 di ' + prossimi.length + '</em>' : '') + '</h3>';
+    if (!prossimi.length) h += '<p class="ogempty">Calendario libero.</p>';
+    prossimi.slice(0, 12).forEach(function(e){
+      h += '<div class="ogrow"><div class="ogmain"><b>' + esc(e.tit) + '</b>'
+        + '<span>' + esc(e.sub || '') + '</span></div>'
+        + '<span class="ogwhen"><i class="dt" style="background:' + EK[e.k].c + '"></i>'
+        + esc(it(e.d)) + '</span></div>';
+    });
+    h += '</section>';
+
+    h += '<section class="og cv" data-n="' + silenziosi.length + '"><h3><i class="dt warn"></i>Clienti silenziosi'
+      + '<em class="oghint">commesse attive, ultima email da 60 giorni o più'
+      + (silenziosi.length > 10 ? ' · le prime 10 di ' + silenziosi.length : '') + '</em></h3>';
+    if (!silenziosi.length) h += '<p class="ogempty">Nessun cliente silenzioso.</p>';
+    silenziosi.slice(0, 10).forEach(function(c){
+      var gg = days(c.last, new Date());
+      h += '<div class="ogrow' + (gg >= 120 ? ' bad' : '') + '" data-cm="' + esc(c.code) + '">'
+        + '<div class="ogmain"><b>' + esc(c.code) + ' · ' + esc(c.cliente) + '</b>'
+        + '<span>ultima email il ' + esc(it(c.last)) + '</span></div>'
+        + '<span class="ogwhen' + (gg >= 120 ? ' bad' : '') + '">' + (gg >= 120 ? '<i aria-hidden="true">⚠</i>' : '') + gg + ' gg fa</span></div>';
+    });
+    h += '</section>';
+
+    /* settimana */
+    var chiusi = tuttiTask().filter(function(x){ return x.t.d && x.t.dd && days(x.t.dd, new Date()) <= 7; });
+    var nuovi = tuttiTask().filter(function(x){ return !x.t.d && days(x.t.o, new Date()) <= 7; });
+    h += '<section class="og cv"><h3><i class="dt vi"></i>Ultimi 7 giorni</h3>'
+      + '<div class="wk"><div><b>' + chiusi.length + '</b><span>task chiusi</span></div>'
+      + '<div><b>' + nuovi.length + '</b><span>task nuovi</span></div>'
+      + '<div><b>' + delegati.length + '</b><span>delegati in attesa</span></div>'
+      + '<div><b>' + (S.commesse || []).filter(function(c){
+          return c.last && days(c.last, new Date()) <= 7; }).length + '</b><span>commesse con attività</span></div>'
+      + '<div><b>' + eventi().filter(function(e){ var k = days(new Date(), e.d);
+          return k >= 0 && k <= 7; }).length + '</b><span>eventi nei prossimi 7 giorni</span></div></div>'
+      + '</section>';
+    h += '</div></div>';
+
+    /* per ultimi: tutti gli altri task aperti, tutti visibili; «comprimi tutto» e' facoltativo */
     var visti = {};
     lista.forEach(function(x){ visti[x.t.id] = 1; });
     delegati.forEach(function(x){ visti[x.t.id] = 1; });
@@ -3823,113 +4296,109 @@ var VZ = (function(){
         perGr[x.g.code].r.push(x);
       });
       ordGr.sort(function(a, b){ return perGr[b].r.length - perGr[a].r.length; });
-      h += '<section class="og" data-n="' + altri.length + '"><h3><i class="dt cy"></i>Tutti gli altri task aperti'
+      h += '<section class="og wide og-altri" id="og-altri" data-n="' + altri.length + '"><h3><i class="dt cy"></i>Tutti gli altri task aperti'
         + '<em class="oghint">' + altri.length + ' task su ' + ordGr.length
-        + ' commesse \u00b7 clicca sul titolo di una commessa per richiuderla</em></h3>';
+        + ' commesse · clicca sul titolo di una commessa per richiuderla</em>'
+        + '<button type="button" class="ogcomp" data-ogcomp="1" aria-pressed="' + ogComp + '">'
+        + (ogComp ? 'espandi tutto' : 'comprimi tutto') + '</button></h3>';
       ordGr.forEach(function(code){
         var G = perGr[code];
-        h += '<details class="ogcm" open><summary><b>' + esc(code) + '</b> '
-          + esc(G.g.name) + '<span class="ogn">' + G.r.length + '</span></summary>';
+        h += '<details class="ogcm"' + (ogComp ? '' : ' open') + '><summary><b>' + esc(code) + '</b> '
+          + esc(G.g.name) + '<span class="ogn">' + G.r.length + '</span></summary><div class="ogcmb">';
         ordina(G.r.map(function(x){ return x.t; })).forEach(function(t){
+          var k = t.due ? days(new Date(), t.due) : null;
           h += '<div class="ogrow act" data-id="' + esc(t.id) + '" data-goto="' + esc(code) + '">'
             + '<input class="box" type="checkbox" aria-label="Segna come fatto" title="segna come fatto e archivia">'
             + '<div class="ogmain"><b>' + esc(t.t) + '</b>'
-            + '<span>' + esc(t.s) + '</span>'
+            + statoHtml(t, 'ogs', ogWhen(k, t.due ? 'scad. ' + esc(it(t.due)) : 'aperto da ' + age(t) + ' gg', null, true))
             + rifBox(t) + drBox(t) + askBox(t) + noteBox(t) + '</div>'
-            + '<span class="ogwhen">' + (t.due ? 'scad. ' + esc(it(t.due)) : 'aperto da ' + age(t) + ' gg')
-            + '</span></div>';
+            + ogWhen(k, t.due ? 'scad. ' + esc(it(t.due)) : 'aperto da ' + age(t) + ' gg')
+            + '</div>';
         });
-        h += '</details>';
+        h += '</div></details>';
       });
       h += '</section>';
     }
-
-    if (delegati.length){
-      h += '<section class="og" data-n="' + delegati.length + '"><h3><i class="dt cy"></i>In delega \u00b7 la palla \u00e8 loro</h3>';
-      delegati.forEach(function(x){
-        var gg = x.t.dgd ? days(x.t.dgd, new Date()) : 0;
-        h += '<div class="ogrow act" data-id="' + esc(x.t.id) + '" data-goto="' + esc(x.g.code) + '">'
-          + '<input class="box" type="checkbox" aria-label="Segna come fatto" title="segna come fatto e archivia">'
-          + '<div class="ogmain"><b>' + esc(x.t.t) + '</b>'
-          + '<span>\u2192 ' + esc(x.t.dg) + (x.t.dgm ? ' \u00b7 email inviata' : ' \u00b7 email in partenza')
-          + ' \u00b7 ' + esc(x.g.code) + '</span>'
-          + rifBox(x.t) + noteBox(x.t) + '</div>'
-          + '<span class="ogwhen">' + (gg === 0 ? 'oggi' : gg + ' gg fa') + '</span></div>';
-      });
-      h += '</section>';
-    }
-    h += '<section class="og" data-n="' + attese.length + '"><h3><i class="dt warn"></i>Aspettano una risposta da te</h3>';
-    if (!attese.length) h += '<p class="ogempty">Nessuno in attesa.</p>';
-    attese.forEach(function(a){
-      var gg = days(a.data, new Date());
-      h += '<div class="ogrow u-' + esc(a.u) + '">'
-        + '<div class="ogmain"><b>' + esc(a.chi) + ' <em>' + esc(a.az) + '</em></b>'
-        + '<span>' + esc(a.chiede) + '</span>'
-        + (a.perche ? '<span class="why">' + esc(a.perche) + '</span>' : '')
-        + '</div><span class="ogwhen' + (gg > 14 ? ' bad' : '') + '">' + gg + ' gg'
-        + (a.tid ? ' <a class="gml" href="https://mail.google.com/mail/#all/' + esc(a.tid)
-           + '" target="_blank" rel="noopener" title="Apri il thread in Gmail">Gmail \u2197</a>' : '')
-        + (a.dm ? ' <a class="gml bz" href="' + drUrl(a) + '" target="_blank" rel="noopener" title="Bozza di risposta gi\u00e0 preparata: aprila, controlla e manda">bozza pronta \u2197</a>' : '')
-        + '</span></div>';
-    });
-    h += '</section></div>';
-
-    /* colonna 2 */
-    h += '<div class="og-col">';
-    h += soldiHtml(soldi);
-
-    h += '<section class="og" data-n="' + rischio.length + '"><h3><i class="dt late"></i>Date a rischio'
-      + (rischio.length > 10 ? '<em class="oghint">le prime 10 di ' + rischio.length + '</em>' : '') + '</h3>';
-    if (!rischio.length) h += '<p class="ogempty">Nessuna consegna a rischio.</p>';
-    rischio.slice(0, 10).forEach(function(c){
-      var t = c.de || c.dc, k = days(new Date(), t);
-      h += '<div class="ogrow' + (k < 0 ? ' bad' : '') + '" data-cm="' + esc(c.code) + '">'
-        + '<div class="ogmain"><b>' + esc(c.code) + ' · ' + esc(c.cliente) + '</b>'
-        + '<span>' + prog(c) + '% avanzamento · ' + esc(c.desc) + '</span></div>'
-        + '<span class="ogwhen' + (k < 0 ? ' bad' : '') + '">'
-        + (k < 0 ? 'scaduta ' + Math.abs(k) + ' gg' : 'tra ' + k + ' gg') + '</span></div>';
-    });
-    h += '</section>';
-
-    h += '<section class="og" data-n="' + silenziosi.length + '"><h3><i class="dt warn"></i>Clienti silenziosi'
-      + '<em class="oghint">commesse attive, ultima email da 60 giorni o pi\u00f9'
-      + (silenziosi.length > 10 ? ' \u00b7 le prime 10 di ' + silenziosi.length : '') + '</em></h3>';
-    if (!silenziosi.length) h += '<p class="ogempty">Nessun cliente silenzioso.</p>';
-    silenziosi.slice(0, 10).forEach(function(c){
-      var gg = days(c.last, new Date());
-      h += '<div class="ogrow' + (gg >= 120 ? ' bad' : '') + '" data-cm="' + esc(c.code) + '">'
-        + '<div class="ogmain"><b>' + esc(c.code) + ' \u00b7 ' + esc(c.cliente) + '</b>'
-        + '<span>ultima email il ' + esc(it(c.last)) + '</span></div>'
-        + '<span class="ogwhen' + (gg >= 120 ? ' bad' : '') + '">' + gg + ' gg fa</span></div>';
-    });
-    h += '</section>';
-
-    h += '<section class="og" data-n="' + prossimi.length + '"><h3><i class="dt cy"></i>Prossimi 14 giorni'
-      + (prossimi.length > 12 ? '<em class="oghint">i primi 12 di ' + prossimi.length + '</em>' : '') + '</h3>';
-    if (!prossimi.length) h += '<p class="ogempty">Calendario libero.</p>';
-    prossimi.slice(0, 12).forEach(function(e){
-      h += '<div class="ogrow"><div class="ogmain"><b>' + esc(e.tit) + '</b>'
-        + '<span>' + esc(e.sub || '') + '</span></div>'
-        + '<span class="ogwhen"><i class="dt" style="background:' + EK[e.k].c + '"></i>'
-        + esc(it(e.d)) + '</span></div>';
-    });
-    h += '</section></div></div>';
-
-    /* settimana */
-    var chiusi = tuttiTask().filter(function(x){ return x.t.d && x.t.dd && days(x.t.dd, new Date()) <= 7; });
-    var nuovi = tuttiTask().filter(function(x){ return !x.t.d && days(x.t.o, new Date()) <= 7; });
-    h += '<section class="og wide"><h3><i class="dt vi"></i>Ultimi 7 giorni</h3>'
-      + '<div class="wk"><div><b>' + chiusi.length + '</b><span>task chiusi</span></div>'
-      + '<div><b>' + nuovi.length + '</b><span>task nuovi</span></div>'
-      + '<div><b>' + tuttiTask().filter(function(x){ return !x.t.d && x.t.dg; }).length
-      + '</b><span>delegati in attesa</span></div>'
-      + '<div><b>' + (S.commesse || []).filter(function(c){
-          return c.last && days(c.last, new Date()) <= 7; }).length + '</b><span>commesse con attività</span></div>'
-      + '<div><b>' + eventi().filter(function(e){ var k = days(new Date(), e.d);
-          return k >= 0 && k <= 7; }).length + '</b><span>eventi nei prossimi 7 giorni</span></div></div>'
-      + '</section>';
     stage.innerHTML = h;
   }
+  /* R36: la scadenza della riga a 13 px in grassetto, col colore di stato sempre insieme a icona e parola */
+  function ogWhen(k, testo, allarme, tel){
+    var st = k === null || k === undefined ? '' : k < 0 ? 'bad' : (k <= 3 && allarme !== false) ? 'soon' : '';
+    /* tel: la copia che al telefono sta in testa alla riga dei dati (una riga in meno per task) */
+    if (tel) return '<em class="ogwtel' + (st ? ' ' + st : '') + '">'
+      + (st === 'bad' ? '\u26a0 ' : st === 'soon' ? '\u25f7 ' : '') + testo + '</em>';
+    return '<span class="ogwhen' + (st ? ' ' + st : '') + '">'
+      + (st === 'bad' ? '<i aria-hidden="true">⚠</i>' : st === 'soon' ? '<i aria-hidden="true">◷</i>' : '')
+      + testo + '</span>';
+  }
+  function ogOrdine(a, b){
+    if (pri(a.t) !== pri(b.t)) return pri(a.t) - pri(b.t);
+    if (a.t.due && b.t.due) return d0(a.t.due) - d0(b.t.due);
+    return a.t.due ? -1 : b.t.due ? 1 : 0;
+  }
+  function rigaAdesso(x){
+    var k = x.t.due ? days(new Date(), x.t.due) : null;
+    var w = k === null ? 'senza data' : k < 0 ? Math.abs(k) + ' gg di ritardo'
+      : k === 0 ? 'oggi' : 'tra ' + k + ' gg';
+    return '<div class="ogrow act' + (k !== null && k < 0 ? ' bad' : '') + '" data-id="' + esc(x.t.id)
+      + '" data-goto="' + esc(x.g.code) + '">'
+      + '<input class="box" type="checkbox" aria-label="Segna come fatto" title="segna come fatto e archivia">'
+      + '<div class="ogmain"><b>' + esc(x.t.t) + '</b>'
+      + '<span>' + ogWhen(k, w, null, true) + esc(x.g.code) + ' · ' + esc(x.g.name) + '</span>'
+      + rifBox(x.t) + noteBox(x.t) + '</div>'
+      + ogWhen(k, w) + '</div>';
+  }
+  /* R36: «In delega» con l'esito che registra la Posta (delega_rifiutata / delega_contestata, vedi
+     window.sbEsitiDelega) o, in mancanza, quello che la routine ha scritto nel task («⚠ … non e' compito suo») */
+  function esitoDelega(x){
+    var t = x.t, E = window.sbEsitiDelega || [], m = (S.team || []).filter(function(p){ return p.n === t.dg; })[0];
+    var cognome = String(t.dg || '').split(/[\s.]+/).filter(function(w){ return w.length > 2; })[0] || '';
+    cognome = cognome.toLowerCase();
+    var varianti = gVarianti(x.g.code), stessi = tuttiTask().filter(function(y){ return !y.t.d && y.t.dg === t.dg; }).length;
+    var best = null;
+    E.forEach(function(e){
+      if (!e) return;
+      var ok = !!(e.tid && t.tid && e.tid === t.tid);
+      if (!ok){
+        var chi = String(e.chi || '').toLowerCase();
+        var lui = (m && m.e && chi.indexOf(String(m.e).toLowerCase()) > -1) || (cognome && chi.indexOf(cognome) > -1);
+        var cm = String(e.cm || '');
+        ok = lui && (cm ? varianti.some(function(v){ return cm.indexOf(v) === 0; }) : stessi === 1);
+      }
+      if (ok && t.dgd && e.ts && String(e.ts).slice(0, 10) < t.dgd) ok = false;
+      if (ok && (!best || String(e.ts || '') > String(best.ts || ''))) best = e;
+    });
+    if (best) return {tipo: best.tipo, motivo: best.motivo || '', quando: String(best.ts || '').slice(0, 10)};
+    var r = /⚠\s*([^·]*?(?:non (?:è|e'|e’)\s+(?:un )?compito|rifiut|contest)[^·]*)/i.exec(t.s || '');
+    return r ? {tipo: /contest/i.test(r[1]) ? 'contestata' : 'rifiutata', motivo: r[1].trim(), quando: ''} : null;
+  }
+  function delegaSez(delegati){
+    var h = '<section class="og cv" id="og-delega" data-n="' + delegati.length + '"><h3><i class="dt cy"></i>In delega · la palla è loro</h3>';
+    if (!delegati.length) h += '<p class="ogempty">Nessun task in delega.</p>';
+    delegati.forEach(function(x){
+      var gg = x.t.dgd ? days(x.t.dgd, new Date()) : 0, es = esitoDelega(x);
+      h += '<div class="ogrow act' + (es ? ' bad' : '') + '" data-id="' + esc(x.t.id) + '" data-goto="' + esc(x.g.code) + '">'
+        + '<input class="box" type="checkbox" aria-label="Segna come fatto" title="segna come fatto e archivia">'
+        + '<div class="ogmain"><b>' + esc(x.t.t) + '</b>'
+        + '<span>' + ogWhen(null, 'delegato ' + (gg === 0 ? 'oggi' : gg + ' gg fa'), null, true) + '→ ' + esc(x.t.dg) + (x.t.dgm ? ' · email inviata' : ' · email in partenza')
+        + ' · ' + esc(x.g.code) + '</span>'
+        + (es ? '<span class="dlgesito"><i aria-hidden="true">⚠</i> <b>delega ' + esc(es.tipo) + '</b>'
+            + (es.quando ? ' il ' + esc(it(es.quando)) : '') + (es.motivo ? ': ' + esc(es.motivo) : '')
+            + ' · riprendila o girala a un altro</span>' : '')
+        + rifBox(x.t) + noteBox(x.t) + '</div>'
+        + '<span class="ogwhen">' + (gg === 0 ? 'oggi' : gg + ' gg fa') + '</span></div>';
+    });
+    return h + '</section>';
+  }
+  /* quando la Posta ha letto gli esiti delle deleghe, rifaccio solo «In delega» (se non ci stai scrivendo) */
+  document.addEventListener('sb-esiti-delega', function(){
+    if (view !== 'oggi') return;
+    var sec = document.getElementById('og-delega');
+    if (!sec || sec.contains(document.activeElement)) return;
+    var delegati = tuttiTask().filter(function(x){ return !x.t.d && !!x.t.dg; });
+    sec.outerHTML = delegaSez(delegati);
+    if (typeof window.sbIndice === 'function') window.sbIndice();
+  });
 
   /* ================= CALENDARIO ================= */
   var calF = 'tutti', riuAperta = false;
@@ -4921,6 +5390,7 @@ var VZ = (function(){
   function render(){
     if (view === 'board') board();
     else if (view === 'time') timeline();
+    else if (view === 'fermi') fermi();
     else if (view === 'bill') denaro();
     else if (view === 'trip') viaggi();
     else if (view === 'oggi') oggi();
@@ -5933,8 +6403,11 @@ var VZ = (function(){
     document.querySelectorAll('[data-ff]').forEach(function(b){ b.addEventListener('click', function(){ fornF = b.getAttribute('data-ff'); persone(); }); });
     var q = document.getElementById('forn-q');
     if (q) q.addEventListener('input', function(){
-      fornQ = q.value; var pos = q.selectionStart; persone();
-      var q2 = document.getElementById('forn-q'); if (q2){ q2.focus(); try{ q2.setSelectionRange(pos, pos); }catch(e){} }
+      aspettaPoi('forn-q', 200, function(){   /* R36: ridisegna dopo 200 ms di pausa, non a ogni tasto */
+        if (!q.isConnected) return;
+        fornQ = q.value; var pos = q.selectionStart; persone();
+        var q2 = document.getElementById('forn-q'); if (q2){ q2.focus(); try{ q2.setSelectionRange(pos, pos); }catch(e){} }
+      });
     });
     document.querySelectorAll('[data-ordf]').forEach(function(b){ b.addEventListener('click', function(){
       ordQ = b.getAttribute('data-ordf'); view = 'dash'; cmode = 'ordini'; setView(); render();
@@ -7433,7 +7906,7 @@ var VZ = (function(){
     }catch(e){}
     return {ts: Date.now(), view: view, cview: cview, cmode: cmode, gcm: gcm, gnd: gnd,
             perF: perF, perR: perR, pgZoom: pgZoom, pgFiltro: pgFiltro,
-            filter: filter, urgent: urgent,
+            filter: filter, fsc: fScelto, ogc: ogComp, urgent: urgent,
             prionly: prionly, dlgonly: dlgonly, query: query, qv: qn ? qn.value : '',
             y: window.scrollY || 0, anc: ancora(), sub: sottoSchede(), foc: f};
   }
@@ -7460,6 +7933,7 @@ var VZ = (function(){
        attivo» resta sempre visibile, così non può succedere di guardare un
        elenco monco senza accorgersene. */
     if (u.filter) filter = u.filter;
+    fScelto = u.fsc || ''; ogComp = !!u.ogc;
     urgent = !!u.urgent; prionly = !!u.prionly; dlgonly = !!u.dlgonly;
     query = u.query || '';
     var qn = document.getElementById('q');
@@ -7547,6 +8021,9 @@ var VZ = (function(){
      nemmeno i task creati a mano, i viaggi aggiunti e le tariffe.
      Adesso registro lo stato dei campi modificabili per intero, vuoti compresi, e il
      ripristino guarda se il campo c'e', non se e' pieno. */
+  /* R36: task a cui questa pagina ha cambiato la scadenza (t.due) o ha detto «tienilo» (t.rv): solo per
+     loro la copia locale porta due e rv, cosi' non riscrive le scadenze che mette la routine */
+  var locMod = {};
   function stash(){
     try{
       var e = {}, creati = [];
@@ -7554,6 +8031,7 @@ var VZ = (function(){
         e[t.id] = {tipo:'task', gruppo:g.code, d:!!t.d, dd:t.dd || null, n:t.n || '',
                    nq:t.nq || [], nqX:t.nqX || [], p:t.p == null ? null : t.p, dg:t.dg || null,
                    dgd:t.dgd || null, auto:!!t.auto};
+        if (locMod[t.id]){ e[t.id].due = t.due || null; e[t.id].rv = t.rv || null; }
         /* Senza tid non nasce da una mail: e' roba mia o di una nota vocale, e se la
            pubblicazione non e' passata nel documento non c'e'. La conservo intera. */
         if (!t.tid) creati.push({gruppo:g.code, task:t});
@@ -7626,6 +8104,16 @@ var VZ = (function(){
       if (ha(e, 'auto') && !!t.auto !== e.auto){
         if (e.auto) t.auto = true; else delete t.auto;
         segna('invio automatico su: ' + (t.t || t.id).slice(0, 60));
+      }
+      /* R36: scadenza messa dalla pagina («scade tra 7 gg») e «tienilo» dei task fermi */
+      if (ha(e, 'due') || ha(e, 'rv')) locMod[t.id] = 1;
+      if (ha(e, 'due') && (t.due || null) !== e.due){
+        t.due = e.due;
+        segna('scadenza su: ' + (t.t || t.id).slice(0, 60));
+      }
+      if (ha(e, 'rv') && (t.rv || null) !== e.rv){
+        if (e.rv) t.rv = e.rv; else delete t.rv;
+        segna('rivisto (tienilo) su: ' + (t.t || t.id).slice(0, 60));
       }
     }); });
 
@@ -7932,10 +8420,9 @@ var VZ = (function(){
     if (t.d){ t.dd = todayISO(); } else { delete t.dd; }
     host.classList.toggle('done', t.d);
     var mt = host.querySelector('.meta');
-    if (mt) mt.innerHTML = tagsFor(t);
-    var g = groupOf(t), card = host.closest('.card');
-    if (g && card) card.querySelector('.tally').textContent =
-      g.tasks.filter(function(x){return x.d;}).length + '/' + g.tasks.length;
+    if (mt) mt.innerHTML = prioBtn(t) + dlgCtl(t) + autoCtl(t) + tagsFor(t);
+    var g = groupOf(t), card = host.closest('.card'), tly = card && card.querySelector('.tally');
+    if (g && tly && card.hasAttribute('data-gi')) tly.textContent = tallyTxt(g);
     head(); save();
     /* R35: tolgo solo la riga (niente ridisegno di tutta la vista) e offro «Annulla» per 8 secondi */
     if (filter !== 'all' || view !== 'board') togliRiga(host);
@@ -7995,6 +8482,25 @@ var VZ = (function(){
   stage.addEventListener('click', function(e){
     if (e.target.classList && e.target.classList.contains('nok')){
       confermaNota(e.target.closest('[data-id]')); return;
+    }
+    /* R36: Delega… (pannello condiviso), azioni dei task fermi, contatore dei fermi, comprimi tutto */
+    var dp = e.target.closest('[data-dlgpop]');
+    if (dp){ dlgApri(dp); return; }
+    var fa = e.target.closest('[data-fchiudi],[data-f7],[data-ftieni]');
+    if (fa){ fermoAzione(fa); return; }
+    if (e.target.closest('[data-fermi]')){
+      view = 'fermi'; setView(); render();
+      try{ window.scrollTo(0, 0); }catch(er){}
+      return;
+    }
+    var oc = e.target.closest('[data-ogcomp]');
+    if (oc){
+      ogComp = !ogComp;
+      stage.querySelectorAll('#og-altri details.ogcm').forEach(function(d){ d.open = !ogComp; });
+      oc.setAttribute('aria-pressed', String(ogComp));
+      oc.textContent = ogComp ? 'espandi tutto' : 'comprimi tutto';
+      stashUI();
+      return;
     }
     var nd = e.target.closest('.ndel');
     if (nd){ eliminaNota(nd.closest('[data-id]'), parseInt(nd.getAttribute('data-nd'), 10)); return; }
@@ -8061,13 +8567,21 @@ var VZ = (function(){
     Object.keys(M).forEach(function(id){
       var n = document.getElementById(id);
       if (n) n.setAttribute('aria-pressed',
-        String(view === M[id] || (id === 'v-board' && view === 'time')));
+        String(view === M[id] || (id === 'v-board' && (view === 'time' || view === 'fermi'))));
     });
     /* R14: qui passa ogni cambio di schermata. Se non salvo qui, un ricaricamento
        che arriva prima del primo scorrimento mi riporta alla vista di prima. */
     if (typeof stashUI === 'function') stashUI();
   }
-  document.getElementById('v-board').addEventListener('click', function(){ view='board'; setView(); render(); });
+  /* R36: dal menu Task si entra sugli aperti, salvo un filtro scelto a mano con Tutti/Aperti/Fatti */
+  document.getElementById('v-board').addEventListener('click', function(){
+    filter = fScelto || 'open';
+    ['all','open','done'].forEach(function(x){
+      var b = document.getElementById('f-' + x);
+      if (b) b.setAttribute('aria-pressed', String(x === filter));
+    });
+    view='board'; setView(); render();
+  });
   /* R35: apre la bacheca sugli aperti o sui chiusi (riquadri di Oggi e «Da fare» della testata) */
   function apriBacheca(f){
     filter = f;
@@ -8147,7 +8661,7 @@ var VZ = (function(){
   document.getElementById('v-trip').addEventListener('click', function(){ view='trip'; setView(); render(); });
   ['all','open','done'].forEach(function(k){
     document.getElementById('f-' + k).addEventListener('click', function(){
-      filter = k;
+      filter = k; fScelto = k;
       ['all','open','done'].forEach(function(x){
         document.getElementById('f-' + x).setAttribute('aria-pressed', String(x === k)); });
       render();
@@ -8162,8 +8676,14 @@ var VZ = (function(){
   document.getElementById('f-dlg').addEventListener('click', function(){
     dlgonly = !dlgonly; this.setAttribute('aria-pressed', String(dlgonly)); render();
   });
+  /* R36: la ricerca aspetta 200 ms di pausa; se si allunga nasconde le righe senza ridisegnare (boardFiltra) */
   document.getElementById('q').addEventListener('input', function(e){
-    query = e.target.value.trim().toLowerCase(); render();
+    var v = e.target.value.trim().toLowerCase();
+    aspettaPoi('q', 200, function(){
+      if (v === query) return;
+      query = v;
+      if (boardFiltra()) stashUI(); else render();
+    });
   });
   /* R28: avvisa anche se l'editor del budget ha modifiche non ancora salvate */
   window.addEventListener('beforeunload', function(e){ if (dirty || (typeof BDG_DIRTY === 'object' && BDG_DIRTY && Object.keys(BDG_DIRTY).length)){ e.preventDefault(); e.returnValue = ''; } });
@@ -8836,6 +9356,17 @@ var VZ = (function(){
   }
   function vociDi(g) { return (g && g.voci || []).map(norm).filter(Boolean); }
   function aperta(n) { return (n.stato === 'da_evadere' || n.stato === 'da_verificare') && !n.chiusa; }
+  /* R36: gli esiti delega_rifiutata / delega_contestata dei giri dell'archivista servono anche a Oggi › In delega */
+  function pubblicaEsitiDelega() {
+    var out = [];
+    state.giorni.forEach(function (g) { vociDi(g).forEach(function (n) {
+      if (n.stato !== 'attenzione' || n.statoRaw.indexOf('deleg') !== 0) return;
+      out.push({ tid: n.threadId, chi: n.mittente, cm: n.commessa, ogg: n.oggetto, motivo: n.motivo || n.azione,
+        tipo: /contest/.test(n.statoRaw) ? 'contestata' : 'rifiutata', ts: String(n.ts || g.id || '') });
+    }); });
+    window.sbEsitiDelega = out;
+    try { document.dispatchEvent(new CustomEvent('sb-esiti-delega')); } catch (e) {}
+  }
   function chipStato(n) {
     var s = typeof n === 'string' ? n : n.stato, raw = typeof n === 'string' ? '' : n.statoRaw;
     if (s === 'evasa') return '<span class="pchip ok">✓ Evasa</span>';
@@ -9161,6 +9692,7 @@ var VZ = (function(){
     db.collection('attivita').orderBy('data', 'desc').limit(21).onSnapshot(function (qs) {
       state.giorni = qs.docs.map(function (d) { var o = Object.assign({}, d.data()); o.id = d.id; return o; });
       renderAttivita(); renderAperte(); renderKpi(); if (!container.hidden) drawChart();
+      pubblicaEsitiDelega();
     });
     db.collection('regole').limit(200).onSnapshot(function (qs) {
       state.regole = qs.docs.map(function (d) { var o = Object.assign({}, d.data()); o.id = d.id; return o; }); renderRegole();
@@ -9327,6 +9859,9 @@ var VZ = (function(){
     if(!el) return;
     var top=el.getBoundingClientRect().top+window.scrollY-barH()-10;
     window.scrollTo({top:Math.max(top,0), behavior:'smooth'});
+    /* R36: con content-visibility le sezioni lontane hanno un'altezza stimata finché non si vedono:
+       a scorrimento finito rimisuro e, se serve, correggo di colpo */
+    setTimeout(function(){ var d=el.getBoundingClientRect().top-barH()-10; if(Math.abs(d)>6) window.scrollTo({top:Math.max(window.scrollY+d,0), behavior:'instant'}); }, 900);
     el.classList.add('flash');
     setTimeout(function(){ el.classList.add('flash-off'); }, 900);
     setTimeout(function(){ el.classList.remove('flash'); el.classList.remove('flash-off'); }, 1900);
