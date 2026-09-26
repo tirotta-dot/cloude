@@ -611,7 +611,7 @@ li.trip{display:grid;grid-template-columns:126px 1fr;gap:14px;background:var(--p
   border:1px solid var(--line);border-top:1px solid var(--line);border-radius:5px;
   box-shadow:var(--shadow);padding:13px 16px;border-left:3px solid var(--c);transition:none}
 li.trip:hover{background:var(--panel)}
-li.trip .when{font-family:"IBM Plex Mono",monospace;font-size:12.5px;color:var(--ink-2);white-space:nowrap;
+li.trip .when{font-family:"IBM Plex Mono",monospace;font-size:12.5px;color:var(--ink-2);white-space:normal;
   font-variant-numeric:tabular-nums;line-height:1.5}
 li.trip .when em{display:block;font-style:normal;color:var(--muted);font-size:11px;margin-top:2px}
 li.trip h3{margin:0;font-size:15.5px;font-weight:600;color:var(--ink)}
@@ -716,11 +716,36 @@ section.og h3 .oghint{display:block;margin-top:3px;font-family:"IBM Plex Sans",s
 .cal{display:flex;flex-direction:column;gap:14px}
 .calm{background:var(--panel);border:1px solid var(--line);border-radius:6px;overflow:hidden;
   box-shadow:var(--shadow)}
-.calm.past{opacity:.62}
 .calh{padding:10px 16px;background:var(--panel-2);border-bottom:1px solid var(--line);
   font-family:"Barlow Condensed",sans-serif;font-size:13px;letter-spacing:.18em;text-transform:uppercase;
   color:var(--muted)}
 .calh b{color:var(--ink);font-weight:700}
+/* R36 calendario-da-oggi: «passato» sulla singola riga, riga compressa dei 30 giorni, mesi lontani chiusi */
+.cev.past{opacity:.72}
+.calh .caln{margin-left:10px;font-family:"IBM Plex Sans",sans-serif;font-style:normal;font-size:12px;letter-spacing:0;
+  text-transform:none;color:var(--muted)}
+details.calm > summary.calh{cursor:pointer;list-style:none;display:flex;align-items:baseline;flex-wrap:wrap;gap:0 4px}
+details.calm > summary.calh::-webkit-details-marker,details.calpass > summary::-webkit-details-marker{display:none}
+details.calm:not([open]) > summary.calh{border-bottom:none}
+i.calfr{margin-left:auto;font-style:normal;color:var(--cy);font-family:"IBM Plex Sans",sans-serif;font-size:12.5px;letter-spacing:0;text-transform:none}
+i.calfr::before{content:"apri ▸"}
+details[open] > summary i.calfr::before{content:"chiudi ▾"}
+details.calm > summary.calh:focus-visible,details.calpass > summary:focus-visible{outline:2px solid var(--cy);outline-offset:-2px}
+details.calpass > summary{cursor:pointer;list-style:none;display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;
+  padding:11px 16px;background:var(--panel-2)}
+details.calpass > summary b{font-size:14px;font-weight:600;color:var(--ink)}
+details.calpass > summary .calps{flex:1 1 100%;order:3;font-size:12.5px;color:var(--muted)}
+details.calpass > summary i.calfr{order:2}
+details.calpass > summary .calpi{order:1;font-size:12px}
+details.calpass[open] > summary{border-bottom:1px solid var(--line)}
+.calsub{padding:7px 16px;border-top:1px solid var(--line);font-family:"Barlow Condensed",sans-serif;font-size:12px;
+  letter-spacing:.18em;text-transform:uppercase;color:var(--muted)}
+.calsub:first-child{border-top:none}
+.calsub b{color:var(--ink-2)}
+.cev .ck .pill{display:inline-block;margin:0 0 0 6px;letter-spacing:0;text-transform:none;font-family:"IBM Plex Sans",sans-serif}
+#calseg .calgo{font-weight:600}
+#printarea i.calfr{display:none!important}
+@media (max-width:640px){ details.calpass > summary b{order:-1} details.calpass > summary i.calfr{order:0} }
 .cale{display:flex;flex-direction:column}
 .cev{display:grid;grid-template-columns:34px 1fr auto;gap:12px;align-items:center;
   padding:10px 16px;border-top:1px solid var(--line);border-left:3px solid var(--c)}
@@ -823,6 +848,31 @@ details.vz-caltab td.cmp{white-space:normal;min-width:240px;max-width:520px}
 .gsr b{display:block;font-size:13.5px;font-weight:500}
 .gsr span{display:block;font-size:12px;color:var(--muted);margin-top:2px}
 .gsempty{padding:14px;color:var(--muted);font-size:13px}
+/* R36 ricerca-globale: gruppi per tipo, voce attiva da tastiera, «altri N» */
+.gsg{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:8px 14px 5px;border-top:1px solid var(--line-2);
+  font-family:"Barlow Condensed",sans-serif;font-size:11.5px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-2);
+  background:var(--panel-2);position:sticky;top:0;z-index:1}
+.gsg:first-child{border-top:none}
+.gsg em{font-style:normal;font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:0;color:var(--muted)}
+.gsg + .gsr{border-top:none}
+.gsr.on{background:var(--ground-2);box-shadow:inset 3px 0 0 var(--cy)}
+.gsr{position:relative}
+.gsr > div{min-width:0}
+.gsr b,.gsr span{overflow-wrap:anywhere}
+.gsmore b{color:var(--cy)}
+.gsaltri{padding:6px 14px 10px;font-size:12px}
+/* il tipo lo dice già il gruppo: resta solo per chi legge con lo screen reader */
+.gsr .gsk{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;min-width:0}
+/* nel tema scuro il vetro della barra fa da radice del backdrop: la tendina non sfoca la pagina e va resa piena */
+html[data-sb-theme="jarvis"] .gs .gsbox{background:#0E1B2B;-webkit-backdrop-filter:none;backdrop-filter:none;
+  border-color:rgba(255,255,255,.16);box-shadow:0 18px 44px rgba(0,0,0,.6)}
+html[data-sb-theme="jarvis"] .gs .gsg{background:#13243A}
+/* lo stesso lampeggio di section.og.flash (vaiA) su righe, schede e voci aperte dalla ricerca */
+#stage .flash{outline:2px solid var(--cy);outline-offset:-2px;transition:outline-color .8s}
+#stage section.og.flash{outline-offset:3px}
+#stage .flash.flash-off{outline-color:transparent}
+#stage tr.flash > td{background:color-mix(in srgb,var(--cy) 16%,transparent);transition:background .8s}
+#stage tr.flash.flash-off > td{background:transparent}
 
 @media (max-width:820px){
   .og-grid{grid-template-columns:1fr}
@@ -1122,6 +1172,41 @@ button.vz-orrow:hover,button.vz-orrow.vz-on,button.vz-orrow:focus-visible,.vz-or
 .vz-orip p{margin:0;flex:1 1 320px;font-size:13px;color:var(--ink-2);line-height:1.5}
 .vz-orip p b{color:var(--ink);font-family:"IBM Plex Mono",monospace}
 #ord-rip .otab{border-top:1px solid var(--line)}
+/* R36 fornitori-da-segnalare: barre dei fornitori in testa a Ordini (un solo colore) e pagella chiusa sotto */
+#ord-forn,#ord-pag{margin:0 0 18px}
+.vz-of{padding:14px 16px 12px}
+.vz-ofsum{font:500 12px "IBM Plex Mono",monospace;color:var(--vz-tick)}
+.vz-ofl{display:flex;flex-direction:column}
+.vz-ofr{display:flex;align-items:center;gap:6px 12px;border-top:1px solid var(--line);padding:3px 0}
+.vz-ofr:first-child{border-top:0}
+.vz-ofb{flex:1 1 auto;min-width:0;display:grid;grid-template-columns:minmax(140px,250px) minmax(60px,1fr) 250px;gap:12px;align-items:center;
+  padding:6px 8px;border:0;border-radius:5px;background:transparent;font:inherit;color:inherit;text-align:left;cursor:pointer}
+.vz-ofb:hover,.vz-ofb.vz-on{background:color-mix(in srgb,var(--vz-ink) 7%,transparent)}
+.vz-ofb:focus-visible{outline:2px solid var(--cy);outline-offset:1px}
+.vz-ofb[aria-pressed="true"]{background:color-mix(in srgb,var(--vz-1) 12%,transparent);box-shadow:inset 3px 0 0 var(--vz-1)}
+.vz-ofk{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:500;color:var(--vz-ink)}
+.vz-ofk small{font-size:11px;font-weight:400;color:var(--vz-tick)}
+.vz-oft{display:block;min-width:0}
+.vz-oft i{display:block;height:12px;min-width:2px;background:var(--vz-1);border-radius:0 4px 4px 0}
+.vz-ofv{font:400 12px "IBM Plex Mono",monospace;color:var(--vz-tick);white-space:nowrap;font-variant-numeric:tabular-nums;text-align:right}
+.vz-ofv b{font-weight:600;color:var(--vz-ink)}
+.vz-ofr > .chip{flex:none;padding:4px 10px;font-size:12px}
+.vz-offq{margin:12px 0 0}
+details.vz-opag{padding:0}
+details.vz-opag > summary{cursor:pointer;padding:12px 16px;font-size:13px;font-weight:500;color:var(--cy)}
+details.vz-opag[open] > summary{border-bottom:1px solid var(--line)}
+details.vz-opag .otab{border:0;border-radius:0;background:transparent}
+#printarea .vz-oft i{background:var(--vz-1)!important}
+#printarea .vz-of .vz-orgrp,#printarea .vz-ofr > .chip{display:none!important}
+#printarea .vz-ofk{white-space:normal!important;overflow:visible!important}
+@media (max-width:640px){
+  .vz-of{padding:12px 12px 10px}
+  .vz-ofr{flex-wrap:wrap;padding:4px 0 8px}
+  .vz-ofb{width:100%;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"k k" "t v";row-gap:6px;padding:6px 4px}
+  .vz-ofk{grid-area:k} .vz-oft{grid-area:t} .vz-ofv{grid-area:v}
+  .vz-ofm{display:none}
+  .vz-ofr > .chip{margin-left:4px}
+}
 @media (max-width:640px){
   .vz-ofind input{font-size:16px;flex-basis:100%}
   .vz-or{padding:12px 12px 10px}
@@ -2042,6 +2127,7 @@ html,body{max-width:100%}
   :root body .bar.altro #altro-menu{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 10px 10px;border-top:1px solid var(--line)}
   :root body #altro-menu .gs{flex:1 1 100%;display:block;position:relative}
   :root body #altro-menu .gs .search{width:100%}
+  :root body #altro-menu .gsbox{width:auto;right:0;max-height:62vh}
   :root body #altro-menu > a.chip.arch,:root body #altro-menu > #chiedi:not([hidden]),:root body #altro-menu > #sbhelp{display:inline-flex}
   :root body .jump{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin-left:-14px;margin-right:-14px;padding:0 14px}
   :root body .jump::-webkit-scrollbar{display:none}
@@ -2523,6 +2609,11 @@ html[data-sb-theme="jarvis"] .otab.cf2 tr.cfst td:first-child,html[data-sb-theme
    fuori da quelli non deve uscire niente. */
 #root{overflow-x:clip;max-width:100%}
 @supports not (overflow:clip){ #root{overflow-x:hidden} }
+/* R36 (26/09/2026) rv-spazio-vuoto: la stessa proiezione allungava anche la pagina in basso (Calendario 83.455 px
+   contro 21.851 di contenuto, Ordini 35.036 contro 19.850). clip su entrambi gli assi: quello che la
+   trasformazione proietta fuori da #root non conta piu' nello scorrimento. clip (a differenza di hidden) non crea
+   un contenitore di scorrimento, quindi la barra resta incollata in alto (position:sticky). */
+@supports (overflow:clip){ #root{overflow:clip} }
 
 /* ===== R35 (26/09/2026): sistema grafico VZ, palette validata (chiaro = PDF, jarvis = schermo) ===== */
 :root{
