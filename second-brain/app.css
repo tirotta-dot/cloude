@@ -1171,6 +1171,7 @@ li.trip .tag.mono{white-space:normal;overflow-wrap:anywhere;text-align:left}
   --p-r: 12px; --p-pad: 16px;
   display: block; color: var(--ink);
 }
+#sb-posta[hidden], #sb-offerte[hidden] { display: none; }
 #sb-posta[data-accent="magenta"] { --p-accent: var(--mg); }
 #sb-posta[data-accent="verde"]   { --p-accent: var(--gr); }
 #sb-posta[data-accent="arancio"] { --p-accent: var(--or); }
@@ -1584,6 +1585,7 @@ html[data-sb-theme="jarvis"] .kpi{-webkit-backdrop-filter:blur(12px) saturate(1.
   html[data-sb-theme="jarvis"] .cm-kpis:has(> :nth-child(5)) > .cm-kpi:first-child{grid-column:span 2;display:flex;flex-direction:column;justify-content:center}
   html[data-sb-theme="jarvis"] .cm-kpis:has(> :nth-child(5)) > .cm-kpi:first-child b{font-size:40px;line-height:1}
   html[data-sb-theme="jarvis"] .cm-kpis:has(> :nth-child(5)) > .cm-kpi:first-child span{font-size:12px;margin-top:6px}
+  html[data-sb-theme="jarvis"] .cm-kpis:has(> :nth-child(6):last-child){grid-template-columns:repeat(7,minmax(0,1fr))}
   html[data-sb-theme="jarvis"] .cm-kpis:has(> :nth-child(4):last-child){grid-template-columns:repeat(5,minmax(0,1fr))}
   html[data-sb-theme="jarvis"] .cm-kpis:has(> :nth-child(4):last-child) > .cm-kpi:first-child{grid-column:span 2}
   html[data-sb-theme="jarvis"] .cm-kpis:has(> :nth-child(4):last-child) > .cm-kpi:first-child b{font-size:36px}
@@ -1755,6 +1757,8 @@ html[data-sb-theme="jarvis"] .bar-in > .seg button[aria-pressed="true"]{box-shad
 html,body{max-width:100%}
 @media (max-width:1180px){
   body{overflow-x:hidden}
+  /* R35: clip e non hidden, altrimenti il body diventa un contenitore di scorrimento e la barra non resta in alto */
+  @supports (overflow:clip){ body{overflow-x:clip} }
 }
 
 /* --- 7. sotto-menu delle schede (filtri): vanno a capo, niente tagli --- */
@@ -1765,11 +1769,72 @@ html,body{max-width:100%}
   .cm-hint{margin-left:0}
 }
 
-/* --- 8. su telefono la barra non resta incollata in alto: con le schede
-       su piu' righe occuperebbe mezzo schermo --- */
+/* --- 8. telefono (R35): testata di una riga e menu a striscia incollato in alto (44 px).
+       Prima la barra era static perché, su più righe, occupava mezzo schermo: ora è
+       una sola riga che scorre di lato; Chiusi e Aggiorna restano sempre visibili a destra.
+       Cerca, Archivio, Note vocali, Chiedi e ? stanno nel menu «⋯». --- */
+#b-altro{display:none}
+#altro-menu{display:none}
 @media (max-width:700px){
-  .bar{position:static}
+  :root body header.hero{min-height:0}
+  :root body .hero-in{padding:10px 14px 12px;gap:8px;grid-template-columns:minmax(0,1fr)}
+  :root body .hero .logo,:root body .hero .sub{display:none}
+  :root body .hero .brand{font-size:10px;letter-spacing:.2em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  :root body .hero h1{font-size:24px;margin-top:2px;line-height:1}
+  :root body .hero .kpis{flex-wrap:nowrap;overflow-x:auto;gap:6px;scrollbar-width:none;margin:0 -14px;padding:0 14px}
+  :root body .hero .kpis::-webkit-scrollbar{display:none}
+  :root body .hero .kpi{flex:0 0 auto;display:flex;align-items:baseline;gap:6px;padding:6px 10px;min-width:0;border-radius:10px}
+  :root body .hero .kpi b{font-size:17px}
+  :root body .hero .kpi span{margin:0;font-size:10px;letter-spacing:.08em;white-space:nowrap}
+  :root body .bar{position:sticky;top:0}
+  :root body .bar-in{flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;gap:6px;padding:4px 8px;height:44px;
+    scrollbar-width:none;overscroll-behavior-x:contain}
+  :root body .bar-in::-webkit-scrollbar{display:none}
+  :root body .bar-in > *{flex:0 0 auto}
+  :root body .bar-in > .seg{flex:0 0 auto;width:auto;max-width:none;flex-wrap:nowrap;overflow:visible;padding:2px;gap:2px}
+  :root body .bar-in > .seg button{flex:0 0 auto;padding:6px 11px;font-size:12px;letter-spacing:.06em;white-space:nowrap;min-height:32px}
+  :root body .bar-in .chip{padding:5px 10px;font-size:11.5px;white-space:nowrap;min-height:32px}
+  :root body .bar-in > #tfilters > .search{width:130px;flex:0 0 130px}
+  :root body .bar-in > .gs,:root body .bar-in > a.chip.arch,:root body .bar-in > #chiedi,:root body .bar-in > #sbhelp,:root body .bar-in > #status{display:none}
+  :root body #b-altro{display:inline-flex;align-items:center;justify-content:center}
+  :root body .bar-in > #f-chiusi{padding-left:8px;padding-right:8px}
+  :root body .bar-in > #f-chiusi{position:sticky;right:42px;z-index:2;order:9}
+  :root body .bar-in > #agg{position:sticky;right:0;z-index:2;order:10;margin-left:0;width:36px;padding:0;font-size:0;letter-spacing:0}
+  :root body .bar-in > #agg::before{content:"\21bb";font-size:17px;line-height:1}
+  :root body .bagg{display:none}
+  :root body .bar-in > #b-altro{order:-1;position:sticky;left:0;z-index:2;padding:2px 9px;gap:3px}
+  :root body .bar-in > #f-chiusi,:root body .bar-in > #agg,:root body .bar-in > #b-altro{--sb-bg:var(--panel);background:var(--sb-bg)}
+  html[data-sb-theme="jarvis"] body .bar-in > #f-chiusi,html[data-sb-theme="jarvis"] body .bar-in > #agg,html[data-sb-theme="jarvis"] body .bar-in > #b-altro{--sb-bg:#0B1622}
+  /* le parti incollate coprono anche il margine della striscia, così sotto non si vede il testo che scorre */
+  :root body .bar-in > #f-chiusi{box-shadow:-10px 0 8px -4px rgba(0,0,0,.55)}
+  :root body .bar-in > #agg{box-shadow:12px 0 0 0 var(--sb-bg),0 0 0 3px var(--sb-bg)}
+  :root body .bar-in > #b-altro{box-shadow:-12px 0 0 0 var(--sb-bg),10px 0 8px -4px rgba(0,0,0,.55)}
+  :root body .bar.altro #altro-menu{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 10px 10px;border-top:1px solid var(--line)}
+  :root body #altro-menu .gs{flex:1 1 100%;display:block;position:relative}
+  :root body #altro-menu .gs .search{width:100%}
+  :root body #altro-menu > a.chip.arch,:root body #altro-menu > #chiedi:not([hidden]),:root body #altro-menu > #sbhelp{display:inline-flex}
+  :root body .jump{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin-left:-14px;margin-right:-14px;padding:0 14px}
+  :root body .jump::-webkit-scrollbar{display:none}
+  :root body .jump button{flex:0 0 auto;white-space:nowrap}
+  :root body .cm-tools .seg.sub,:root body .pgtools .seg.sub{flex-wrap:nowrap;overflow-x:auto;max-width:100%;scrollbar-width:none}
+  :root body .cm-tools .seg.sub::-webkit-scrollbar{display:none}
+  :root body .cm-tools .seg.sub button{flex:0 0 auto}
 }
+/* indice «In questa pagina» sempre a portata sotto la barra al computer */
+@media (min-width:701px){
+  .jump{position:sticky;top:var(--barh,58px);z-index:20;padding:6px 0;background:linear-gradient(var(--ground) 70%,transparent)}
+}
+/* R35: chiusura di un task — la riga scivola via e compare «Annulla» per 8 secondi */
+.ogrow.via,li.via{opacity:0;transform:translateX(24px);transition:opacity .22s ease,transform .22s ease}
+#sb-ttoast{position:fixed;left:50%;bottom:18px;transform:translate(-50%,20px);z-index:80;display:flex;align-items:center;gap:14px;
+  max-width:calc(100vw - 24px);padding:10px 12px 10px 16px;border-radius:12px;background:var(--ink);color:var(--panel);
+  font:500 13.5px "IBM Plex Sans",sans-serif;box-shadow:0 10px 30px rgba(0,0,0,.35);opacity:0;pointer-events:none;transition:opacity .2s,transform .2s}
+#sb-ttoast.show{opacity:1;transform:translate(-50%,0);pointer-events:auto}
+#sb-ttoast .tt-m{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#sb-ttoast .tt-u{flex:none;border:0;border-radius:8px;padding:7px 12px;background:var(--cy);color:#06121E;font:700 12.5px "IBM Plex Sans",sans-serif;letter-spacing:.06em;text-transform:uppercase;cursor:pointer}
+html[data-sb-theme="jarvis"] #sb-ttoast{background:#E6F1FA;color:#06121E}
+.kpi.kgo{cursor:pointer}
+.kpi.kgo:hover{border-color:rgba(56,189,248,.6)}
 
 /* posta v2 — destinazioni, filtri doppi, proposte di etichette (05/09/2026) */
 #sb-posta .pchip.dest { font-weight: 500; }
