@@ -332,8 +332,10 @@ var VZ = (function(){
     + '<div class="hero-in"><div>'
     + '<div class="logo" role="img" aria-label="Preston &amp; Barbieri"></div>'
     + '<div class="brand">Preston &amp; Barbieri &middot; il cervello operativo di Danilo</div>'
+    + '<p class="hdati hdati-t" id="hdati-t"></p>'   /* R36: al telefono le date dei dati prendono il posto del marchio */
     + '<h1>Danilo <em>Second Brain</em></h1>'
-    + '<p class="sub" id="subline"></p></div>'
+    + '<p class="sub" id="subline"></p>'
+    + '<p class="hdati" id="hdati"></p></div>'
     + '<div class="kpis">'
     + '<div class="kpi"><b id="k-open">0</b><span>Da fare</span></div>'
     + '<div class="kpi hot"><b id="k-late">0</b><span>In scadenza</span></div>'
@@ -734,6 +736,7 @@ var VZ = (function(){
     document.getElementById('k-bill').textContent =
       (S.billing || []).filter(function(b){ return !b.d; }).length;
     document.getElementById('barfill').style.width = (all ? Math.round(dn * 100 / all) : 0) + '%';
+    datiTestata();
     var SUB = {oggi:'Il punto di oggi: cosa è urgente, chi aspetta una risposta, dove sono fermi i soldi.',
       cal:'La tua agenda Google più consegne, installazioni, incassi, scadenze, viaggi ed enti di controllo, su una sola linea.',
       pers:'Chi ha in mano cosa, come stanno andando i fornitori e cosa chiedono gli enti di controllo.',
@@ -752,6 +755,37 @@ var VZ = (function(){
       + 'Spunte e note restano salvate: se la scheda non può riscrivere la pagina, restano sul browser '
       + 'e risalgono da sole alla prima apertura utile. Le note vengono lette a ogni sincronizzazione. Quando deleghi un task, alla sincronizzazione successiva parte l\'email alla persona scelta a nome tuo: le basta rispondere <em>FATTO</em> e il task si chiude da solo.<br>'
       + 'I task spuntati restano visibili tre mesi, poi vengono eliminati da soli.';
+  }
+
+  /* ---------- R36: DATE DEI DATI — da quando sono fermi ordini, costi, ore, agenda ed email per commessa ----------
+     Nella testata (tutte le viste; al telefono al posto del marchio, sulla stessa riga), sopra il bottone per il
+     consulente e nella conferma dell'invio. Ambra oltre 7 giorni, rosso oltre 14, sempre con ⚠ e la parola.
+     c.last: la piu' recente fra le commesse (nessun ripiego sui task: la data si corregge alla fonte). */
+  function datiDate(){
+    var last = '', oggiD = new Date();
+    CM().forEach(function(c){ var x = String(c.last || '').slice(0, 10); if (isoOk(x) && x > last) last = x; });
+    return [['ordini', S.ordf && S.ordf.agg], ['costi', S.cons && (S.cons.agg || S.cons.docAgg)], ['ore', S.oreG && S.oreG.agg],
+            ['agenda', S.gcalup], ['email per commessa', last]].map(function(x){
+      var d = x[1] ? String(x[1]).slice(0, 10) : '', ok = isoOk(d), gg = ok ? days(d, oggiD) : null;
+      return {k: x[0], d: ok ? d : null, gg: gg, st: gg == null ? 'nd' : gg > 14 ? 'late' : gg > 7 ? 'warn' : 'ok'};
+    });
+  }
+  function ggmm(d){ return d.slice(8, 10) + '/' + d.slice(5, 7) + (d.slice(0, 4) !== String(new Date().getFullYear()) ? '/' + d.slice(2, 4) : ''); }
+  /* testo semplice (conferma dell'invio) o html: le voci vicine con lo stesso stato hanno una sola parola in fondo */
+  function datiRiga(html){
+    var L = datiDate(), out = [], i;
+    for (i = 0; i < L.length; i++){
+      var x = L[i], fine = !L[i + 1] || L[i + 1].st !== x.st, w = x.st === 'late' ? 'oltre 14 gg' : x.st === 'warn' ? 'oltre 7 gg' : x.st === 'nd' ? 'data non disponibile' : '';
+      var t = x.k + ' ' + (x.d ? ggmm(x.d) : '—');
+      if (!html){ out.push(t + (fine && w ? ' (' + w + ')' : '')); continue; }
+      out.push('<span class="hd-it ' + x.st + '" title="' + esc(x.k + ': ' + (x.d ? 'dati del ' + itFull(x.d) + ', ' + x.gg + (x.gg === 1 ? ' giorno fa' : ' giorni fa') : 'data non disponibile')) + '">' + esc(t)
+        + (fine && w && x.st !== 'nd' ? ' <b><i aria-hidden="true">⚠</i> ' + w + '</b>' : fine && w ? ' <b>' + w + '</b>' : '') + '</span>');
+    }
+    return html ? '<span class="hd-lab">Dati:</span> ' + out.join('<span class="hd-sep"> · </span>') : 'Dati: ' + out.join(' · ');
+  }
+  function datiTestata(){
+    var h = datiRiga(true);
+    ['hdati', 'hdati-t'].forEach(function(id){ var el = document.getElementById(id); if (el && el.innerHTML !== h) el.innerHTML = h; });
   }
 
   var ntAperto = false;
@@ -2186,7 +2220,10 @@ var VZ = (function(){
     return ('0'+d.getDate()).slice(-2) + '/' + ('0'+(d.getMonth()+1)).slice(-2) + '/' + d.getFullYear(); }
   /* la prima data AAAA-MM-GG dentro un testo (consegna o data del contratto scritte a parole) */
   function isoIn(s){ var m = String(s == null ? '' : s).match(/\d{4}-\d{2}-\d{2}/); return m ? m[0] : null; }
-  function eur(n){ return n == null ? '—' : new Intl.NumberFormat('it-IT').format(n) + ' €'; }
+  /* R36: un solo Intl.NumberFormat, creato una volta e riusato (prima uno nuovo a ogni chiamata: 9.653 per clic su Flusso).
+     Stesse opzioni di prima, quindi stesso testo. NF_IT1 = una cifra decimale (pctIt, oreTxt). */
+  var NF_IT = new Intl.NumberFormat('it-IT'), NF_IT1 = new Intl.NumberFormat('it-IT', {maximumFractionDigits: 1});
+  function eur(n){ return n == null ? '—' : NF_IT.format(n) + ' €'; }
   function CM(){ return S.commesse || []; }
   function CMv(){ return CM().filter(function(c){
     if (cview === 'evase') return !!c.ev;
@@ -2243,6 +2280,72 @@ var VZ = (function(){
     return '<span class="pill ' + ps.k + '"><i class="pico" aria-hidden="true">' + PAG_ICO[ps.k] + '</i> '
       + esc(ps.tag || ps.txt) + '</span>' + (ps.nota ? ' <span class="pnota ' + ps.k + '">' + esc(ps.nota) + '</span>' : '');
   }
+  /* R36: scheda commessa › Pagamenti del cliente — le rate su una linea del tempo, un pallino per rata.
+     Area in scala √ dell'importo; pieno = incassata, vuoto = attesa, anello rosso = data passata, non registrato;
+     per le rate «in arrivo» (risposta dell'amministrazione) un rombo alla data promessa. Solo qui, non in Denaro.
+     HTML con posizioni in %: i pallini restano tondi a ogni larghezza. Il clic porta alla rata nell'elenco sotto. */
+  function pagLineaHtml(c, voci){
+    var P = [], og = isoDi(today()), mx = 0, lo = og, hi = og, senza = 0, T = {inc: [0, 0], scad: [0, 0], att: [0, 0]};
+    voci.forEach(function(v, i){
+      var ps = pagStato(v), imp = +v.imp || 0, pa = v.pa || {}, k = ps.g === 'inc' ? 'inc' : ps.g === 'scad' ? 'scad' : 'att';
+      var d = k === 'inc' ? (isoOk(v.inc) ? v.inc : isoOk(v.att) ? v.att : null) : (isoOk(v.att) ? v.att : (pa.r === 'arrivo' && isoOk(pa.d) ? pa.d : null));
+      T[k][0]++; T[k][1] += imp;
+      if (!d){ senza++; return; }
+      var pr = pa.r === 'arrivo' && isoOk(pa.d) && k !== 'inc' ? pa.d : null;
+      P.push({i: i, v: v, ps: ps, k: k, imp: imp, d: d, pr: pr}); mx = Math.max(mx, imp);
+      [d, pr].forEach(function(x){ if (x){ if (x < lo) lo = x; if (x > hi) hi = x; } });
+    });
+    if (!P.length) return '';
+    var t0 = d0(lo).getTime(), span = Math.max(d0(hi).getTime() - t0, DAY * 30);
+    function X(d){ return (6 + (d0(d).getTime() - t0) / span * 88).toFixed(2); }
+    function R(imp){ return imp ? Math.max(4, 13 * Math.sqrt(imp / (mx || 1))) : 4; }
+    var h = '<div class="pgl" role="group" aria-label="' + esc('Rate del contratto di ' + c.code + ' sulla linea del tempo: frecce sinistra e destra per scorrerle, Invio per andare alla rata') + '">'
+      + '<p class="pgl-sum">' + [['inc', 'incassato'], ['scad', 'data passata, non registrato'], ['att', 'da incassare']].filter(function(x){ return T[x[0]][0]; }).map(function(x){
+          return (x[0] === 'scad' ? '<i aria-hidden="true">⚠</i> ' : '') + x[1] + ' <b>' + esc(eurR(T[x[0]][1])) + '</b> · ' + T[x[0]][0] + (T[x[0]][0] === 1 ? ' rata' : ' rate'); }).join('<span class="pgl-sep"> · </span>')
+      + (senza ? '<span class="pgl-sep"> · </span>' + senza + (senza === 1 ? ' rata senza data, fuori dalla linea' : ' rate senza data, fuori dalla linea') : '') + '</p>'
+      + '<div class="pgl-tr"><span class="pgl-ax"></span>';
+    /* mesi: al massimo 6 etichette, al primo del mese */
+    var m0 = d0(lo), nM = Math.max(1, Math.round(span / (DAY * 30.4))), passo = Math.max(1, Math.ceil(nM / 6));
+    for (var q = 0; q <= nM + 1; q += passo){
+      var md = new Date(m0.getFullYear(), m0.getMonth() + q + 1, 1), mi = isoDi(md);
+      if (mi > hi) break;
+      h += '<span class="pgl-m" style="left:' + X(mi) + '%">' + MESI_BREVI[md.getMonth()] + '-' + String(md.getFullYear()).slice(2) + '</span>';
+    }
+    h += '<span class="pgl-oggi" style="left:' + X(og) + '%"><em>oggi</em></span>';
+    P.sort(function(a, b){ return b.imp - a.imp; }).forEach(function(p, j){
+      var r = R(p.imp), stato = p.k === 'inc' ? 'incassata' + (isoOk(p.v.inc) ? ' il ' + itFull(p.v.inc) : '') : p.k === 'scad' ? 'data passata, non registrato · attesa il ' + itFull(p.v.att) : (p.ps.tag || 'attesa') + (isoOk(p.v.att) ? ' · attesa il ' + itFull(p.v.att) : '');
+      var tip = [[p.imp ? eurR(p.imp) : 'senza importo', stato, '', '']];
+      if (p.pr) tip.push([itFull(p.pr), 'in arrivo: data promessa dall’amministrazione', '', '']);
+      tip.push(['', 'clic: vai alla rata nell’elenco', '', '']);
+      if (p.pr) h += '<span class="pgl-pr" style="left:' + Math.min(X(p.d), X(p.pr)) + '%;width:' + Math.abs(X(p.pr) - X(p.d)).toFixed(2) + '%"></span>'
+        + '<span class="pgl-dm" style="left:' + X(p.pr) + '%" aria-hidden="true"></span>';
+      h += '<span class="pgl-p ' + p.k + (p.imp ? '' : ' noimp') + '" role="button" tabindex="' + (j ? -1 : 0) + '" data-pgi="' + p.i + '" style="left:' + X(p.d) + '%;top:' + (24 - r).toFixed(1) + 'px;margin-left:' + (-r).toFixed(1) + 'px;width:' + (2 * r).toFixed(1) + 'px;height:' + (2 * r).toFixed(1) + 'px"'
+        + ' aria-label="' + esc(String(p.v.c || '').slice(0, 80) + ': ' + (p.imp ? eurR(p.imp) : 'senza importo') + ', ' + stato) + '"' + VZ.tip(String(p.v.c || '').replace(/\s+/g, ' ').slice(0, 70), tip) + '></span>';
+    });
+    h += '</div><div class="pgl-leg">'
+      + (T.inc[0] ? '<span><i class="pgl-k inc"></i>incassata</span>' : '') + (T.att[0] ? '<span><i class="pgl-k att"></i>da incassare</span>' : '')
+      + (T.scad[0] ? '<span><i class="pgl-k scad"></i><b aria-hidden="true">⚠</b> data passata, non registrato</span>' : '')
+      + (P.some(function(p){ return p.pr; }) ? '<span><i class="pgl-k dm"></i>in arrivo: data promessa</span>' : '')
+      + '<span>area del pallino = importo</span></div></div>';
+    return h;
+  }
+  /* frecce tra i pallini (un solo punto di tabulazione), Invio o clic: la rata nell'elenco sotto, evidenziata */
+  function pagLineaVai(el){
+    var box = el.closest('.cmb'), li = box && box.querySelector('ul.pay > li[data-pgi="' + el.getAttribute('data-pgi') + '"]');
+    if (!li) return;
+    li.scrollIntoView({block: 'nearest', behavior: 'smooth'});
+    li.classList.remove('pgl-hl'); void li.offsetWidth; li.classList.add('pgl-hl');
+    setTimeout(function(){ li.classList.remove('pgl-hl'); }, 2200);
+  }
+  document.addEventListener('click', function(e){ var el = e.target.closest && e.target.closest('#stage .pgl-p'); if (el) pagLineaVai(el); });
+  document.addEventListener('keydown', function(e){
+    var el = e.target; if (!el.classList || !el.classList.contains('pgl-p')) return;
+    if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); pagLineaVai(el); return; }
+    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+    var l = Array.prototype.slice.call(el.parentNode.querySelectorAll('.pgl-p')).sort(function(a, b){ return parseFloat(a.style.left) - parseFloat(b.style.left); });
+    var nx = l[l.indexOf(el) + (e.key === 'ArrowRight' ? 1 : -1)]; if (!nx) return;
+    e.preventDefault(); el.setAttribute('tabindex', '-1'); nx.setAttribute('tabindex', '0'); nx.focus();
+  });
   /* R35: una sola base per «data passata, non registrati» (Oggi › Soldi da sbloccare e KPI di Denaro):
      commesse non evase, sospese comprese e dette a parte. Righe per commessa ordinate per importo. */
   function incassiFermi(){
@@ -2738,9 +2841,9 @@ var VZ = (function(){
       h += '<div class="cmb"><h4>Pagamenti del cliente</h4>';
       var voci = (c.pag && c.pag.voci) || [];
       if (voci.length){
-        h += '<ul class="plain pay">' + voci.map(function(v){
+        h += pagLineaHtml(c, voci) + '<ul class="plain pay">' + voci.map(function(v, vi){
           var ps = pagStato(v);
-          return '<li class="p-' + ps.k + '"><b>' + esc(v.c) + '</b>'
+          return '<li class="p-' + ps.k + '" data-pgi="' + vi + '"><b>' + esc(v.c) + '</b>'
             + (v.imp ? ' <span class="amt">' + esc(eur(v.imp)) + '</span>' : '')
             + ' ' + pagPill(ps)
             + (v.inc ? '<span class="srcline"> incassato il ' + esc(itFull(v.inc)) + '</span>'
@@ -3786,7 +3889,7 @@ var VZ = (function(){
   function incAzione(t){
     var x;
     if ((x = t.closest('[data-sdcm]'))){
-      incF = 'scad'; incCm = x.getAttribute('data-sdcm'); denF = 'incassi'; view = 'bill';
+      incF = 'scad'; incCm = x.getAttribute('data-sdcm'); incR = ''; denF = 'incassi'; view = 'bill';
       setView(); render(); incVai(document.getElementById('incf')); return true;
     }
     if ((x = t.closest('[data-sdblk]'))){
@@ -3795,11 +3898,15 @@ var VZ = (function(){
       incVai(id ? document.querySelector('#stage .bcard[data-id="' + selId(id) + '"]') : null); return true;
     }
     if ((x = t.closest('[data-denkpi]'))){
-      incF = 'scad'; incCm = ''; denF = 'incassi'; denaro(); incVai(document.getElementById('incf')); return true;
+      incF = 'scad'; incCm = ''; incR = ''; denF = 'incassi'; denaro(); incVai(document.getElementById('incf')); return true;
     }
     if ((x = t.closest('[data-incf]'))){
       var f = x.getAttribute('data-incf');
-      incF = (incF === f && f !== 'tutte') ? 'tutte' : f; denaro(); return true;
+      incF = (incF === f && f !== 'tutte' && !incR) ? 'tutte' : f; incR = ''; denaro(); return true;
+    }
+    if ((x = t.closest('[data-incr]'))){
+      var r = x.getAttribute('data-incr');
+      incR = incR === r ? '' : r; incF = 'scad'; denaro(); return true;
     }
     if ((x = t.closest('[data-incord]'))){ incOrd = x.getAttribute('data-incord'); denaro(); return true; }
     if ((x = t.closest('[data-inccm]'))){ incCm = ''; denaro(); return true; }
@@ -3811,11 +3918,12 @@ var VZ = (function(){
   });
   document.addEventListener('keydown', function(e){
     if ((e.key !== 'Enter' && e.key !== ' ') || !e.target.closest) return;
-    var el = e.target.closest('#stage [data-sdcm], #stage [data-sdblk], #stage [data-denkpi], #stage [data-incf]');
+    var el = e.target.closest('#stage [data-sdcm], #stage [data-sdblk], #stage [data-denkpi], #stage [data-incf], #stage [data-incr]');
     if (el && el === e.target && el.getAttribute('role') === 'button'){
       e.preventDefault(); incAzione(el); setTimeout(stashUI, 120);
-      var k = el.getAttribute('data-incf');
+      var k = el.getAttribute('data-incf'), kr = el.getAttribute('data-incr');
       if (k){ var n = document.querySelector('#stage [data-incf="' + k + '"]'); if (n) n.focus(); }
+      if (kr){ var nr = document.querySelector('#stage .incr-it[data-incr="' + kr + '"]'); if (nr) nr.focus(); }
     }
   });
   document.addEventListener('toggle', function(e){
@@ -4640,6 +4748,44 @@ var VZ = (function(){
   var incF = 'tutte', incCm = '', incOrd = 'rit';
   var INC_G = [['scad', '⚠', 'Data passata, non registrate', 'late'], ['ver', '?', 'Da verificare', 'warn'],
                ['att', '○', 'Attese', 'mute'], ['inc', '✓', 'Incassate', 'ok']];
+  /* R36: dentro la fascia «data passata» la scomposizione per giorni di ritardo (dall'ambra al rosso) fa da filtro;
+     incR vale solo per questa sessione, come incF. Il contatore delle verifiche legge v.pa (foglio del lunedi'). */
+  var incR = '', INC_R = [['r30', '0–30 gg', 30], ['r90', '31–90 gg', 90], ['r365', '91–365 gg', 365], ['r999', 'oltre 365 gg', Infinity]];
+  function incRit(gg){ for (var i = 0; i < INC_R.length; i++) if ((gg || 0) <= INC_R[i][2]) return INC_R[i][0]; return 'r999'; }
+  function incRitHtml(base){
+    var F = {}, tot = {n: 0, e: 0}, ver = {n: 0, pa: 0, e: 0}, oggiD = new Date();
+    INC_R.forEach(function(r){ F[r[0]] = {n: 0, e: 0, no: 0}; });
+    base.forEach(function(x){
+      var v = x.v, imp = +v.imp || 0;
+      /* da verificare con l'amministrazione: non incassata e con la data attesa passata; verificata se ha la risposta v.pa */
+      if (v.st !== 'incassato' && isoOk(v.att) && days(v.att, oggiD) > 0){ ver.n++; if (v.pa) ver.pa++; else ver.e += imp; }
+      if (x.ps.g !== 'scad') return;
+      var f = F[incRit(x.ps.gg)]; f.n++; f.e += imp; if (!imp) f.no++; tot.n++; tot.e += imp;
+    });
+    if (!tot.n && !ver.n) return '';
+    function nr(n){ return n + (n === 1 ? ' rata' : ' rate'); }
+    var h = '<div class="incr" role="group" aria-label="Data passata, per giorni di ritardo: scegli una fascia per filtrare le rate">'
+      + '<div class="incr-h"><span class="incl"><i aria-hidden="true">⚠</i> Data passata, per giorni di ritardo</span>'
+      + '<span class="incr-ver">' + (ver.pa ? '<b>verificate ' + ver.pa + '/' + ver.n + '</b> · ' + esc(eurS(ver.e)) + ' ancora da verificare'
+          : ver.n ? 'nessuna risposta dell’amministrazione ancora' : '') + '</span></div>';
+    if (tot.n){
+      h += '<div class="incr-bar" aria-hidden="true">';
+      INC_R.forEach(function(r, i){
+        var f = F[r[0]]; if (!f.n) return;
+        h += '<span class="incr-s' + (incR === r[0] ? ' on' : incR ? ' off' : '') + '" data-incr="' + r[0] + '" style="flex:' + Math.max(f.e, tot.e * 0.02).toFixed(0) + ' 1 0;--a:' + (i / 3).toFixed(2) + '"'
+          + VZ.tip(r[1] + ' di ritardo', [[eurR(f.e), nr(f.n) + (f.no ? ', di cui ' + f.no + ' senza importo' : ''), '', ''], ['', 'clic: solo queste rate', '', '']]) + '><i></i></span>';
+      });
+      h += '</div><div class="incr-leg">';
+      INC_R.forEach(function(r, i){
+        var f = F[r[0]];
+        h += '<div class="incr-it' + (f.n ? '' : ' vuota') + '"' + (f.n ? ' role="button" tabindex="0" data-incr="' + r[0] + '" aria-pressed="' + (incR === r[0]) + '"' : '') + ' style="--a:' + (i / 3).toFixed(2) + '">'
+          + '<span class="incr-k"><i aria-hidden="true"><i></i></i>' + r[1] + '</span><b>' + esc(eurS(f.e)) + '</b>'
+          + '<small>' + (f.n ? nr(f.n) + (f.no ? ', di cui ' + f.no + ' senza importo' : '') : 'nessuna rata') + '</small></div>';
+      });
+      h += '</div>';
+    }
+    return h + '</div>';
+  }
   function incassiHtml(inc, cm, fermi){
     if (!inc.length) return '<p class="empty">Nessun incasso tracciato.</p>';
     var oggiD = new Date(), L = inc.map(function(x){ return {c:x.c, v:x.v, ps:pagStato(x.v)}; });
@@ -4659,7 +4805,7 @@ var VZ = (function(){
         + '<b>' + eurS(t.e) + '</b>'
         + '<small>' + nr(t.n) + (t.no ? ' · ' + t.no + ' senza importo' : '') + '</small></div>';
     });
-    h += '</div>';
+    h += '</div>' + incRitHtml(base);
     var nSp = cm.filter(function(c){ return c.sp; }).length, sp = fermi.sosp.filter(function(q){ return q.scad > 0; });
     h += '<p class="srcline incbase">Base: le ' + cm.length + ' commesse non evase'
       + (nSp ? ', comprese ' + (nSp === 1 ? 'la sospesa' : 'le ' + nSp + ' sospese') : '')
@@ -4668,7 +4814,10 @@ var VZ = (function(){
       + 'spesso è solo da verificare con l’amministrazione.</p>';
     if (incCm) h += '<div class="fbar">Solo la commessa <b>' + esc(incCm) + '</b>'
       + '<button class="chip" data-inccm="1">× tutte le commesse</button></div>';
-    var vis = base.filter(function(x){ return incF === 'tutte' || x.ps.g === incF; });
+    if (incR) h += '<div class="fbar">Solo la data passata da <b>' + esc(INC_R.filter(function(r){ return r[0] === incR; })[0][1]) + '</b>'
+      + '<button class="chip" data-incr="' + incR + '">× tutte le fasce di ritardo</button></div>';
+    if (incR && incF !== 'scad') incR = '';
+    var vis = base.filter(function(x){ return (incF === 'tutte' || x.ps.g === incF) && (!incR || incRit(x.ps.gg) === incR); });
     function rit(x){
       if (x.ps.g === 'inc') return -1e7;
       if (x.ps.g === 'scad') return x.ps.gg;
@@ -4699,6 +4848,141 @@ var VZ = (function(){
         + (x.v.n ? ' — ' + esc(x.v.n) : '') + '</small></li>';
     });
     return h + '</ul>';
+  }
+
+  /* ================= R36: DENARO › FLUSSO DI CASSA — STORICO DEGLI INCASSI =================
+     Torna lo storico che R35 aveva tolto con le barre .flow, ma in colonne su mesi continui e solo fino al mese
+     corrente: incassato (al mese dell'incasso) e «data passata, non registrato» (chiave scad a parte, al mese della
+     data attesa). La parte futura resta al grafico di cassa qui sopra (csg*). Base: le commesse non evase, come i
+     numeri in testa a Denaro. Si disegna dopo stage.innerHTML alla larghezza vera, e di nuovo al resize (150 ms). */
+  var STO = null, STO_RS = null;
+  function stoDati(inc){
+    var M = {}, k0 = ymKey(today()), senza = {n: 0, e: 0}, T = {inc: 0, scad: 0, nInc: 0, nScad: 0, nNo: 0};
+    inc.forEach(function(x){
+      var v = x.v, ps = pagStato(v), imp = +v.imp || 0, pa = v.pa || {}, d = null;
+      if (ps.g === 'inc'){
+        d = isoOk(v.inc) ? v.inc : (pa.r === 'pagato' && isoOk(pa.d) ? pa.d : null);
+        if (!d){ senza.n++; senza.e += imp; return; }
+      } else if (ps.g === 'scad') d = pa.r === 'arrivo' && isoOk(pa.d) ? pa.d : (isoOk(v.att) ? v.att : null);
+      if (!d) return;
+      var k = d.slice(0, 7); if (k > k0) return;
+      var m = M[k] = M[k] || {inc: 0, scad: 0, r: []}, g = ps.g === 'inc' ? 'inc' : 'scad';
+      m[g] += imp; m.r.push({c: x.c, v: v, g: g, imp: imp});
+      if (g === 'inc'){ T.inc += imp; T.nInc++; } else { T.scad += imp; T.nScad++; if (!imp) T.nNo++; }
+    });
+    var ks = Object.keys(M).sort(); if (!ks.length) return null;
+    return {M: M, mesi: ymRange(ks[0], k0), T: T, senza: senza};
+  }
+  function stoHtml(inc){
+    STO = stoDati(inc);
+    var h = '<section class="og vz-sto-sec"><h3 class="cfh"><i class="dt cy"></i>Incassi mese per mese, fino a oggi<em class="oghint">'
+      + 'le rate dei contratti delle commesse non evase · il futuro è nel grafico di cassa qui sopra</em></h3><div class="vz-cs-body">';
+    if (!STO) return h + '<p class="ogempty">Nessuna rata incassata o con la data passata.</p></div></section>';
+    var T = STO.T;
+    h += '<div class="vz-leg vz-sto-leg"><span><i class="rc vz-sto-k1"></i>incassato <b>' + esc(eurR(T.inc)) + '</b> · ' + T.nInc + (T.nInc === 1 ? ' rata' : ' rate') + '</span>'
+      + '<span><i class="rc vz-sto-k2"></i>data passata, non registrato <b>' + esc(eurR(T.scad)) + '</b> · ' + T.nScad + (T.nScad === 1 ? ' rata' : ' rate')
+      + (T.nNo ? ', di cui ' + T.nNo + ' senza importo' : '') + '</span></div>'
+      + '<div class="vz-sto" id="vz-sto"></div>'
+      + '<p class="srcline">Incassato al mese in cui è entrato; «data passata, non registrato» al mese della data attesa dal contratto: può essere già incassato e non registrato, da verificare con l’amministrazione (Scadenzario incassi).'
+      + (STO.senza.n ? ' ' + STO.senza.n + (STO.senza.n === 1 ? ' rata risulta incassata ma senza data: ' : ' rate risultano incassate ma senza data: ') + esc(eurR(STO.senza.e)) + ' non sono nel grafico.' : '') + '</p>';
+    return h + '</div></section>';
+  }
+  /* tratteggio a righe dentro un rettangolo (come nel grafico di cassa: niente <pattern>, che nella copia del PDF si perde) */
+  function stoTrat(x0, y0, w, h, col){
+    var o = '', c, t0, t1;
+    for (c = -h; c < w; c += 6){ t0 = Math.max(0, -c); t1 = Math.min(h, w - c); if (t1 - t0 < 0.5) continue; o += 'M' + (x0 + c + t0).toFixed(1) + ',' + (y0 + h - t0).toFixed(1) + 'L' + (x0 + c + t1).toFixed(1) + ',' + (y0 + h - t1).toFixed(1); }
+    return o ? '<path d="' + o + '" stroke="' + col + '" stroke-width="1.5" fill="none"/>' : '';
+  }
+  function stoSvg(W){
+    var D = STO, mesi = D.mesi, n = mesi.length, tel = W < 640, padL = tel ? 44 : 58, padR = 10, padT = 22, padB = 34, H = tel ? 170 : 190;
+    var tot = mesi.map(function(k){ var m = D.M[k]; return m ? m.inc + m.scad : 0; }), mx = Math.max.apply(null, tot.concat([1]));
+    var st = VZ.nice(mx, 4), hi = Math.ceil(mx / st) * st;
+    function Y(v){ return padT + (H - padT - padB) * (1 - v / hi); }
+    var band = (W - padL - padR) / n, bw = Math.max(3, Math.min(24, band * 0.62)), passo = Math.max(1, Math.ceil(26 / band)), iMx = tot.indexOf(mx), annoPrec = '';
+    var s = '<svg class="vz-flow vz-sto-svg" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" role="group" aria-label="Incassi mese per mese da '
+      + esc(csgLungo(mesi[0])) + ' a ' + esc(csgLungo(mesi[n - 1])) + ': incassato e data passata non registrato. Frecce sinistra e destra per scorrere i mesi.">';
+    for (var t = 0; t <= hi + 1; t += st) s += '<line x1="' + padL + '" x2="' + (W - padR) + '" y1="' + Y(t).toFixed(1) + '" y2="' + Y(t).toFixed(1) + '" stroke="var(' + (t ? '--vz-grid' : '--vz-axis') + ')" stroke-width="1" shape-rendering="crispEdges"/>'
+      + '<text x="' + (padL - 8) + '" y="' + (Y(t) + 3.5).toFixed(1) + '" text-anchor="end" class="vz-tick">' + esc(t ? VZ.eurC(t) : '0') + '</text>';
+    mesi.forEach(function(k, i){
+      var m = D.M[k] || {inc: 0, scad: 0, r: []}, cx = padL + band * (i + 0.5), x = cx - bw / 2, y0 = Y(0), rows = [], lab = csgLungo(k);
+      /* incassato sotto (piu' certo, vicino allo zero), data passata sopra, 2 px di stacco, angoli tondi solo in cima */
+      var hI = y0 - Y(m.inc), hS = y0 - Y(m.scad);
+      if (m.inc > 0 && hI > 0.5) s += '<path d="' + VZ.barPath(x, y0 - hI, bw, hI, m.scad > 0 ? '' : 'su') + '" fill="var(--vz-in-3)"/>';
+      if (m.scad > 0 && hS > 0.5){
+        var yS = y0 - hI - hS - (m.inc > 0 ? 2 : 0);
+        s += '<path d="' + VZ.barPath(x, yS, bw, hS, 'su') + '" fill="var(--vz-in-1)"/>' + stoTrat(x, yS + 1, bw, Math.max(hS - 1, 0.5), 'var(--vz-in-3)');
+      }
+      if (i === iMx && mx > 0 && !tel) s += '<text x="' + cx.toFixed(1) + '" y="' + (Y(mx) - 6).toFixed(1) + '" text-anchor="middle" class="vz-dl">' + esc(VZ.eurC(mx)) + '</text>';
+      /* etichette dei mesi a passo fisso contando dal mese corrente (che ha sempre la sua); l'anno sotto la prima di ogni anno */
+      var mm = MESI_BREVI[+k.slice(5, 7) - 1];
+      if ((n - 1 - i) % passo === 0){
+        s += '<text x="' + cx.toFixed(1) + '" y="' + (H - padB + 15) + '" text-anchor="middle" class="vz-tick">' + mm + '</text>';
+        if (k.slice(0, 4) !== annoPrec){ annoPrec = k.slice(0, 4); s += '<text x="' + cx.toFixed(1) + '" y="' + (H - padB + 28) + '" text-anchor="middle" class="vz-tick yr">' + annoPrec + '</text>'; }
+      }
+      var nNo = m.r.filter(function(r){ return r.g === 'scad' && !r.imp; }).length;
+      rows.push(m.inc ? [eurR(m.inc), 'incassato', '--vz-in-3', 'r'] : ['—', 'nessun incasso registrato', '', '']);
+      if (m.scad) rows.push([eurR(m.scad), 'data passata, non registrato' + (nNo ? ' (più ' + nNo + (nNo === 1 ? ' rata' : ' rate') + ' senza importo)' : ''), '--vz-in-1', 'r']);
+      else if (nNo) rows.push(['senza importo', nNo + (nNo === 1 ? ' rata' : ' rate') + ' con data passata, non registrate', '--vz-in-1', 'r']);
+      m.r.slice().sort(function(a, b){ return b.imp - a.imp; }).forEach(function(r, j){
+        if (j < 8) rows.push([r.imp ? eurR(r.imp) : 'senza importo', r.c.code + ' · ' + String(r.v.c || '').replace(/\s+/g, ' ').slice(0, 48) + (r.g === 'inc' ? ' · incassata' : ' · data passata'), '', '']);
+      });
+      if (m.r.length > 8) rows.push(['', 'e altre ' + (m.r.length - 8) + ' rate: le trovi nello Scadenzario incassi', '', '']);
+      s += '<rect class="vz-hit" x="' + (padL + band * i).toFixed(1) + '" y="' + padT + '" width="' + band.toFixed(1) + '" height="' + (H - padT - padB) + '" fill="transparent" tabindex="' + (i === n - 1 ? 0 : -1) + '" role="img"'
+        + ' aria-label="' + esc(lab + ': ' + rows.slice(0, 2).map(function(r){ return r[1] + ' ' + r[0]; }).join(', ')) + '"' + VZ.tip(lab, rows) + ' data-cx="' + cx.toFixed(1) + '"/>';
+    });
+    s += '<line class="vz-xh" x1="0" x2="0" y1="' + padT + '" y2="' + (H - padB) + '" stroke="var(--vz-axis)" visibility="hidden" pointer-events="none"/>';
+    return s + '</svg>';
+  }
+  function stoDisegna(){
+    var box = document.getElementById('vz-sto'); if (!box || !STO) return;
+    var W = Math.max(Math.floor(box.clientWidth), 300);
+    if (box.getAttribute('data-w') === String(W)) return;
+    box.setAttribute('data-w', W); box.innerHTML = stoSvg(W);
+  }
+  window.addEventListener('resize', function(){ clearTimeout(STO_RS); STO_RS = setTimeout(stoDisegna, 150); });
+
+  /* ================= R36: DENARO › DA FATTURARE, SEZIONI PER STATO =================
+     Una sezione per stato, una sotto l'altra, con il conteggio (niente colonne: stx e nx sono lunghi). Card su due
+     righe: cliente e cosa, poi l'eta' con la barretta (rossa oltre 90 gg, con ⚠ e la parola; niente barretta senza
+     data). Stato e prossimo passo si vedono aprendo la card; il campo nota resta sempre visibile. Nessun totale in €:
+     gli importi sono testo («importo nella proforma»). Le voci gia' fatturate restano visibili in fondo. */
+  var FATT_ST = [['quote', 'Da quotare'], ['collect', 'Da incassare'], ['invoice', 'Da fatturare'], ['blocked', 'Bloccata']];
+  var FATT_ETA_MAX = 180;
+  function fattCardHtml(b){
+    var o = isoIn(b.o), gg = o ? days(o, new Date()) : null, vecchia = gg != null && gg > 90;
+    var eta = gg == null ? '<span class="bk-eta nd">senza data di apertura</span>'
+      : '<span class="bk-eta' + (vecchia ? ' late' : '') + '"><span class="bk-tr" aria-hidden="true"><i style="width:' + Math.max(3, Math.min(gg, FATT_ETA_MAX) / FATT_ETA_MAX * 100).toFixed(1) + '%"></i></span>'
+        + (vecchia ? '<b aria-hidden="true">⚠</b> ' : '') + 'aperta da ' + gg + ' gg' + (vecchia ? ', oltre 90' : '') + '</span>';
+    return '<article class="bcard bk' + (b.d ? ' done' : '') + '" data-id="' + esc(b.id) + '" style="--sc:var(' + bst(b.st).c + ')">'
+      + '<input class="box" type="checkbox"' + (b.d ? ' checked' : '') + ' aria-label="Fatturato">'
+      + '<div class="bmain"><details class="bk-d"><summary>'
+      + '<span class="bk-r1"><span class="bcli">' + esc(b.cli) + '</span>' + (b.ride ? '<span class="bride">' + esc(b.ride) + '</span>' : '') + '</span>'
+      + '<span class="bk-r2"><span class="bk-w">' + esc(b.w) + '</span>' + eta + '</span></summary>'
+      + '<div class="bk-body"><span class="bstat">' + bst(b.st).l + '</span>' + (b.a ? ' <span class="bamt">' + esc(b.a) + '</span>' : '')
+      + (b.stx ? '<div class="bnote">' + esc(b.stx) + '</div>' : '')
+      + (b.nx ? '<div class="bnote"><em>Prossimo passo:</em> ' + esc(b.nx) + '</div>' : '')
+      + '<span class="bsrc">' + esc(b.s || '') + (o ? ' · aperta il ' + esc(itFull(o)) : '') + '</span></div></details>'
+      + noteBox(b) + '</div></article>';
+  }
+  function fattSezioniHtml(list){
+    if (!list.length) return '<p class="empty">Niente da fatturare.</p>';
+    function eta(b){ var o = isoIn(b.o); return o ? days(o, new Date()) : -1; }
+    var aperte = list.filter(function(b){ return !b.d; }), gruppi = FATT_ST.map(function(x){ return [x[0], x[1], []]; }), altri = [];
+    aperte.forEach(function(b){ var g = gruppi.filter(function(x){ return x[0] === b.st; })[0]; (g ? g[2] : altri).push(b); });
+    if (altri.length) gruppi.push(['', 'Stato da verificare', altri]);
+    var fatte = list.filter(function(b){ return b.d; });
+    var h = '<p class="srcline bk-sum">' + aperte.length + (aperte.length === 1 ? ' voce aperta: ' : ' voci aperte: ')
+      + gruppi.filter(function(g){ return g[2].length; }).map(function(g){ return g[2].length + ' ' + (g[0] === 'blocked' && g[2].length > 1 ? 'bloccate' : g[1].toLowerCase()); }).join(' · ')
+      + (fatte.length ? ' · ' + fatte.length + ' già fatturat' + (fatte.length === 1 ? 'a' : 'e') + ', in fondo' : '')
+      + '. Apri una voce per lo stato e il prossimo passo; la barretta è l’età, rossa oltre 90 giorni.</p>';
+    gruppi.concat([['done', 'Già fatturate', fatte]]).forEach(function(g){
+      if (!g[2].length) return;
+      var c = g[0] === 'done' ? '--gr' : bst(g[0]).c;
+      h += '<section class="og bk-sec" data-n="' + g[2].length + '" style="--sc:var(' + c + ')"><h3><i class="dt ' + (g[0] === 'blocked' ? 'warn' : g[0] === 'invoice' ? 'cy' : g[0] === 'quote' ? 'vi' : 'gr') + '"></i>' + esc(g[1])
+        + ' <em class="oghint bk-n">' + g[2].length + '</em></h3><div class="bill bk-list">'
+        + g[2].slice().sort(function(a, b){ return eta(b) - eta(a); }).map(fattCardHtml).join('') + '</div></section>';
+    });
+    return h;
   }
 
   /* ================= DENARO ================= */
@@ -4811,26 +5095,10 @@ var VZ = (function(){
     if (denF === 'incassi') h += incassiHtml(inc, cm, fermi);
 
     /* R35 (26/09): le 29 barre orizzontali .flow (incassi per mese, solo i mesi con dati) sono sostituite dal grafico
-       di cassa qui sotto (cassaHtml): mesi continui, incassi e uscite dello stesso modello del Cash flow. */
+       di cassa qui sotto (cassaHtml): mesi continui, incassi e uscite dello stesso modello del Cash flow.
+       R36: sotto il grafico di cassa torna lo storico degli incassi fino al mese corrente (stoHtml). */
 
-    if (denF === 'fatture'){
-      var list = S.billing || [];
-      h += '<div class="bill">';
-      list.forEach(function(b, i){
-        h += '<article class="bcard' + (b.d ? ' done' : '') + '" data-id="' + b.id
-          + '" style="--sc:var(' + bst(b.st).c + ');animation-delay:' + (i * 25) + 'ms">'
-          + '<input class="box" type="checkbox"' + (b.d ? ' checked' : '') + ' aria-label="Fatturato">'
-          + '<div class="bmain"><div class="brow1"><span class="bcli">' + esc(b.cli) + '</span>'
-          + '<span class="bride">' + esc(b.ride) + '</span><span class="bamt">' + esc(b.a) + '</span></div>'
-          + '<p class="bwhat">' + esc(b.w) + '</p>'
-          + '<span class="bstat">' + bst(b.st).l + '</span>'
-          + '<div class="bnote">' + esc(b.stx) + '</div>'
-          + '<div class="bnote"><em>Prossimo passo:</em> ' + esc(b.nx) + '</div>'
-          + '<span class="bsrc">' + esc(b.s) + (isoIn(b.o) ? ' · aperta da ' + days(isoIn(b.o), new Date()) + ' gg' : '') + '</span>'
-          + noteBox(b) + '</div></article>';
-      });
-      h += '</div>';
-    }
+    if (denF === 'fatture') h += fattSezioniHtml(S.billing || []);
 
     if (denF === 'tar'){
       h += '<div class="vform" style="max-width:560px"><div class="grid2">'
@@ -4846,9 +5114,9 @@ var VZ = (function(){
         + 'tutti i calcoli di margine e gli alert. Cambiale qui e si aggiorna tutto.</p></div>';
     }
 
-    if (denF === 'flusso') h += cassaHtml(cm);
+    if (denF === 'flusso') h += cassaHtml(cm) + stoHtml(inc);
     stage.innerHTML = h;
-    if (denF === 'flusso') csgDisegna();
+    if (denF === 'flusso'){ csgDisegna(); stoDisegna(); }
     document.querySelectorAll('#denseg button').forEach(function(b){
       b.addEventListener('click', function(){ denF = b.getAttribute('data-den'); denaro(); });
     });
@@ -5380,8 +5648,18 @@ var VZ = (function(){
     ['ddt', 'Fornitori · merce consegnata, fattura da ricevere (DDT)', -1, 'DDT (gestionale)'],
     ['ord', 'Fornitori · ordini aperti', -1, 'Ordine (gestionale)'],
     ['fornDa', 'Fornitori · termini di pagamento da confermare', -1, 'Fattura, DDT o ordine · alla data del documento'],
-    ['stima', 'Fornitori · STIMA del budget non ancora ordinato', -1, 'Stima di Danilo (budget per nodo)']
+    ['stima', 'Fornitori · STIMA del budget non ancora ordinato', -1, 'Stima dal budget per nodo']
   ];
+  /* R36: la fonte della stima dice se il budget e' confermato da Danilo (bdg.conf) o solo proposto dalle commesse simili:
+     prima diceva sempre «Stima di Danilo», anche con nessun budget confermato. M e' una commessa (M.B) o la somma (M.bdgN). */
+  function cfStimaFonte(M){
+    if (M.B) return M.B.conf ? 'Stima confermata da Danilo (budget per nodo)' : M.B.proposta ? 'Stima proposta da commesse simili (non confermata)' : 'Stima dal budget salvato (non confermata)';
+    var b = M.bdgN || {conf: 0, prop: 0, salv: 0};
+    if (b.conf && !b.prop && !b.salv) return 'Stima confermata da Danilo (budget per nodo)';
+    if (!b.conf) return b.salv ? 'Stima proposta da commesse simili o salvata, non confermata' : 'Stima proposta da commesse simili (non confermata)';
+    return 'Stima confermata da Danilo su ' + b.conf + (b.conf === 1 ? ' commessa' : ' commesse') + ', non confermata su ' + (b.prop + b.salv);
+  }
+  function cfStimaTipo(B){ return B.conf ? 'STIMA · confermata da Danilo' : B.proposta ? 'STIMA · proposta da commesse simili, non confermata' : 'STIMA · budget salvato, non confermato'; }
   var CF_EV = [['fissa', 'data fissa', null], ['sped', 'spedizione (segue le %)', null], ['inst', 'installazione e commissioning', 'dInst'],
     ['doc', 'invio documenti', 'dDoc'], ['sald', 'inizio saldatura', 'dSald'], ['pitt', 'inizio pittura', 'dPitt'], ['acc', 'collaudo / accettazione', 'dAcc']];
   var CF_DATE = [['dInst', 'Installazione e commissioning'], ['dDoc', 'Invio documenti'], ['dSald', 'Inizio saldatura'], ['dPitt', 'Inizio pittura'], ['dAcc', 'Collaudo / accettazione']];
@@ -5393,7 +5671,7 @@ var VZ = (function(){
   function ymRange(a, b){ var out = []; if (!a || !b) return out; for (var k = a; k <= b && out.length < 120; k = ymAdd(k, 1)) out.push(k); return out; }
   function ymData(k, g){ var p = k.split('-'), fm = new Date(+p[0], +p[1], 0).getDate(); return new Date(+p[0], +p[1] - 1, Math.min(g || 15, fm)); }
   function isoOk(s){ return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s); }
-  function pctIt(p){ return new Intl.NumberFormat('it-IT', {maximumFractionDigits: 1}).format(p) + '%'; }
+  function pctIt(p){ return NF_IT1.format(p) + '%'; }
   function cfp(c){ return (c && c.cfp) || {}; }
   /* spedizione da contratto: dc, altrimenti la prima data AAAA-MM-GG del testo del contratto */
   function cfDc(c){
@@ -5479,7 +5757,7 @@ var VZ = (function(){
       if (!k) senza[row] += imp; else if (k < k0) prima[row] += imp; else { R[row][k] = (R[row][k] || 0) + imp; mesi[k] = 1; }
       x = x || {};
       det.push({cm: c.code, cli: c.cliente || '', row: row, d: d ? isoDi(d) : '', k: k, imp: imp, nodo: x.nodo || '', chi: x.chi || '', rif: x.rif || '',
-        dDoc: x.dDoc || '', term: x.term || '', nota: x.nota || '', tipo: x.tipo || CF_TIPO[row]});
+        dDoc: x.dDoc || '', term: x.term || '', nota: x.nota || '', nf: x.nf || null, tipo: x.tipo || CF_TIPO[row]});
     }
     /* incassi */
     var SP = cfSped(c); if (SP.avviso) avvisi.push(SP.avviso);
@@ -5540,10 +5818,12 @@ var VZ = (function(){
       var usaPiano = W > 0;
       if (!usaPiano){ w = {}; def.forEach(function(k){ w[k] = 1; }); W = def.length; }
       var dist = {};
+      /* R36: la nota della stima si scrive solo quando serve (Dettaglio dell'Excel e del .csv), non per ogni mese e nodo */
+      var nf = function(){ return (usaPiano ? 'piano mensile di Danilo' : 'nessun piano mensile: in parti uguali fino al mese di spedizione')
+        + ' · da spendere ' + eur(Math.round(res)) + ' su budget ' + eur(Math.round(r.ext)); };
       Object.keys(w).sort().forEach(function(k){
         var v = res * w[k] / W; if (!v) return; dist[k] = v;
-        put('stima', ymData(k, 15), v, {nodo: r.n, rif: 'Budget del nodo', nota: (usaPiano ? 'piano mensile di Danilo' : 'nessun piano mensile: in parti uguali fino al mese di spedizione')
-          + ' · da spendere ' + eur(Math.round(res)) + ' su budget ' + eur(Math.round(r.ext)), tipo: 'STIMA'});
+        put('stima', ymData(k, 15), v, {nodo: r.n, rif: 'Budget del nodo', nf: nf, tipo: cfStimaTipo(B)});
       });
       nodi.push({id: r.id, n: r.n, ext: r.ext, doc: doc, ord: ord, res: res, piano: mp, usaPiano: usaPiano, dist: dist}); stTot += res;
     });
@@ -5561,6 +5841,7 @@ var VZ = (function(){
       M.mesi.forEach(function(k){ mesi[k] = 1; });
       CF_R.forEach(function(r){ var key = r[0]; Object.keys(M.R[key]).forEach(function(k){ A.R[key][k] = (A.R[key][k] || 0) + M.R[key][k]; }); A.prima[key] += M.prima[key]; A.senza[key] += M.senza[key]; });
       A.det = A.det.concat(M.det);
+      if (M.stTot > 0.5 && M.B){ A.bdgN = A.bdgN || {conf: 0, prop: 0, salv: 0}; A.bdgN[M.B.conf ? 'conf' : M.B.proposta ? 'prop' : 'salv']++; }
     });
     var ks = Object.keys(mesi).sort(); A.mesi = ks.length ? ymRange(ks[0], ks[ks.length - 1]) : [A.k0];
     return A;
@@ -5573,7 +5854,7 @@ var VZ = (function(){
       var key = r[0], s = r[2], vals = M.mesi.map(function(k){ return Math.round(s * (M.R[key][k] || 0)); }), pr = Math.round(s * M.prima[key]), se = Math.round(s * M.senza[key]);
       var tot = pr + se; vals.forEach(function(v){ tot += v; });
       if (!Math.round(pr) && !Math.round(se) && !vals.some(function(v){ return Math.round(v); })) return;
-      righe.push({key: key, lab: r[1], fonte: r[3], s: s, prima: pr, vals: vals, senza: se, tot: tot});
+      righe.push({key: key, lab: r[1], fonte: key === 'stima' ? cfStimaFonte(M) : r[3], s: s, prima: pr, vals: vals, senza: se, tot: tot});
     });
     function somma(seg, campo, i){ var t = 0; righe.forEach(function(r){ if (r.s === seg) t += i == null ? r[campo] : r.vals[i]; }); return t; }
     var ent = M.mesi.map(function(k, i){ return somma(1, null, i); }), usc = M.mesi.map(function(k, i){ return somma(-1, null, i); });
@@ -5602,10 +5883,179 @@ var VZ = (function(){
   function cfUltimoInvio(){
     var u = null; (S.groups || []).forEach(function(g){ (g.tasks || []).forEach(function(t){ if (String(t.id || '').indexOf('mlcf') === 0 && t.dd && (!u || t.dd > u)) u = t.dd; }); }); return u;
   }
+  /* ---------- R36: «PRONTO PER IL CONSULENTE?» in testa a Commesse › Cash flow ----------
+     Le stesse commesse del file (cfAperte). Uscite future per fonte da questo mese (i documenti con data passata a parte,
+     gli ordini senza data in nota), una riga per commessa con le cose che mancano (il clic porta al riquadro giusto:
+     editor del budget o «Cash flow · date chiave e incassi» della scheda) e i 10 fornitori senza termini con piu' ordini
+     aperti. I termini dei fornitori qui non si scrivono: la pagina mostra solo il dato. */
+  var CF_EV_CORTO = {inst: 'installazione', doc: 'invio documenti', sald: 'saldatura', pitt: 'pittura', acc: 'collaudo'};
+  function cfPronto(Ms){
+    var P = {k0: ymKey(today()), fat: 0, ord: 0, forn: 0, stC: 0, stP: 0, pDoc: 0, pForn: 0, senza: 0, senzaOrd: 0, righe: [], nCm: Ms.length, codes: {}};
+    function som(o){ var t = 0; Object.keys(o).forEach(function(k){ t += o[k]; }); return t; }
+    Ms.forEach(function(M){
+      var c = M.c, B = M.B || {}, st = som(M.R.stima), it = [];
+      P.codes[c.code] = 1;
+      P.fat += som(M.R.fat) + som(M.R.ddt); P.ord += som(M.R.ord); P.forn += som(M.R.fornDa);
+      if (B.conf) P.stC += st; else P.stP += st;
+      P.pDoc += M.prima.fat + M.prima.ddt + M.prima.ord; P.pForn += M.prima.fornDa;
+      P.senzaOrd += M.senza.ord; P.senza += M.senza.fat + M.senza.ddt + M.senza.ord + M.senza.fornDa + M.senza.stima;
+      /* [ok, testo, dove porta il clic] */
+      it.push(!M.nodi.length ? [false, 'senza budget', 'bdg'] : B.conf ? [true, 'budget confermato', 'bdg'] : B.proposta ? [false, 'budget proposto', 'bdg'] : [false, 'budget salvato, da confermare', 'bdg']);
+      var n = M.rate.length, nImp = M.rate.filter(function(r){ return +r.v.imp > 0; }).length;
+      it.push(n ? [nImp === n, nImp + '/' + n + ' rate con importo', 'cf'] : [false, 'nessun piano pagamenti', 'cf']);
+      var manca = [];
+      M.rate.forEach(function(r){
+        if (r.v.inc || r.v.st === 'incassato' || !CF_EV_CORTO[r.q.a]) return;
+        var ev = CF_EV.filter(function(e){ return e[0] === r.q.a; })[0];
+        if (ev && !isoOk(cfp(c)[ev[2]]) && manca.indexOf(CF_EV_CORTO[r.q.a]) < 0) manca.push(CF_EV_CORTO[r.q.a]);
+      });
+      if (manca.length) it.push([false, (manca.length === 1 ? 'manca ' : 'mancano ') + manca.join(' e '), 'cf']);
+      if (M.rate.some(function(r){ return r.q.a === 'sped' && !r.v.inc && r.v.st !== 'incassato'; }) && !(M.SP && M.SP.tot > 0)) it.push([false, '% spedite da indicare', 'cf']);
+      var scad = som(M.R.incScad); if (scad >= 1) it.push([false, eurS(scad) + ' con data passata, non registrati', 'cf']);
+      P.righe.push({c: c, it: it, nNo: it.filter(function(x){ return !x[0]; }).length});
+    });
+    P.righe.sort(function(a, b){ return (b.nNo - a.nNo) || (a.c.code < b.c.code ? -1 : 1); });
+    P.fut = P.fat + P.ord + P.forn + P.stC + P.stP; P.pass = P.pDoc + P.pForn;
+    /* fornitori con ordini aperti sulle stesse commesse: con e senza termini di pagamento */
+    var F = {}, tot = 0, conT = 0, nF = 0, nT = 0;
+    ((S.ordf && S.ordf.voci) || []).forEach(function(v){
+      if (!P.codes[v.cm]) return;
+      var f = v.f || '(fornitore non indicato)', x = F[f] = F[f] || {f: f, e: 0, n: 0}; x.e += +v.imp || 0; x.n++;
+    });
+    P.forni = Object.keys(F).map(function(f){ var x = F[f]; x.t = !!termineDi(f); tot += x.e; nF++; if (x.t){ conT += x.e; nT++; } return x; });
+    P.fTot = {n: nF, nT: nT, pct: tot ? conT * 100 / tot : 0};
+    P.fSenza = P.forni.filter(function(x){ return !x.t && x.e > 0; }).sort(function(a, b){ return b.e - a.e; });
+    return P;
+  }
+  function cfPct(v, t){ return t ? pctIt(Math.round(v * 1000 / t) / 10) : '0%'; }
+  /* sintesi in una riga: conferma dell'invio al consulente */
+  function cfProntoTesto(P){
+    var st = P.stC + P.stP;
+    return 'Nel file: uscite future ' + eurS(P.fut) + ' da ' + ymLabel(P.k0) + ', di cui stima ' + cfPct(st, P.fut)
+      + (P.stP ? (P.stC ? ' (' + eurS(P.stP) + ' proposta dalle commesse simili, non confermata)' : ' (proposta dalle commesse simili, non confermata)') : st ? ' (confermata da Danilo)' : '')
+      + ' e termini da confermare ' + cfPct(P.forn, P.fut)
+      + (P.pass >= 1 ? '; più ' + eurS(P.pass) + ' di documenti fornitori con data passata (pagati?)' : '') + '. ' + datiRiga(false) + '.';
+  }
+  function cfProntoHtml(P){
+    var seg = [['fat', 'fatture e DDT', '--vz-out-3', P.fat], ['ord', 'ordini con termini', '--vz-out-3', P.ord], ['forn', 'termini da confermare', '--vz-out-2', P.forn],
+               ['stC', 'stima confermata da Danilo', '--vz-out-1', P.stC], ['stP', 'stima proposta, non confermata', '--vz-out-1', P.stP]];
+    function segHtml(x){
+      return '<span class="cfp-s cfp-' + x[0] + '" style="flex:' + Math.max(x[3], P.fut * 0.004).toFixed(0) + ' 1 0;--k:var(' + x[2] + ')" tabindex="-1"'
+        + VZ.tip(x[1], [[eurR(x[3]), cfPct(x[3], P.fut) + ' delle uscite future', x[2], 'r']]) + '></span>';
+    }
+    var h = '<section class="og cfp"><h3 class="cfh"><i class="dt ' + (P.stP ? 'warn' : 'cy') + '"></i>Pronto per il consulente?<em class="oghint">quanto è solido il file: '
+      + 'da dove vengono le uscite, cosa manca commessa per commessa, fornitori senza termini · le ' + P.nCm + ' commesse in corso del file</em></h3><div class="vz-cs-body">';
+    h += '<p class="cfp-t1"><b>Uscite future per fonte</b> · da ' + esc(ymLabel(P.k0)) + ' · <b class="mono">' + esc(eurR(P.fut)) + '</b></p>'
+      + '<div class="cfp-bar" role="img" aria-label="' + esc('Uscite future ' + eurR(P.fut) + ': ' + seg.filter(function(x){ return x[3] >= 1; }).map(function(x){ return x[1] + ' ' + cfPct(x[3], P.fut); }).join(', ')) + '">'
+      + seg.filter(function(x){ return x[3] >= 1; }).map(segHtml).join('') + '</div>';
+    h += '<div class="vz-leg cfp-leg">'
+      + '<span><i class="rc" style="--k:var(--vz-out-3)"></i>documenti: fatture e DDT <b>' + esc(eurS(P.fat)) + '</b> ' + cfPct(P.fat, P.fut) + ' · ordini con termini <b>' + esc(eurS(P.ord)) + '</b> ' + cfPct(P.ord, P.fut) + '</span>'
+      + '<span><i class="rc" style="--k:var(--vz-out-2)"></i>termini da confermare <b>' + esc(eurS(P.forn)) + '</b> ' + cfPct(P.forn, P.fut) + '</span>'
+      + '<span><i class="rc" style="--k:var(--vz-out-1)"></i>stima dal budget: confermata da Danilo <b>' + esc(eurS(P.stC)) + '</b>' + (P.stC ? ' ' + cfPct(P.stC, P.fut) : '')
+      + ' · <i class="cfp-w" aria-hidden="true">⚠</i> proposta, non confermata <b>' + esc(eurS(P.stP)) + '</b> ' + cfPct(P.stP, P.fut) + '</span></div>';
+    if (P.pass >= 1){
+      var w = Math.max(P.pass / Math.max(P.fut, 1) * 100, 0.6);
+      h += '<div class="cfp-pass"><span class="cfp-pbar" style="width:' + Math.min(w, 100).toFixed(2) + '%"' + VZ.tip('Documenti con data passata', [[eurR(P.pForn), 'termini da confermare', '', ''], [eurR(P.pDoc), 'fatture, DDT e ordini', '', '']]) + ' tabindex="-1"></span>'
+        + '<span class="cfp-ptx"><i aria-hidden="true">?</i> <b>documenti con data passata: pagati?</b> ' + esc(eurS(P.pass)) + ' · ' + esc(eurS(P.pForn)) + ' con termini da confermare, ' + esc(eurR(P.pDoc)) + ' di fatture e DDT · prima di ' + esc(ymLabel(P.k0)) + ', fuori da questa barra e dal progressivo</span></div>';
+    }
+    if (P.senza >= 1) h += '<p class="srcline cfp-nota">A parte anche ' + esc(eurR(P.senza)) + (Math.round(P.senza) === Math.round(P.senzaOrd) ? ' di ordini senza data di consegna' : ' senza data (di cui ' + esc(eurR(P.senzaOrd)) + ' di ordini senza data di consegna)') + ': nel file sono nella colonna «Senza data».</p>';
+    /* una riga per commessa */
+    var nOk = P.righe.filter(function(r){ return !r.nNo; }).length;
+    h += '<h4 class="cfp-h4">Commessa per commessa <small>' + (P.righe.length - nOk) + ' con qualcosa da completare' + (nOk ? ' · ' + nOk + ' complete' : '') + ' · clic: vai al riquadro da completare</small></h4><div class="cfp-list">';
+    P.righe.forEach(function(r){
+      var code = esc(r.c.code);
+      h += '<div class="cfp-r"><span class="cfp-cm" role="button" tabindex="0" data-cfgo="cf" data-cfcm="' + code + '" title="' + esc(r.c.cliente || '') + '">' + code + '</span><span class="cfp-its">'
+        + r.it.map(function(x){ return '<span class="cfp-i ' + (x[0] ? 'ok' : 'no') + '" role="button" tabindex="0" data-cfgo="' + x[2] + '" data-cfcm="' + code + '"><i aria-hidden="true">' + (x[0] ? '✓' : '⚠') + '</i> ' + esc(x[1]) + '</span>'; }).join('<span class="cfp-sep"> · </span>')
+        + '</span></div>';
+    });
+    h += '</div>';
+    /* fornitori senza termini */
+    var top = P.fSenza.slice(0, 10), mx = top.length ? top[0].e : 1;
+    h += '<h4 class="cfp-h4">Fornitori senza termini di pagamento <small>i ' + top.length + ' con più ordini aperti · termini noti per ' + P.fTot.nT + ' fornitori su ' + P.fTot.n
+      + ' con ordini aperti (' + pctIt(Math.round(P.fTot.pct * 10) / 10) + ' degli €) · senza termini, i loro importi vanno in «termini da confermare»</small></h4>';
+    if (top.length){
+      h += '<div class="vz-hbar cfp-f" role="list" aria-label="Fornitori senza termini di pagamento, per ordini aperti">';
+      top.forEach(function(x){
+        h += '<div class="vz-hrow" role="listitem" tabindex="0"' + VZ.tip(x.f, [[eurR(x.e), 'ordini aperti sulle commesse in corso', '--vz-out-2', 'r'], [String(x.n), x.n === 1 ? 'riga d’ordine' : 'righe d’ordine', '', ''], ['', 'termini di pagamento non noti', '', '']])
+          + ' aria-label="' + esc(x.f + ': ' + eurR(x.e) + ' di ordini aperti, ' + x.n + (x.n === 1 ? ' riga' : ' righe')) + '">'
+          + '<span class="vz-hk">' + esc(x.f) + '<small>' + x.n + (x.n === 1 ? ' riga' : ' righe') + '</small></span>'
+          + '<span class="vz-htr" aria-hidden="true"><i style="width:' + Math.max(x.e / mx * 100, 0.6).toFixed(2) + '%"></i></span>'
+          + '<span class="vz-hv">' + esc(VZ.eurC(x.e)) + '</span></div>';
+      });
+      h += '</div>';
+    }
+    return h + '</div></section>';
+  }
+  /* il clic su una riga porta al riquadro da completare: editor del budget o «Cash flow · date chiave e incassi» */
+  function cfVai(dove, code){
+    cmode = dove === 'bdg' ? 'bdg' : 'schede'; apriRis({cm: code});
+    setTimeout(function(){
+      var el = dove === 'bdg' ? document.getElementById('bdg-' + code) : document.querySelector('#stage [data-cfz="' + selId(code) + '"]');
+      if (!el) return;
+      incVai(el); el.classList.add('cfp-hl'); setTimeout(function(){ el.classList.remove('cfp-hl'); }, 2400);
+    }, 150);
+  }
+  document.addEventListener('click', function(e){ var t = e.target.closest && e.target.closest('#stage [data-cfgo]'); if (t) cfVai(t.getAttribute('data-cfgo'), t.getAttribute('data-cfcm')); });
+  document.addEventListener('keydown', function(e){
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    var t = e.target; if (!t.getAttribute || !t.getAttribute('data-cfgo') || !t.closest('#stage')) return;
+    e.preventDefault(); cfVai(t.getAttribute('data-cfgo'), t.getAttribute('data-cfcm'));
+  });
+
+  /* ---------- R36: «Aggiorna dal file su Drive» — una richiesta al giorno nel database (collezione «richieste») ----------
+     {tipo:'gestionale', stato:'aperta', creata}: la routine rilegge il file del gestionale dalla cartella Drive e aggiorna
+     ordini, costi e ore. Id del documento = gestionale-AAAA-MM-GG (il giorno di Danilo): al massimo una al giorno;
+     se c'e' gia' quella di oggi la pagina mostra il suo stato invece del bottone. */
+  var GEST = null, GEST_SIG = '';
+  function gestDiOggi(){ return GEST && GEST.creata && isoDi(new Date(GEST.creata)) === isoOggi() ? GEST : null; }
+  function gestOra(x){ var d = new Date(x); return isNaN(d) ? '' : ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); }
+  function gestHtml(){
+    var r = gestDiOggi();
+    if (!r) return '<span class="gest" id="gest-agg"><button class="chip" type="button" data-gest="1" title="La routine rilegge il file del gestionale nella cartella Drive e aggiorna ordini, costi e ore: una richiesta al giorno">Aggiorna dal file su Drive</button><span class="gest-st"></span></span>';
+    var st = r.stato || 'aperta', k = st === 'fatta' ? 'ok' : st === 'errore' ? 'late' : 'warn';
+    var t = st === 'fatta' ? '✓ aggiornato oggi dal file su Drive' + (r.fatta ? ' alle ' + gestOra(r.fatta) : '') + (r.esito ? ': ' + r.esito : '')
+      : st === 'errore' ? '⚠ aggiornamento dal file su Drive non riuscito' + (r.errore ? ': ' + r.errore : '') + ' · si può richiedere di nuovo domani'
+      : st === 'in corso' ? '○ aggiornamento dal file su Drive in corso'
+      : '○ aggiornamento dal file su Drive richiesto oggi alle ' + gestOra(r.creata) + ': parte al prossimo giro della routine (8 o 13)';
+    return '<span class="gest ' + k + '" id="gest-agg">' + esc(t) + '</span>';
+  }
+  function gestAggiorna(){ var el = document.getElementById('gest-agg'); if (el) el.outerHTML = gestHtml(); }
+  function gestRichiedi(b){
+    var cl = (window.claude && window.claude.use) ? window.claude : null, st = b.parentNode.querySelector('.gest-st'), id = 'gestionale-' + isoOggi();
+    if (!cl){ st.textContent = 'database non disponibile in questa vista'; return; }
+    b.disabled = true; st.textContent = 'registro la richiesta…';
+    cl.use('db').then(function(db){
+      if (!db) throw {code: 'db'};
+      var ref = db.doc('richieste/' + id);
+      return ref.get().then(function(x){
+        if (x && x.exists){ GEST = Object.assign({}, x.data(), {id: id}); gestAggiorna(); return; }
+        var o = {tipo: 'gestionale', stato: 'aperta', creata: new Date().toISOString(),
+          contesto: 'Creata da Commesse › Cash flow: rileggere il file del gestionale nella cartella Drive e aggiornare ordini, costi e ore'};
+        return ref.set(o).then(function(){ GEST = Object.assign({}, o, {id: id}); gestAggiorna(); });
+      });
+    }).catch(function(e){ b.disabled = false; st.textContent = e && e.code === 'db' ? 'database non disponibile in questa vista' : 'non sono riuscito a registrarla, riprova'; });
+  }
+  document.addEventListener('click', function(e){ var b = e.target.closest && e.target.closest('#stage [data-gest]'); if (b && !b.disabled) gestRichiedi(b); });
+  function gestRichInit(){
+    var cl = (window.claude && window.claude.use) ? window.claude : null; if (!cl) return;
+    cl.use('db').then(function(db){
+      if (!db) return;
+      try {
+        db.collection('richieste').orderBy('creata', 'desc').limit(60).onSnapshot(function(qs){
+          var g = null;
+          qs.docs.forEach(function(d){ var o = d.data() || {}; if (!g && o.tipo === 'gestionale'){ g = Object.assign({}, o); g.id = d.id; } });
+          var sig = JSON.stringify(g); if (sig !== GEST_SIG){ GEST_SIG = sig; GEST = g; gestAggiorna(); }
+        });
+      } catch(e){}
+    }).catch(function(){});
+  }
+  gestRichInit();
+
   function cfBarHtml(n){
     var u = cfUltimoInvio(), C = cfConsulente();
     return '<div class="cfbar"><div class="cfbar-t"><b>File per il consulente</b> · le ' + n + ' commesse in corso: riepilogo, un foglio per commessa, dettaglio riga per riga e legenda. Per ogni cifra c\'è la fonte: <b>contratto</b>, <b>fattura</b>, <b>DDT</b>, <b>ordine</b> o <b>stima</b>.'
       + '<span class="osub">' + (u ? 'Ultimo invio a ' + esc(C.nome) + ': ' + esc(itFull(u)) : 'Mai inviato da qui') + ' · destinatario ' + esc(C.email) + '</span></div>'
+      + '<div class="cfdati"><span class="cfhd">' + datiRiga(true) + '</span>' + gestHtml() + '</div>'
       + '<div class="cfbtns"><button class="btn" data-cfx="orsini">Invia a ' + esc(C.nome) + '</button><button class="chip" data-cfx="me">Mandalo a me per controllo</button><button class="chip" data-cfx="csv">Scarica .csv</button></div>'
       + '<div class="cfconf" id="cfconf" hidden></div><div class="srcline" id="cfmsg"></div></div>';
   }
@@ -5613,11 +6063,13 @@ var VZ = (function(){
   function cashHtml(list, nsel){
     var aperte = list.filter(function(c){ return !c.ev && !c.sp && !cmAltro(c); }), h = '';
     CF_CACHE = {}; CSG = {};
+    /* R36: in testa «Pronto per il consulente?» sulle commesse del file, poi il bottone per il consulente e la spiegazione */
+    var MsF = cfAperte().map(function(c){ var M = cfModello(c); CF_CACHE[c.code] = M; return M; });
+    h += cfProntoHtml(cfPronto(MsF)) + cfBarHtml(MsF.length);
     h += '<div class="ore-wait" style="margin-bottom:14px"><b>Cash flow delle commesse in corso.</b> <b>Incassi</b>: le rate del contratto, ognuna al suo evento — anticipo, spedizione (con le % che spedisci mese per mese), installazione e commissioning, invio documenti, lavorazioni, collaudo — che imposti nella <b>scheda della commessa</b>, riquadro «Cash flow · date chiave e incassi». '
       + '<b>Uscite</b>: fatture e DDT dal gestionale e ordini aperti, alla data in cui paghi (documento o consegna più i termini del fornitore), più la <b>stima</b> del budget non ancora ordinato, sui mesi che scrivi in <b>Budget → Piano mensile della spesa</b>: quando arriva un ordine la stima del nodo cala da sola. Solo costi esterni, niente ore.</div>';
-    h += cfBarHtml(cfAperte().length);
     if (!aperte.length) return h + '<p class="ogempty">Nessuna commessa in corso in questa vista.</p>';
-    var Ms = aperte.map(cfModello); Ms.forEach(function(M){ CF_CACHE[M.c.code] = M; });
+    var Ms = aperte.map(function(c){ return CF_CACHE[c.code] || cfModello(c); }); Ms.forEach(function(M){ CF_CACHE[M.c.code] = M; });
     if (!nsel){
       var A = cfAggrega(Ms); CF_CACHE['*'] = A;
       h += '<section class="og"><h3 class="cfh"><i class="dt cy"></i>Tutte le commesse in vista<em class="oghint">' + Ms.length + ' commesse · incassi più, uscite meno, mese per mese</em>'
@@ -5675,7 +6127,7 @@ var VZ = (function(){
     var rows = [['Commessa', 'Cliente', 'Entrata/Uscita', 'Voce', 'Fonte', 'Nodo', 'Controparte', 'Riferimento', 'Data documento', 'Termini di pagamento', 'Data prevista', 'Mese', 'Importo', 'Note']];
     det.slice().sort(function(a, b){ return a.cm < b.cm ? -1 : a.cm > b.cm ? 1 : (a.d || '9') < (b.d || '9') ? -1 : (a.d || '9') > (b.d || '9') ? 1 : 0; }).forEach(function(x){
       var r = CF_R.filter(function(y){ return y[0] === x.row; })[0] || ['', x.row, -1];
-      rows.push([x.cm, x.cli, r[2] > 0 ? 'Entrata' : 'Uscita', r[1], x.tipo, x.nodo, x.chi, x.rif, x.dDoc ? itFull(x.dDoc) : '', x.term, x.d ? itFull(x.d) : '', x.k ? ymLabel(x.k) : 'senza data', Math.round(r[2] * x.imp * 100) / 100, x.nota]);
+      rows.push([x.cm, x.cli, r[2] > 0 ? 'Entrata' : 'Uscita', r[1], x.tipo, x.nodo, x.chi, x.rif, x.dDoc ? itFull(x.dDoc) : '', x.term, x.d ? itFull(x.d) : '', x.k ? ymLabel(x.k) : 'senza data', Math.round(r[2] * x.imp * 100) / 100, x.nota || (x.nf ? x.nf() : '')]);
     });
     return rows;
   }
@@ -5705,7 +6157,9 @@ var VZ = (function(){
     if (tipo === 'me'){ cfInvia(ME_EMAIL, 'te', true); return; }
     var C = cfConsulente(), box = document.getElementById('cfconf'); if (!box) return;
     box.hidden = false;
-    box.innerHTML = 'Invio adesso dal tuo Gmail a <b>' + esc(C.titolo + ' ' + C.nome) + '</b> &lt;' + esc(C.email) + '&gt; il file <b>' + esc(cfNomeFile()) + '</b> con le ' + cfAperte().length + ' commesse in corso. Confermi?'
+    var sint = ''; try { sint = cfProntoTesto(cfPronto(cfAperte().map(function(c){ return CF_CACHE[c.code] || cfModello(c); }))); } catch(e){}
+    box.innerHTML = 'Invio adesso dal tuo Gmail a <b>' + esc(C.titolo + ' ' + C.nome) + '</b> &lt;' + esc(C.email) + '&gt; il file <b>' + esc(cfNomeFile()) + '</b> con le ' + cfAperte().length + ' commesse in corso.'
+      + (sint ? '<span class="cfsint">' + esc(sint) + '</span>' : '') + ' Confermi?'
       + ' <button class="btn" id="cf-si">Sì, invia adesso</button> <button class="chip" id="cf-no">Annulla</button>';
     document.getElementById('cf-no').addEventListener('click', function(){ box.hidden = true; box.innerHTML = ''; });
     document.getElementById('cf-si').addEventListener('click', function(){ box.hidden = true; box.innerHTML = ''; cfInvia(C.email, C.titolo + ' ' + C.nome, false); });
@@ -5713,7 +6167,10 @@ var VZ = (function(){
   var ME_EMAIL = 'tirotta@prestonbarbieri.com', CF_INVIO = false;
   function cfNomeFile(){ return isoDi(today()) + ' Cash flow commesse in corso.xlsx'; }
   function cfCorpo(Ms, controllo){
-    var C = cfConsulente(), A = cfAggrega(Ms), da = ymLabel(A.mesi[0]), a = ymLabel(A.mesi[A.mesi.length - 1]);
+    var C = cfConsulente(), A = cfAggrega(Ms), da = ymLabel(A.mesi[0]), a = ymLabel(A.mesi[A.mesi.length - 1]), bN = A.bdgN || {conf: 0, prop: 0, salv: 0};
+    var stTxt = bN.conf && !bN.prop && !bN.salv ? 'secondo il budget che ho confermato'
+      : bN.conf ? 'secondo il budget che ho confermato su ' + bN.conf + (bN.conf === 1 ? ' commessa' : ' commesse') + '; sulle altre ' + (bN.prop + bN.salv) + ' il budget è proposto dalle commesse simili già chiuse e non è ancora confermato'
+      : 'con un budget proposto dalle commesse simili già chiuse, non ancora confermato da me';
     return '— Messaggio preparato dal Danilo Second Brain per conto di Danilo Tirotta —\n\n'
       + (controllo ? '[Copia di controllo: questa è la mail che parte verso ' + C.titolo + ' ' + C.nome + ' con il bottone «Invia».]\n\n' : '')
       + 'Buongiorno ' + C.titolo + ' ' + C.nome + ',\n\n'
@@ -5727,7 +6184,7 @@ var VZ = (function(){
       + '- CONTRATTO: rate di incasso dal piano pagamenti del contratto, alla data dell\'evento (anticipo, spedizione, installazione e commissioning, invio documenti, collaudo) più i giorni di pagamento;\n'
       + '- FATTURA e DDT: costi già registrati nel gestionale, alla data di pagamento prevista con i termini del fornitore;\n'
       + '- ORDINE: ordini fornitore aperti, alla data di consegna prevista più i termini del fornitore;\n'
-      + '- STIMA: la parte del budget non ancora ordinata, distribuita sui mesi secondo le mie previsioni; si riduce da sola man mano che emettiamo gli ordini.\n\n'
+      + '- STIMA: la parte del budget non ancora ordinata, distribuita sui mesi, ' + stTxt + '; si riduce da sola man mano che emettiamo gli ordini.\n\n'
       + 'Sono esclusi i costi interni (ore di ufficio e di officina). La riga «termini da confermare» raccoglie costi documentati per cui non abbiamo ancora i termini di pagamento del fornitore: sono messi alla data del documento.\n\n'
       + 'Cordiali saluti,\nDanilo Tirotta, Program Manager, Preston & Barbieri Srl';
   }
@@ -5887,7 +6344,7 @@ var VZ = (function(){
       var agg = [(S.cons && S.cons.docAgg) ? 'fatture e DDT al ' + itFull(S.cons.docAgg) : null, (S.ordf && S.ordf.agg) ? 'ordini aperti al ' + itFull(S.ordf.agg) : null].filter(Boolean).join(', ');
       var R = [[{v: 'Cash flow commesse in corso — Preston & Barbieri Srl', s: 3}],
         ['Aggiornato al ' + itFull(oggi) + ' · ' + Ms.length + ' commesse in corso · importi in euro · entrate positive, uscite negative · solo costi esterni (ore interne escluse)'],
-        [{v: 'Gestionale: ' + (agg || 'date di estrazione non disponibili') + '. Colori: verde = contratto, grigio = documenti del gestionale (fattura, DDT, ordine), giallo = stima di Danilo.', s: 13}], []];
+        [{v: 'Gestionale: ' + (agg || 'date di estrazione non disponibili') + '. Colori: verde = contratto, grigio = documenti del gestionale (fattura, DDT, ordine), giallo = stima dal budget (la colonna Fonte dice se è confermata da Danilo o proposta dalle commesse simili).', s: 13}], []];
       R = R.concat(xTabella(cfRighe(A)));
       R.push([], [{v: 'Saldo mensile per commessa', s: 3}]);
       var T0 = cfTab(A), hc = ['Commessa', 'Cliente'].concat(T0.haPrima ? ['Prima di ' + ymLabel(A.k0)] : [], A.mesi.map(ymLabel), T0.haSenza ? ['Senza data'] : [], ['Totale', 'Di cui stima']);
@@ -5911,7 +6368,7 @@ var VZ = (function(){
         ['ORDINE', {v: 'Ordini fornitore aperti: data di consegna prevista più i termini del fornitore. Se la consegna prevista è già passata, si considera da oggi.', s: 10}],
         ['Incassi scaduti da verificare', {v: 'Rate con data già passata per cui nel Second Brain non è registrato l\'incasso: possono essere già incassate (registrazione mancante) o davvero in ritardo. Sono nel mese corrente, in una riga a parte: da verificare con l\'amministrazione prima di contarle.', s: 10}],
         ['Termini da confermare', {v: 'Costi documentati (fattura, DDT o ordine) di fornitori di cui non conosciamo ancora i termini di pagamento: sono messi alla data del documento, in una riga separata.', s: 10}],
-        ['STIMA', {v: 'Budget per nodo (costi esterni) meno quanto già in fatture, DDT e ordini aperti dello stesso nodo, distribuito sui mesi secondo il piano di spesa di Danilo; senza piano, in parti uguali fino al mese di spedizione. Quando si emette un ordine la stima di quel nodo si riduce da sola.', s: 10}],
+        ['STIMA', {v: 'Budget per nodo (costi esterni) meno quanto già in fatture, DDT e ordini aperti dello stesso nodo, distribuito sui mesi secondo il piano di spesa di Danilo; senza piano, in parti uguali fino al mese di spedizione. Quando si emette un ordine la stima di quel nodo si riduce da sola. Il budget è «confermato da Danilo» solo dopo la sua conferma in Commesse › Budget; altrimenti è proposto dalle commesse simili già chiuse, e la colonna Fonte lo dice.', s: 10}],
         [], [{v: 'Note', s: 1}, {v: '', s: 1}],
         ['Periodo', {v: 'Da ' + ymLabel(A.mesi[0]) + ' a ' + ymLabel(A.mesi[n - 1]) + ': per ogni commessa almeno fino a 4 mesi dopo la spedizione da contratto.', s: 10}],
         ['Esclusi', {v: 'Costi interni (ore di ufficio e di officina), IVA, costi generali non attribuiti a commessa.' + (sosp.length ? ' Commesse sospese, non incluse: ' + sosp.join(', ') + '.' : ''), s: 10}],
@@ -7092,7 +7549,7 @@ var VZ = (function(){
   }
   function consNodi(code){ var c = consCm(code); return c ? Object.keys(c.nd || {}) : []; }
   function nodoLabel(nd){ return nd === '-' ? 'Senza nodo' : titolo(nd); }
-  function oreTxt(h){ return new Intl.NumberFormat('it-IT', {maximumFractionDigits: 1}).format(h) + ' h'; }
+  function oreTxt(h){ return NF_IT1.format(h) + ' h'; }
   function pctTxt(p){ return p == null ? '—' : (p > 1 ? '+' : '') + Math.round((p - 1) * 100) + '%'; }
   function eurR(n){ return n == null ? '—' : eur(Math.round(n)); }
   function bdgDaConfermare(l){ return (l || CM()).filter(function(c){ return !c.ev && !c.sp && !(c.bdg && c.bdg.conf); }); }

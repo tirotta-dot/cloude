@@ -56,6 +56,20 @@ h1{font-family:"Barlow Condensed",Impact,sans-serif;font-weight:700;font-size:cl
   text-shadow:0 6px 40px rgba(0,0,0,.6)}
 h1 em{font-style:normal;color:var(--h-cy)}
 .sub{color:var(--h-ink2);font-size:14px;margin-top:12px;max-width:46ch}
+/* R36: date dei dati nella testata (ambra oltre 7 gg, rosso oltre 14, sempre con ⚠ e parola) */
+.hdati{margin:7px 0 0;font:500 11px/1.5 "IBM Plex Mono",monospace;color:var(--h-ink2)}
+.hdati-t{display:none}
+.hdati .hd-lab{color:var(--h-cy);font-weight:600}
+.hdati .hd-it{white-space:nowrap}
+.hdati .hd-it.warn{color:var(--warn)} .hdati .hd-it.late{color:var(--late)}
+.hdati .hd-it b{font-weight:600} .hdati .hd-it i{font-style:normal}
+.hdati .hd-sep{color:var(--h-ink2);opacity:.6}
+@media (max-width:700px){
+  /* al telefono la riga prende il posto del marchio, alla stessa altezza: scorre di lato come i riquadri */
+  :root body .hero .brand,:root body .hero #hdati{display:none}
+  :root body .hero .hdati-t{display:block;margin:0 -14px;padding:0 14px;font-size:10px;line-height:13px;white-space:nowrap;overflow-x:auto;scrollbar-width:none}
+  :root body .hero .hdati-t::-webkit-scrollbar{display:none}
+}
 .kpis{display:flex;gap:10px}
 .kpi{background:rgba(12,18,26,.60);border:1px solid rgba(255,255,255,.18);backdrop-filter:blur(9px);
   padding:12px 16px;min-width:96px;border-radius:3px}
@@ -214,6 +228,46 @@ li.done .txt{color:var(--muted);text-decoration:line-through}
 .bnote{margin-top:8px;font-size:13.5px;color:var(--ink-2)}
 .bnote em{font-style:normal;color:var(--sc);font-weight:600}
 .bsrc{display:block;margin-top:7px;font-size:11.5px;color:var(--muted)}
+/* R36: Da fatturare in sezioni per stato; card compatte su due righe (cliente e cosa, poi l'eta'), si aprono per il resto */
+.bk-sum{margin:0 0 12px;line-height:1.5}
+section.og.bk-sec h3 .oghint.bk-n{display:inline;margin:0 0 0 4px;font:600 13px "IBM Plex Mono",monospace;color:var(--ink-2);letter-spacing:0;text-transform:none}
+.bill.bk-list{gap:0;padding:4px 12px 8px;grid-template-columns:minmax(0,1fr)}
+.bcard.bk,html[data-sb-theme="jarvis"] .bcard.bk{min-width:0;box-shadow:none;border:0;border-bottom:1px solid var(--line);border-left:3px solid var(--sc);border-radius:0;
+  padding:9px 4px 9px 10px;gap:10px;animation:none;background:transparent;-webkit-backdrop-filter:none;backdrop-filter:none}
+.bcard.bk:last-child{border-bottom:0}
+.bcard.bk .box{margin-top:3px}
+.bk-d>summary{list-style:none;cursor:pointer;display:block;outline:none;border-radius:3px}
+.bk-d>summary::-webkit-details-marker{display:none}
+.bk-d>summary:focus-visible{outline:2px solid var(--cy);outline-offset:2px}
+.bk-r1{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px}
+.bk-r1 .bcli{font-size:14px}
+.bk-r1 .bcli::before{content:"\25B8\00A0";color:var(--muted);font-size:11px}
+.bk-d[open] .bk-r1 .bcli::before{content:"\25BE\00A0"}
+.bk-r1 .bride{font-size:10.5px;padding:1px 6px}
+.bk-r2{display:flex;align-items:center;gap:6px 14px;margin-top:3px;min-width:0}
+.bk-w{flex:1;min-width:0;font-size:13px;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bk-d[open] .bk-w{white-space:normal}
+.bk-eta{flex:none;display:inline-flex;align-items:center;gap:7px;font:500 11.5px "IBM Plex Mono",monospace;color:var(--ink-2);white-space:nowrap}
+.bk-eta.nd{color:var(--muted)}
+.bk-eta.late{color:var(--late)}
+.bk-eta b{font-weight:400}
+.bk-tr{display:inline-block;width:64px;height:6px;border-radius:3px;background:var(--vz-track);overflow:hidden}
+.bk-tr i{display:block;height:100%;border-radius:0 3px 3px 0;background:var(--vz-1)}
+.bk-eta.late .bk-tr i{background:var(--late)}
+.bk-body{padding:4px 0 2px}
+.bk-body .bstat{margin-top:6px}
+.bk-body .bamt{margin-left:8px}
+.bcard.bk .nbox{margin-top:6px}
+.bcard.bk.done .bk-w,.bcard.bk.done .bcli{text-decoration:line-through;color:var(--muted)}
+#printarea .bk-tr{background:var(--vz-track)!important}
+#printarea .bk-w{white-space:normal}
+#printarea .bk-tr i{background:var(--vz-1)!important}
+#printarea .bk-eta.late .bk-tr i{background:var(--late)!important}
+@media (max-width:640px){
+  .bill.bk-list{padding:2px 8px 6px}
+  .bk-r2{flex-wrap:wrap}
+  .bk-w{flex-basis:100%}
+}
 
 /* ============ TIMELINE ============ */
 .tl{background:var(--panel);border:1px solid var(--line);border-radius:5px;overflow-x:auto;box-shadow:var(--shadow)}
@@ -327,6 +381,39 @@ ul.plain.pay li.p-late{border-left-color:var(--late)}
 ul.plain.pay li small{display:block;color:var(--muted);font-size:11.5px;margin-top:3px;line-height:1.4}
 ul.plain.pay .amt{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;color:var(--ink)}
 ul.plain.pay .pill{margin-left:4px;vertical-align:1px}
+/* R36: rate del contratto su una linea del tempo (scheda commessa › Pagamenti del cliente) */
+.pgl{margin:0 0 14px}
+.pgl-sum{margin:0 0 6px;font-size:12px;line-height:1.5;color:var(--vz-ink2)}
+.pgl-sum b{font:600 12px "IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;color:var(--vz-ink);white-space:nowrap}
+.pgl-sum i{font-style:normal;color:var(--late)}
+.pgl-tr{position:relative;height:62px;margin:0 2px}
+.pgl-ax{position:absolute;left:0;right:0;top:24px;height:1px;background:var(--vz-axis)}
+.pgl-m{position:absolute;top:44px;transform:translateX(-50%);font:500 10.5px "IBM Plex Mono",monospace;color:var(--vz-tick);white-space:nowrap}
+.pgl-m::before{content:"";position:absolute;left:50%;top:-18px;width:1px;height:5px;background:var(--vz-axis)}
+.pgl-oggi{position:absolute;top:0;height:40px;width:0;border-left:1px dashed var(--vz-ink2)}
+.pgl-oggi em{position:absolute;top:-2px;left:4px;font:600 10px "IBM Plex Mono",monospace;font-style:normal;color:var(--vz-ink2)}
+.pgl-p{position:absolute;box-sizing:border-box;border-radius:50%;cursor:pointer;outline:none}
+.pgl-p.inc{background:var(--vz-1);border:2px solid var(--vz-surface)}
+.pgl-p.att{background:var(--vz-surface);border:2px solid var(--vz-1)}
+.pgl-p.scad{background:var(--vz-cs-wash,transparent);border:2.5px solid var(--late)}
+.pgl-p.noimp{border-style:dashed}
+.pgl-p:hover,.pgl-p.vz-on,.pgl-p:focus-visible{box-shadow:0 0 0 2px var(--vz-ink)}
+.pgl-pr{position:absolute;top:24px;height:0;border-top:2px dotted var(--vz-ink2)}
+.pgl-dm{position:absolute;top:19.5px;width:9px;height:9px;margin-left:-4.5px;transform:rotate(45deg);background:var(--vz-ink2)}
+.pgl-leg{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:11.5px;color:var(--vz-ink2)}
+.pgl-leg span{display:inline-flex;align-items:center;gap:6px}
+.pgl-leg b{color:var(--late);font-weight:400}
+.pgl-k{display:inline-block;width:10px;height:10px;border-radius:50%;box-sizing:border-box}
+.pgl-k.inc{background:var(--vz-1)} .pgl-k.att{border:2px solid var(--vz-1)} .pgl-k.scad{border:2px solid var(--late)}
+.pgl-k.dm{width:8px;height:8px;border-radius:0;transform:rotate(45deg);background:var(--vz-ink2)}
+ul.plain.pay li.pgl-hl{background:color-mix(in srgb,var(--vz-1) 14%,transparent);transition:background .6s}
+#printarea .pgl-ax,#printarea .pgl-m::before{background:var(--vz-axis)!important}
+#printarea .pgl-p.inc,#printarea .pgl-k.inc{background:var(--vz-1)!important;border-color:#fff!important}
+#printarea .pgl-p.att,#printarea .pgl-k.att{border-color:var(--vz-1)!important}
+#printarea .pgl-p.scad,#printarea .pgl-k.scad{border-color:var(--late)!important}
+#printarea .pgl-dm,#printarea .pgl-k.dm{background:var(--vz-ink2)!important}
+#printarea .pgl-oggi,#printarea .pgl-pr{border-color:var(--vz-ink2)!important}
+#printarea .pgl-m{margin-left:-19px}
 
 /* R35 (26/09/2026) incassi: pillola di pagStato con icona, scadenzario con le fasce, Soldi da sbloccare in Oggi */
 .pill .pico{font-style:normal;letter-spacing:0}
@@ -350,6 +437,34 @@ ul.plain.pay .amt.noimp{font-size:11.5px;color:var(--muted)}
 .incbar .cm-hint{margin-left:0}
 .incord{display:inline-flex;align-items:center;gap:8px}
 .incord .seg.sub{width:auto;margin:0}
+/* R36: dentro la fascia «data passata» la scomposizione per giorni di ritardo, dall'ambra (--warn) al rosso (--late):
+   ogni tinta e' --warn con sopra --late all'opacita' --a (0, 1/3, 2/3, 1). Le fasce fanno da filtro. */
+.incr{border:1px solid var(--line-2);border-left:3px solid var(--late);border-radius:6px;padding:9px 12px 10px;margin:0 0 8px;background:var(--panel)}
+html[data-sb-theme="jarvis"] .incr{background:rgba(255,255,255,.03)}
+.incr-h{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:4px 14px;margin:0 0 8px}
+.incr-h .incl{font:600 11px/1.3 "Barlow Condensed",sans-serif;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-2)}
+.incr-h .incl i{font-style:normal;letter-spacing:0;color:var(--late)}
+.incr-ver{font-size:11.5px;color:var(--ink-2)}
+.incr-ver b{font:600 12px "IBM Plex Mono",monospace;color:var(--ink)}
+.incr-bar{display:flex;gap:2px;height:14px;border-radius:4px;overflow:hidden;margin:0 0 8px}
+.incr-s,.incr-k>i{display:block;background:var(--warn);cursor:pointer}
+.incr-s>i,.incr-k>i>i{display:block;height:100%;background:var(--late);opacity:var(--a,0)}
+.incr-s.off{opacity:.35}
+.incr-s.on{box-shadow:inset 0 0 0 2px var(--vz-ink)}
+.incr-leg{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.incr-it{min-width:0;padding:5px 8px;border:1px solid transparent;border-radius:5px;cursor:pointer;outline:none;line-height:1.25}
+.incr-it:hover{border-color:var(--cy)}
+.incr-it:focus-visible{outline:2px solid var(--cy);outline-offset:1px}
+.incr-it[aria-pressed="true"]{border-color:var(--cy);box-shadow:inset 0 0 0 1px var(--cy)}
+.incr-it.vuota{cursor:default;opacity:.6}
+.incr-it.vuota:hover{border-color:transparent}
+.incr-k{display:flex;align-items:center;gap:6px;font:600 11px "Barlow Condensed",sans-serif;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-2)}
+.incr-k>i{width:10px;height:10px;border-radius:2px;overflow:hidden;flex:none}
+.incr-it b{display:block;margin-top:2px;font:600 14px "IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;color:var(--ink);white-space:nowrap}
+.incr-it small{display:block;font-size:11px;color:var(--ink-2)}
+#printarea .incr-s,#printarea .incr-k>i{background:var(--warn)!important}
+#printarea .incr-s>i,#printarea .incr-k>i>i{background:var(--late)!important;opacity:var(--a,0)!important}
+@media (max-width:640px){ .incr-leg{grid-template-columns:repeat(2,minmax(0,1fr))} }
 .cm-kpis.kpi-incrow{grid-template-columns:minmax(0,1fr)}
 .cm-kpi.kpi-inc{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 14px}
 .cm-kpi.kpi-inc span{margin-top:0}
@@ -810,6 +925,18 @@ details.vz-caltab td.cmp{white-space:normal;min-width:240px;max-width:520px}
 .ftr i{display:block;height:100%}
 .ftr i.gia{background:var(--gr)} .ftr i.att{background:var(--cy)}
 .fv{font-family:"IBM Plex Mono",monospace;text-align:right;font-variant-numeric:tabular-nums}
+/* R36: storico degli incassi sotto il grafico di cassa (colonne su mesi continui fino al mese corrente) */
+.vz-sto{min-width:0}
+.vz-sto-svg{display:block}
+.vz-sto-svg .vz-hit{cursor:default}
+.vz-sto-leg b{font:600 12px "IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;color:var(--vz-ink)}
+/* legende con testo lungo: il testo va a capo dentro la voce, non in pezzi separati */
+.vz-leg.vz-sto-leg span,.vz-leg.cfp-leg span{display:inline-block}
+.vz-leg.vz-sto-leg i.rc,.vz-leg.cfp-leg i.rc{vertical-align:-1px;margin-right:6px}
+.vz-sto-sec .srcline{margin:8px 0 0}
+.vz-leg i.vz-sto-k1,#printarea .vz-leg i.vz-sto-k1{background:var(--vz-in-3)!important}
+.vz-leg i.vz-sto-k2{background:repeating-linear-gradient(135deg,var(--vz-in-3) 0 1.5px,var(--vz-in-1) 1.5px 5px)!important}
+#printarea .vz-leg i.vz-sto-k2{background:var(--vz-in-1)!important;border:2px solid var(--vz-in-3)!important}
 
 /* ============ PERSONE ============ */
 .cards3{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px}
@@ -2567,6 +2694,58 @@ table.cm small.im-bsub{display:block;font-size:10.5px;color:var(--muted);white-s
 .cfconf .btn{margin-left:6px}
 .cfbar .srcline{flex-basis:100%}
 .cfbar .srcline:empty{display:none}
+/* R36: date dei dati e «Aggiorna dal file su Drive» sopra il bottone per il consulente; sintesi nella conferma */
+.cfdati{flex-basis:100%;display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;font:500 11.5px/1.5 "IBM Plex Mono",monospace;color:var(--ink-2)}
+.cfdati .hd-lab{font-weight:600;color:var(--ink)}
+.cfdati .hd-it{white-space:nowrap}
+.cfdati .hd-it.warn{color:var(--warn)} .cfdati .hd-it.late{color:var(--late)}
+.cfdati .hd-it b{font-weight:600} .cfdati .hd-it i{font-style:normal}
+.cfdati .hd-sep{opacity:.6}
+.gest{display:inline-flex;flex-wrap:wrap;align-items:center;gap:6px 10px;font:400 12px/1.4 "IBM Plex Sans",sans-serif;color:var(--ink-2)}
+.gest.warn{color:var(--warn)} .gest.late{color:var(--late)} .gest.ok{color:var(--done)}
+.gest .gest-st:empty{display:none}
+.cfconf .cfsint{display:block;margin:6px 0;font-size:12.5px;color:var(--ink-2)}
+/* R36: «Pronto per il consulente?» in testa a Commesse › Cash flow */
+section.og.cfp{margin:0 0 16px}
+.cfp-t1{margin:0 0 6px;font-size:13px;color:var(--ink-2)}
+.cfp-t1 b.mono{font:600 13px "IBM Plex Mono",monospace;color:var(--ink)}
+.cfp-bar{display:flex;gap:2px;height:16px;border-radius:4px;overflow:hidden;margin:0 0 8px}
+.cfp-s{display:block;min-width:2px;background:var(--k)}
+.cfp-s.cfp-stP{opacity:.8}
+.cfp-leg{margin:0 0 10px}
+.cfp-leg i.rc{background:var(--k)}
+.cfp-leg b{font:600 12px "IBM Plex Mono",monospace;color:var(--vz-ink)}
+.cfp-leg .cfp-w{font-style:normal;color:var(--warn)}
+.cfp-pass{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:2px 0 6px}
+.cfp-pbar{display:block;height:10px;min-width:4px;border-radius:0 4px 4px 0;background:var(--vz-rest);box-shadow:inset 0 0 0 1px var(--vz-rest-ink)}
+.cfp-ptx{flex:1 1 320px;font-size:12px;color:var(--ink-2)}
+.cfp-ptx i{font-style:normal;font-weight:700;color:var(--warn)}
+.cfp-ptx b{color:var(--ink);font-weight:600}
+.cfp-nota{margin:4px 0 0}
+.cfp-h4{margin:16px 0 6px;font:700 13px "Barlow Condensed",sans-serif;letter-spacing:.12em;text-transform:uppercase;color:var(--ink)}
+.cfp-h4 small{display:block;margin-top:2px;font:400 11.5px "IBM Plex Sans",sans-serif;letter-spacing:0;text-transform:none;color:var(--muted)}
+.cfp-list{columns:2 520px;column-gap:28px}
+.cfp-r{break-inside:avoid;display:flex;gap:10px;align-items:baseline;padding:3px 0;border-bottom:1px solid var(--line);font-size:12.5px;line-height:1.45}
+.cfp-cm{flex:none;width:78px;font:600 12px "IBM Plex Mono",monospace;color:var(--ink);cursor:pointer}
+.cfp-its{min-width:0;color:var(--ink-2)}
+.cfp-i{display:inline-block;cursor:pointer;border-radius:3px;outline:none}
+.cfp-i i{font-style:normal}
+.cfp-i.no i{color:var(--warn)} .cfp-i.ok i{color:var(--done)}
+.cfp-i:hover,.cfp-cm:hover{text-decoration:underline;text-underline-offset:2px}
+.cfp-i:focus-visible,.cfp-cm:focus-visible{outline:2px solid var(--cy);outline-offset:1px}
+.cfp-sep{color:var(--muted)}
+.cfp-f .vz-htr i{background:var(--vz-out-2)}
+.cfp-f .vz-hrow{cursor:default;grid-template-columns:minmax(150px,360px) 1fr 70px}
+.cfz.cfp-hl,section.og.cfp-hl{outline:2px solid var(--cy);outline-offset:3px;transition:outline-color .8s}
+#printarea .cfp-s,#printarea .cfp-leg i.rc{background:var(--k)!important}
+#printarea .cfp-pbar{background:var(--vz-rest)!important}
+#printarea .cfp-f .vz-htr i{background:var(--vz-out-2)!important}
+#printarea .cfp-f .vz-hk{white-space:normal}
+@media (max-width:640px){
+  .cfp-f .vz-hrow{grid-template-columns:minmax(100px,44%) 1fr 58px}
+  .cfp-r{flex-direction:column;gap:0}
+  .cfp-cm{width:auto}
+}
 .srcline.late{color:var(--late)}
 .cfavv{margin:0 0 8px;color:var(--warn)}
 .cfz .cfdate{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px 12px;margin:0 0 12px}
