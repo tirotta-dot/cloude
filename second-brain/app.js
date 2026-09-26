@@ -1555,13 +1555,61 @@ var VZ = (function(){
   }
 
   /* --- pagamenti --- */
+  /* R35 (26/09/2026): la data conta. Prima «da verificare» vinceva sulla data e 41 rate con la data
+     attesa gia' passata non risultavano ferme. Ora una rata non incassata, con data passata e senza
+     risposta dell'amministrazione, e' k='late' con «data passata da N gg · incasso non registrato
+     (da verificare)»: non «scaduto» secco, perche' puo' essere incassata e non ancora registrata.
+     v.pa e' la risposta dell'amministrazione dal foglio del lunedi' (r: pagato | sollecitare | arrivo, d).
+     g = fascia dello scadenzario: scad (data passata) · ver (da verificare) · att (attesa) · inc (incassata);
+     gg = giorni di ritardo; tag + nota = la stessa etichetta in due pezzi, per la pillola. */
   function pagStato(v){
-    if (v.st === 'incassato') return {k:'ok', txt:'incassato'};
-    if (v.st === 'da_verificare') return {k:'warn', txt:'da verificare'};
-    if (v.st === 'scaduto') return {k:'late', txt:'scaduto'};
-    if (v.att && days(new Date(), v.att) < 0) return {k:'late', txt:'scaduto'};
-    return {k:'mute', txt:'atteso'};
+    if (v.st === 'incassato') return {k:'ok', g:'inc', txt:'incassato', tag:'incassato'};
+    var pa = v.pa || null, gg = v.att ? days(v.att, new Date()) : null;
+    function st(k, g, tag, nota, n){ return {k:k, g:g, tag:tag, nota:nota || '', gg:n || 0, txt:tag + (nota ? ' · ' + nota : '')}; }
+    if (pa && pa.r === 'pagato') return st('ok', 'inc', 'pagato', 'secondo l’amministrazione');
+    if (pa && pa.r === 'sollecitare') return st('late', 'scad', 'da sollecitare', 'secondo l’amministrazione'
+      + (gg > 0 ? ' · data passata da ' + gg + ' gg' : ''), gg > 0 ? gg : 0);
+    if (pa && pa.r === 'arrivo'){
+      var ga = pa.d ? days(pa.d, new Date()) : null;
+      if (ga !== null && ga > 0) return st('late', 'scad', 'doveva arrivare il ' + itFull(pa.d), 'da ' + ga + ' gg, secondo l’amministrazione', ga);
+      return st('mute', 'att', pa.d ? 'in arrivo il ' + itFull(pa.d) : 'in arrivo', 'secondo l’amministrazione');
+    }
+    if (gg !== null && gg > 0){
+      if (v.st === 'scaduto') return st('late', 'scad', 'scaduto da ' + gg + ' gg', 'non pagato', gg);
+      return st('late', 'scad', 'data passata da ' + gg + ' gg', 'incasso non registrato (da verificare)', gg);
+    }
+    if (v.st === 'scaduto') return st('late', 'scad', 'scaduto', 'non pagato');
+    if (v.st === 'da_verificare') return st('warn', 'ver', 'da verificare');
+    return st('mute', 'att', 'atteso');
   }
+  /* pillola con icona e parola, poi il resto dell'etichetta in chiaro (non tutto maiuscolo) */
+  var PAG_ICO = {ok:'✓', warn:'?', late:'⚠', mute:'○'};
+  function pagPill(ps){
+    return '<span class="pill ' + ps.k + '"><i class="pico" aria-hidden="true">' + PAG_ICO[ps.k] + '</i> '
+      + esc(ps.tag || ps.txt) + '</span>' + (ps.nota ? ' <span class="pnota ' + ps.k + '">' + esc(ps.nota) + '</span>' : '');
+  }
+  /* R35: una sola base per «data passata, non registrati» (Oggi › Soldi da sbloccare e KPI di Denaro):
+     commesse non evase, sospese comprese e dette a parte. Righe per commessa ordinate per importo. */
+  function incassiFermi(){
+    var R = {tot:0, n:0, nNo:0, inCorso:0, sosp:[], righe:[], bloccate:[]};
+    CM().forEach(function(c){
+      if (c.ev) return;
+      var q = {c:c, scad:0, fut:0, inc:0, n:0, nNo:0, gg:0};
+      ((c.pag && c.pag.voci) || []).forEach(function(v){
+        var ps = pagStato(v), imp = +v.imp || 0;
+        if (ps.g === 'inc') q.inc += imp;
+        else if (ps.g !== 'scad') q.fut += imp;
+        else { q.scad += imp; q.n++; if (!imp) q.nNo++; if (ps.gg > q.gg) q.gg = ps.gg; }
+      });
+      if (!q.n) return;
+      R.righe.push(q); R.tot += q.scad; R.n += q.n; R.nNo += q.nNo;
+      if (c.sp) R.sosp.push(q); else R.inCorso += q.scad;
+    });
+    R.righe.sort(function(a, b){ return (b.scad - a.scad) || (a.c.code < b.c.code ? -1 : 1); });
+    R.bloccate = (S.billing || []).filter(function(b){ return !b.d && b.st === 'blocked'; });
+    return R;
+  }
+  function eurM(n){ return (n / 1e6).toLocaleString('it-IT', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' M€'; }
   function pagAlert(c){
     var n = 0;
     ((c.pag && c.pag.voci) || []).forEach(function(v){
@@ -2051,7 +2099,7 @@ var VZ = (function(){
           var ps = pagStato(v);
           return '<li class="p-' + ps.k + '"><b>' + esc(v.c) + '</b>'
             + (v.imp ? ' <span class="amt">' + esc(eur(v.imp)) + '</span>' : '')
-            + ' <span class="pill ' + ps.k + '">' + ps.txt + '</span>'
+            + ' ' + pagPill(ps)
             + (v.inc ? '<span class="srcline"> incassato il ' + esc(itFull(v.inc)) + '</span>'
                : v.att ? '<span class="srcline"> atteso il ' + esc(itFull(v.att)) + '</span>' : '')
             + (v.n ? '<small>' + esc(v.n) + '</small>' : '')
@@ -2606,6 +2654,111 @@ var VZ = (function(){
             ente:{l:'ente di controllo', c:'var(--yl)'},
             agenda:{l:'agenda', c:'var(--ink-2)'}};
 
+  /* ================= OGGI › SOLDI DA SBLOCCARE (R35, 26/09/2026) =================
+     Al posto di una riga per rata (56, alte 3.679 px): il numero grande, il dettaglio, le fatture
+     bloccate e una barra per commessa lunga quanto il SOLO importo con data passata, su scala comune.
+     Quanto resta da scadere e l'incassato sono testo, non barre. Il clic su una commessa apre le sue
+     rate nello scadenzario di Denaro, filtrato su quella commessa. Dati: incassiFermi(). */
+  var sdAperti = {};   /* quali elenchi «altre…» sono aperti: vale solo per questa sessione */
+  function eurS(n){ return Math.abs(n) >= 995000 ? eurM(n) : VZ.eurC(n); }
+  function soldiHtml(R){
+    var h = '<section class="og og-soldi" data-n="' + R.n + '"><h3><i class="dt warn"></i>Soldi da sbloccare</h3>'
+      + '<div class="sd-body">';
+    var blk = R.bloccate.length ? '<div class="sd-blk" role="button" tabindex="0" data-sdblk="1" '
+      + 'title="Apri Denaro › Da fatturare"><b>' + R.bloccate.length + '</b><span><i aria-hidden="true">■</i> '
+      + (R.bloccate.length === 1 ? 'fattura bloccata' : 'fatture bloccate') + ' ›</span></div>' : '';
+    if (!R.n) return h + '<div class="sd-hero"><p class="ogempty">Nessuna rata con la data passata.</p>' + blk + '</div></div></section>';
+    var sosp = R.sosp.filter(function(q){ return q.scad > 0; });
+    h += '<div class="sd-hero"><div class="sd-hl">'
+      + '<span class="sd-lab"><i aria-hidden="true">⚠</i> Data passata, non registrati come incassati</span>'
+      + '<b class="sd-big">' + eurM(R.tot) + '</b>'
+      + '<small><b>' + R.n + ' rate</b> su <b>' + R.righe.length + (R.righe.length === 1 ? ' commessa' : ' commesse') + '</b>'
+      + (R.nNo ? ' · ' + R.nNo + (R.nNo === 1 ? ' rata senza importo' : ' rate senza importo') : '') + '</small>'
+      + (sosp.length ? '<small>' + eurM(R.inCorso) + ' sulle commesse in corso · '
+          + sosp.map(function(q){ return eurM(q.scad) + ' su ' + esc(q.c.code) + ' sospesa'; }).join(' · ') + '</small>' : '')
+      + '</div>' + blk + '</div>';
+    var conImp = R.righe.filter(function(q){ return q.scad > 0; });
+    var senza = R.righe.filter(function(q){ return !(q.scad > 0); });
+    var top = conImp.slice(0, 8), resto = conImp.slice(8), max = top.length ? top[0].scad : 1;
+    function somma(l, k){ return l.reduce(function(a, q){ return a + q[k]; }, 0); }
+    function riga(q){
+      var c = q.c, rate = q.n + (q.n === 1 ? ' rata' : ' rate'), sub = [], nome = c.desc || c.cliente || '';
+      if (q.nNo && q.scad) sub.push(q.nNo + (q.nNo === 1 ? ' rata' : ' rate') + ' senza importo');
+      if (q.inc) sub.push(eurS(q.inc) + ' già incassati');
+      if (q.fut) sub.push(eurS(q.fut) + ' ancora da scadere');
+      var tip = [[VZ.eur(q.scad), 'con data passata · ' + rate, '--warn', 'r']];
+      if (q.nNo) tip.push([String(q.nNo), q.nNo === 1 ? 'rata con data passata senza importo' : 'rate con data passata senza importo', '', '']);
+      tip.push([VZ.eur(q.fut), 'ancora da scadere', 'rest-ink', 'r'], [VZ.eur(q.inc), 'già incassato', '', ''],
+        [q.gg + ' gg', 'la data più vecchia' + (c.sp ? ' · commessa sospesa' : ''), '', '']);
+      return '<div class="sd-row" role="button" tabindex="0" data-sdcm="' + esc(c.code) + '"'
+        + VZ.tip(c.code + (nome ? ' · ' + nome : ''), tip)
+        + ' aria-label="' + esc(c.code + ': ' + (q.scad ? eurS(q.scad) : 'senza importo') + ' con data passata, ' + rate + '. Apri le rate') + '">'
+        + '<span class="sd-k"><b>' + esc(c.code) + '</b>' + (c.sp ? '<span class="sd-sp">sospesa</span>' : '')
+        + '<small>' + esc(nome) + '</small></span>'
+        + '<span class="sd-bar">' + (q.scad ? '<span class="sd-tr"><i style="width:' + Math.max(.6, q.scad / max * 100).toFixed(2) + '%"></i></span>' : '')
+        + '<small>' + (sub.length ? esc(sub.join(' · ')) : q.scad ? '&nbsp;' : 'nessun importo scritto nel contratto') + '</small></span>'
+        + '<span class="sd-v"><b>' + (q.scad ? eurS(q.scad) : '—') + '</b><small>' + rate + '</small></span></div>';
+    }
+    if (top.length) h += '<div class="sd-cap"><span>per commessa<span class="sd-lg"> · importo con data passata</span></span>'
+      + '<span><span class="sd-lg">scala comune · </span>max ' + eurS(max) + '</span></div>';
+    h += top.map(riga).join('');
+    if (resto.length) h += '<details class="sd-altre" data-sda="altre"' + (sdAperti.altre ? ' open' : '') + '><summary><span>altre '
+      + resto.length + (resto.length === 1 ? ' commessa' : ' commesse') + ' · ' + somma(resto, 'n') + ' rate</span><b>'
+      + eurS(somma(resto, 'scad')) + '</b></summary>' + resto.map(riga).join('') + '</details>';
+    if (senza.length) h += '<details class="sd-altre" data-sda="senza"' + (sdAperti.senza ? ' open' : '') + '><summary><span>'
+      + senza.length + (senza.length === 1 ? ' commessa' : ' commesse') + ' solo con rate senza importo · '
+      + somma(senza, 'n') + ' rate</span><b>—</b></summary>' + senza.map(riga).join('') + '</details>';
+    h += '<p class="srcline sd-nota">Rate dei contratti delle commesse non evase, sospese comprese, con la data attesa '
+      + 'passata e nessun incasso registrato. Molte sono solo da verificare con l’amministrazione: non vuol dire '
+      + 'che il cliente non abbia pagato. Clic su una commessa: le sue rate nello scadenzario di Denaro.</p>';
+    return h + '</div></section>';
+  }
+  /* clic e tastiera di Soldi da sbloccare e dello scadenzario: un ascoltatore solo, agganciato una volta */
+  function incVai(el){
+    if (!el) return;
+    var b = document.querySelector('.bar'), off = b ? b.getBoundingClientRect().height : 0;
+    try{ window.scrollTo(0, Math.max(0, el.getBoundingClientRect().top + (window.scrollY || 0) - off - 12)); }catch(e){}
+  }
+  function incAzione(t){
+    var x;
+    if ((x = t.closest('[data-sdcm]'))){
+      incF = 'scad'; incCm = x.getAttribute('data-sdcm'); denF = 'incassi'; view = 'bill';
+      setView(); render(); incVai(document.getElementById('incf')); return true;
+    }
+    if ((x = t.closest('[data-sdblk]'))){
+      denF = 'fatture'; view = 'bill'; setView(); render();
+      var id = (incassiFermi().bloccate[0] || {}).id;
+      incVai(id ? document.querySelector('#stage .bcard[data-id="' + selId(id) + '"]') : null); return true;
+    }
+    if ((x = t.closest('[data-denkpi]'))){
+      incF = 'scad'; incCm = ''; denF = 'incassi'; denaro(); incVai(document.getElementById('incf')); return true;
+    }
+    if ((x = t.closest('[data-incf]'))){
+      var f = x.getAttribute('data-incf');
+      incF = (incF === f && f !== 'tutte') ? 'tutte' : f; denaro(); return true;
+    }
+    if ((x = t.closest('[data-incord]'))){ incOrd = x.getAttribute('data-incord'); denaro(); return true; }
+    if ((x = t.closest('[data-inccm]'))){ incCm = ''; denaro(); return true; }
+    return false;
+  }
+  document.addEventListener('click', function(e){
+    if (!e.target.closest || !e.target.closest('#stage')) return;
+    if (incAzione(e.target)){ e.preventDefault(); setTimeout(stashUI, 120); }
+  });
+  document.addEventListener('keydown', function(e){
+    if ((e.key !== 'Enter' && e.key !== ' ') || !e.target.closest) return;
+    var el = e.target.closest('#stage [data-sdcm], #stage [data-sdblk], #stage [data-denkpi], #stage [data-incf]');
+    if (el && el === e.target && el.getAttribute('role') === 'button'){
+      e.preventDefault(); incAzione(el); setTimeout(stashUI, 120);
+      var k = el.getAttribute('data-incf');
+      if (k){ var n = document.querySelector('#stage [data-incf="' + k + '"]'); if (n) n.focus(); }
+    }
+  });
+  document.addEventListener('toggle', function(e){
+    var d = e.target;
+    if (d && d.classList && d.classList.contains('sd-altre')) sdAperti[d.getAttribute('data-sda')] = d.open;
+  }, true);
+
   /* ================= OGGI ================= */
   function oggi(){
     var oggiD = today(), h = '';
@@ -2641,13 +2794,7 @@ var VZ = (function(){
       if (U[a.u] !== U[b.u]) return U[a.u] - U[b.u];
       return d0(a.data) - d0(b.data);
     });
-    var soldi = [];
-    (S.commesse || []).forEach(function(c){
-      ((c.pag && c.pag.voci) || []).forEach(function(v){
-        var k = pagStato(v).k;
-        if (k === 'late' || k === 'warn') soldi.push({c:c, v:v, k:k}); });
-    });
-    (S.billing || []).forEach(function(b){ if (!b.d && b.st === 'blocked') soldi.push({b:b, k:'late'}); });
+    var soldi = incassiFermi();
     var rischio = (S.commesse || []).filter(function(c){
       if (c.ev) return false;
       var t = c.de || c.dc; if (!t) return false;
@@ -2670,8 +2817,9 @@ var VZ = (function(){
       + '<small>' + scaduti.length + ' scaduti · ' + entro3.length + ' entro 3 giorni</small></div>'
       + '<div class="cm-kpi"><b>' + attese.length + '</b><span>aspettano risposta</span>'
       + '<small>' + attese.filter(function(a){ return a.u === 'alta'; }).length + ' urgenti</small></div>'
-      + '<div class="cm-kpi' + (soldi.length ? ' hot' : '') + '"><b>' + soldi.length + '</b><span>soldi da sbloccare</span>'
-      + '<small>incassi e fatture ferme</small></div>'
+      + '<div class="cm-kpi' + (soldi.n || soldi.bloccate.length ? ' hot' : '') + '"><b>' + (soldi.tot ? eurM(soldi.tot) : soldi.n) + '</b><span>soldi da sbloccare</span>'
+      + '<small>' + soldi.n + (soldi.n === 1 ? ' rata' : ' rate') + ' con data passata · ' + soldi.bloccate.length
+      + (soldi.bloccate.length === 1 ? ' fattura bloccata' : ' fatture bloccate') + '</small></div>'
       + '<div class="cm-kpi"><b>' + rischio.length + '</b><span>date a rischio</span>'
       + '<small>consegna vicina o superata</small></div>'
       + '<div class="cm-kpi' + (silenziosi.length ? ' hot' : '') + '"><b>' + silenziosi.length + '</b><span>clienti silenziosi</span>'
@@ -2768,20 +2916,7 @@ var VZ = (function(){
 
     /* colonna 2 */
     h += '<div class="og-col">';
-    h += '<section class="og"><h3><i class="dt gr"></i>Soldi da sbloccare</h3>';
-    if (!soldi.length) h += '<p class="ogempty">Niente di fermo.</p>';
-    soldi.forEach(function(s){
-      if (s.b){
-        h += '<div class="ogrow bad"><div class="ogmain"><b>' + esc(s.b.cli) + ' · ' + esc(s.b.ride) + '</b>'
-          + '<span>' + esc(s.b.w) + '</span></div><span class="ogwhen">' + esc(s.b.a) + '</span></div>';
-      } else {
-        h += '<div class="ogrow' + (s.k === 'late' ? ' bad' : '') + '" data-cm="' + esc(s.c.code) + '">'
-          + '<div class="ogmain"><b>' + esc(s.v.c) + '</b>'
-          + '<span>' + esc(s.c.code) + ' · ' + esc(s.c.cliente) + '</span></div>'
-          + '<span class="ogwhen">' + (s.v.imp ? esc(eur(s.v.imp)) : pagStato(s.v).txt) + '</span></div>';
-      }
-    });
-    h += '</section>';
+    h += soldiHtml(soldi);
 
     h += '<section class="og"><h3><i class="dt late"></i>Date a rischio</h3>';
     if (!rischio.length) h += '<p class="ogempty">Nessuna consegna a rischio.</p>';
@@ -3116,6 +3251,75 @@ var VZ = (function(){
     }
   }
 
+  /* ================= DENARO › SCADENZARIO INCASSI (R35, 26/09/2026) =================
+     In testa le fasce di pagStato con conteggio e somma in € (sono anche il filtro), la base dichiarata
+     e l'ordine: per giorni di ritardo (predefinito) o per data. incF, incCm e incOrd valgono solo per
+     questa sessione e non entrano nello stato; la fascia scelta si ritrova dopo un ricaricamento come
+     le altre sotto-schede (aria-pressed). */
+  var incF = 'tutte', incCm = '', incOrd = 'rit';
+  var INC_G = [['scad', '⚠', 'Data passata, non registrate', 'late'], ['ver', '?', 'Da verificare', 'warn'],
+               ['att', '○', 'Attese', 'mute'], ['inc', '✓', 'Incassate', 'ok']];
+  function incassiHtml(inc, cm, fermi){
+    if (!inc.length) return '<p class="empty">Nessun incasso tracciato.</p>';
+    var oggiD = new Date(), L = inc.map(function(x){ return {c:x.c, v:x.v, ps:pagStato(x.v)}; });
+    if (incCm && !L.some(function(x){ return x.c.code === incCm; })) incCm = '';
+    var base = incCm ? L.filter(function(x){ return x.c.code === incCm; }) : L;
+    var T = {tutte:{n:0, e:0, no:0}};
+    INC_G.forEach(function(g){ T[g[0]] = {n:0, e:0, no:0}; });
+    base.forEach(function(x){
+      [T[x.ps.g], T.tutte].forEach(function(t){ t.n++; t.e += +x.v.imp || 0; if (!x.v.imp) t.no++; });
+    });
+    function nr(n){ return n + (n === 1 ? ' rata' : ' rate'); }
+    var h = '<div class="incf" id="incf" role="group" aria-label="Filtra le rate per stato">';
+    INC_G.concat([['tutte', '', 'Tutte', 'tutte']]).forEach(function(g){
+      var t = T[g[0]];
+      h += '<div class="incc ' + g[3] + '" role="button" tabindex="0" data-incf="' + g[0] + '" aria-pressed="' + (incF === g[0]) + '">'
+        + '<span class="incl">' + (g[1] ? '<i aria-hidden="true">' + g[1] + '</i> ' : '') + g[2] + '</span>'
+        + '<b>' + eurS(t.e) + '</b>'
+        + '<small>' + nr(t.n) + (t.no ? ' · ' + t.no + ' senza importo' : '') + '</small></div>';
+    });
+    h += '</div>';
+    var nSp = cm.filter(function(c){ return c.sp; }).length, sp = fermi.sosp.filter(function(q){ return q.scad > 0; });
+    h += '<p class="srcline incbase">Base: le ' + cm.length + ' commesse non evase'
+      + (nSp ? ', comprese ' + (nSp === 1 ? 'la sospesa' : 'le ' + nSp + ' sospese') : '')
+      + (sp.length ? ' (' + sp.map(function(q){ return esc(q.c.code) + ': ' + eurM(q.scad) + ' con data passata'; }).join(', ') + ')' : '')
+      + '. «Data passata» vuol dire che la data attesa è superata e l’incasso non è registrato: '
+      + 'spesso è solo da verificare con l’amministrazione.</p>';
+    if (incCm) h += '<div class="fbar">Solo la commessa <b>' + esc(incCm) + '</b>'
+      + '<button class="chip" data-inccm="1">× tutte le commesse</button></div>';
+    var vis = base.filter(function(x){ return incF === 'tutte' || x.ps.g === incF; });
+    function rit(x){
+      if (x.ps.g === 'inc') return -1e7;
+      if (x.ps.g === 'scad') return x.ps.gg;
+      var d = (x.v.pa && x.v.pa.r === 'arrivo' && x.v.pa.d) || x.v.att;
+      return d ? days(d, oggiD) : -1e6;
+    }
+    vis.sort(incOrd === 'rit'
+      ? function(a, b){ return (rit(b) - rit(a)) || ((+b.v.imp || 0) - (+a.v.imp || 0)); }
+      : function(a, b){ return d0(a.v.att || a.v.inc || '2099-01-01') - d0(b.v.att || b.v.inc || '2099-01-01'); });
+    var eVis = vis.reduce(function(a, x){ return a + (+x.v.imp || 0); }, 0);
+    h += '<div class="incbar"><span class="cm-hint">' + nr(vis.length) + ' · ' + esc(eur(eVis)) + '</span>'
+      + '<span class="incord"><span class="cm-hint">ordina</span><span class="seg sub">'
+      + [['rit', 'per ritardo'], ['data', 'per data']].map(function(o){
+          return '<button data-incord="' + o[0] + '" aria-pressed="' + (incOrd === o[0]) + '">' + o[1] + '</button>'; }).join('')
+      + '</span></span></div>';
+    if (!vis.length) return h + '<p class="empty">Nessuna rata in questa fascia.</p>';
+    h += '<ul class="plain pay incl-list" style="gap:10px">';
+    vis.forEach(function(x){
+      var ps = x.ps, pa = x.v.pa;
+      h += '<li class="p-' + ps.k + '"><b>' + esc(x.c.code) + ' · ' + esc(x.c.cliente) + '</b>'
+        + (x.c.sp ? ' <span class="pill mute">sospesa</span>' : '')
+        + (x.v.imp ? ' <span class="amt">' + esc(eur(x.v.imp)) + '</span>' : ' <span class="amt noimp">senza importo</span>')
+        + ' ' + pagPill(ps)
+        + '<small>' + esc(x.v.c)
+        + (x.v.inc ? ' · incassato il ' + esc(itFull(x.v.inc))
+           : x.v.att ? ' · atteso il ' + esc(itFull(x.v.att)) : '')
+        + (pa ? ' · risposta dell’amministrazione' + (pa.chi ? ' (' + esc(pa.chi) + (pa.quando ? ', ' + esc(itFull(pa.quando)) : '') + ')' : '') : '')
+        + (x.v.n ? ' — ' + esc(x.v.n) : '') + '</small></li>';
+    });
+    return h + '</ul>';
+  }
+
   /* ================= DENARO ================= */
   var denF = 'quadro';
   function denaro(){
@@ -3133,6 +3337,7 @@ var VZ = (function(){
       if (v.st === 'incassato' && v.imp) incassato += v.imp;
       else if (v.imp) att += v.imp; }); });
     var daFatt = (S.billing || []).filter(function(b){ return !b.d; }).length;
+    var fermi = incassiFermi(), fSosp = fermi.sosp.filter(function(q){ return q.scad > 0; });
 
     var h = '<div class="cm-kpis">'
       + '<div class="cm-kpi"><b>' + eur(valTot) + '</b><span>valore a contratto</span>'
@@ -3148,6 +3353,15 @@ var VZ = (function(){
       + '<small>' + eur(att) + ' ancora attesi</small></div>'
       + '<div class="cm-kpi' + (daFatt ? ' hot' : '') + '"><b>' + daFatt + '</b><span>da fatturare</span>'
       + '<small>voci aperte</small></div></div>';
+    /* R35: quanto ha la data passata e non risulta incassato, in una fila sua sotto i numeri;
+       il clic apre lo scadenzario su quelle rate */
+    if (fermi.n) h += '<div class="cm-kpis kpi-incrow"><div class="cm-kpi hot kpi-go kpi-inc" role="button" tabindex="0" '
+      + 'data-denkpi="scad" title="Apri lo scadenzario sulle rate con la data passata"><b>' + eurM(fermi.tot) + '</b>'
+      + '<span><i aria-hidden="true">⚠</i> con data passata, non registrati</span>'
+      + '<small>' + fermi.n + ' rate' + (fermi.nNo ? ' (' + fermi.nNo + ' senza importo)' : '') + ' su '
+      + fermi.righe.length + ' commesse non evase'
+      + fSosp.map(function(q){ return ' · di cui ' + eurM(q.scad) + ' su ' + esc(q.c.code) + ' sospesa'; }).join('')
+      + ' · da verificare con l’amministrazione ›</small></div></div>';
 
     h += '<div class="cm-tools"><div class="seg sub" id="denseg">'
       + [['quadro','Margini'],['incassi','Scadenzario incassi'],['flusso','Flusso di cassa'],
@@ -3185,26 +3399,7 @@ var VZ = (function(){
         + 'Le ore compaiono appena carichi il file ore; i valori a contratto appena carichi i contratti.</p>';
     }
 
-    if (denF === 'incassi'){
-      if (!inc.length) h += '<p class="empty">Nessun incasso tracciato.</p>';
-      else {
-        h += '<ul class="plain pay" style="gap:10px">';
-        inc.sort(function(a,b){
-          var da = a.v.att || a.v.inc || '2099-01-01', db = b.v.att || b.v.inc || '2099-01-01';
-          return d0(da) - d0(db);
-        }).forEach(function(x){
-          var ps = pagStato(x.v);
-          h += '<li class="p-' + ps.k + '"><b>' + esc(x.c.code) + ' · ' + esc(x.c.cliente) + '</b>'
-            + '<span class="pill ' + ps.k + '">' + ps.txt + '</span>'
-            + (x.v.imp ? ' <span class="amt">' + esc(eur(x.v.imp)) + '</span>' : '')
-            + '<small>' + esc(x.v.c)
-            + (x.v.inc ? ' · incassato il ' + esc(itFull(x.v.inc))
-               : x.v.att ? ' · atteso il ' + esc(itFull(x.v.att)) : '')
-            + (x.v.n ? ' — ' + esc(x.v.n) : '') + '</small></li>';
-        });
-        h += '</ul>';
-      }
-    }
+    if (denF === 'incassi') h += incassiHtml(inc, cm, fermi);
 
     if (denF === 'flusso'){
       var mesi = {};
