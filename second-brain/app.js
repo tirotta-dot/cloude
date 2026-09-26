@@ -390,7 +390,7 @@ var VZ = (function(){
     + '<dt>Commesse</dt><dd>clicca una o pi\u00f9 commesse per confrontarle; spunte <em>Sosp.</em> ed <em>Evasa</em> per parcheggiarle o archiviarle, mai cancellate.</dd>'
     + '<dt>Denaro</dt><dd>margini con gli stessi costi di Commesse \u203a Budget (documenti e ordini del gestionale, ore a 55/56 \u20ac/h) e alert sotto il 15%; tariffe modificabili l\u00ec.</dd>'
     + '<dt>Note</dt><dd>ogni riga ha \u201cscrivi una nota per Claude\u201d: le leggo a ogni sincronizzazione (alle 8 e alle 13, riepilogo il venerd\u00ec alle 13). Fra un giro e l\'altro decidi tu: il tasto <em>Aggiorna</em> in Oggi.</dd>'
-    + '<dt>Ricerca</dt><dd>premi <em>/</em> ovunque e cerchi in tutto: task, commesse, viaggi, incassi, fornitori.</dd>'
+    + '<dt>Ricerca</dt><dd>premi <em>/</em> ovunque e cerchi in tutto: commesse, task, ordini fornitore, rate e incassi, fornitori, agenda, viaggi, colleghi. Più parole valgono tutte insieme, accenti e trattini non contano (<em>dt 10 26</em> trova DT-10-26); frecce e Invio per scegliere.</dd>'
     + '</dl><button class="btn" id="hclose">Ho capito</button></div></div>'
     + '<div class="hmask" id="askm" hidden><div class="hbox askbox" role="dialog" aria-modal="true" aria-label="Chiedi al Second Brain">'
     + '<h3>Chiedi al Second Brain</h3>'
@@ -1725,7 +1725,8 @@ var VZ = (function(){
   }
   /* ricerca su numero, articolo, fornitore, descrizione e commessa (tutte le parole) + fornitore da Persone */
   function ordTrova(v){
-    if (ordQ && String(v.f || '').toLowerCase().indexOf(ordQ.toLowerCase()) < 0) return false;
+    /* R36: il fornitore scelto (dalle barre o da Persone) vale per chiave: i due modi di scrivere C&P SNC sono uno */
+    if (ordQ && fornKeyC(v.f) !== fornKeyC(ordQ)) return false;
     if (!ordS) return true;
     var hay = ((v.n || '') + ' ' + (v.art || '') + ' ' + (v.f || '') + ' ' + (v.d || '') + ' ' + (v.cm || '')).toLowerCase();
     return ordS.toLowerCase().split(/\s+/).every(function(w){ return !w || hay.indexOf(w) >= 0; });
@@ -1978,14 +1979,18 @@ var VZ = (function(){
     }
   }
   function wireOrdini(){
-    var oc = document.getElementById('ord-clear');
-    if (oc) oc.addEventListener('click', function(){ ordQ = ''; dashboard(); });
     var q = document.getElementById('ord-q');
     if (q) q.addEventListener('input', function(){
       clearTimeout(ordT);
       ordT = setTimeout(function(){ ordS = q.value.trim(); ordPag = {}; ordAggiorna(); }, 200);
     });
-    if (!ordWired){ ordWired = true; stage.addEventListener('click', ordClick); }
+    if (!ordWired){
+      ordWired = true; stage.addEventListener('click', ordClick); stage.addEventListener('click', ordFornClick);
+      stage.addEventListener('keydown', function(e){
+        if ((e.key === 'Enter' || e.key === ' ') && e.target.classList && e.target.classList.contains('vz-ofb')){ e.preventDefault(); ordFornClick({target: e.target, detail: 0}); }
+      });
+    }
+    var of = document.getElementById('ord-forn'); if (of) segnalaWire(of);
   }
   function ordiniHtml(pool, nsel){
     var o = S.ordf || {}, tot = (o.voci || []).length;
@@ -2026,7 +2031,8 @@ var VZ = (function(){
       h += '<div class="ore-wait" style="margin:0 0 14px"><b>Due estrazioni, due elenchi diversi.</b> ' + esc(o.srcnote)
         + ' Righe: <b>' + nSC + '</b> in entrambe · <b>' + nS + '</b> solo nel settimanale 11/09 · <b>' + nC + '</b> solo nel completo 16/09.</div>';
     }
-    if (ordQ) h += '<div class="fbar">Solo il fornitore <b>' + esc(ordQ) + '</b> <button class="chip" id="ord-clear">× tutti i fornitori</button></div>';
+    var nF = ordForn(B.att).length;
+    h += '<section class="og vz-ofsec" id="ord-forn" data-n="' + nF + '">' + ordFornHtml() + '</section>' + pagellaFornitori();
     var F = ordFiltrato(), nScad = F.att.filter(function(r){ return ordInFin(r.f) && (!ordCmF || r.v.cm === ordCmF); }).length;
     h += '<div class="vz-ofind"><input class="sel" id="ord-q" type="search" value="' + esc(ordS) + '" placeholder="Cerca negli ordini: numero, articolo, fornitore, descrizione, commessa" aria-label="Cerca negli ordini">'
       + '<span id="ord-qn" aria-live="polite">' + (ordS ? ordRg(F.sett.length + F.pross.length + F.att.length + F.rip.length) + ' trovate' : '') + '</span></div>';
@@ -2035,42 +2041,132 @@ var VZ = (function(){
       + '<section class="og" id="ord-graf">' + ordGrafHtml(F) + '</section>'
       + '<section class="og" id="ord-scad" data-n="' + nScad + '">' + ordScadHtml(F.att) + '</section>'
       + (B.rip.length ? '<section class="og" id="ord-rip" data-n="' + F.rip.length + '">' + ordRipHtml(F.rip) + '</section>' : '');
-    h += pagellaFornitori();
     return h;
   }
 
   /* R19 (13/09/2026): pagella fornitori, su richiesta di Danilo. Corretto 15/09/2026: una riga
      resta nell'estrazione finche' l'ordine non arriva o viene evaso nel gestionale (non esiste
      un flag "ev" separato, vedi regole/2026-09-15-ordini-fornitore-criterio) — quindi questa e'
-     comunque la situazione di OGGI, fornitore per fornitore, non uno storico. */
+     comunque la situazione di OGGI, fornitore per fornitore, non uno storico.
+     R36: sale in cima a Ordini, sotto le barre dei fornitori, chiusa di suo (185 righe); nomi uniti con fornKey. */
   function pagellaFornitori(){
     var oggi = today();
     var per = {};
     ordiniAperti().forEach(function (v){
-      var f = v.f || 'Fornitore non indicato';
-      per[f] = per[f] || {aperti: 0, scaduti: 0, ggTot: 0, valFermo: 0};
-      per[f].aperti++;
+      var f = v.f || 'Fornitore non indicato', k = fornKeyC(f);
+      var q = per[k] = per[k] || {aperti: 0, scaduti: 0, ggTot: 0, valFermo: 0, nomi: {}};
+      q.aperti++; q.nomi[f] = (q.nomi[f] || 0) + 1;
       if (v.dp){
         var gg = days(oggi, v.dp);
-        if (gg < 0){ per[f].scaduti++; per[f].ggTot += -gg; per[f].valFermo += (v.imp || 0); }
+        if (gg < 0){ q.scaduti++; q.ggTot += -gg; q.valFermo += (v.imp || 0); }
       }
     });
-    var righe = Object.keys(per).map(function (f){
-      var q = per[f]; q.f = f; q.ggMedi = q.scaduti ? Math.round(q.ggTot / q.scaduti) : 0; return q;
+    var righe = Object.keys(per).map(function (k){
+      var q = per[k], ns = Object.keys(q.nomi).sort(function(a, b){ return q.nomi[b] - q.nomi[a]; });
+      q.f = ns[0]; q.alias = ns.slice(1); q.ggMedi = q.scaduti ? Math.round(q.ggTot / q.scaduti) : 0; return q;
     }).filter(function (q){ return q.scaduti > 0; })
       .sort(function (a, b){ return b.scaduti - a.scaduti || b.ggMedi - a.ggMedi; });
     if (!righe.length) return '';
-    return '<section class="og"><h3><i class="dt late"></i>Fornitori con ordini in ritardo'
-      + '<em class="oghint">ordini aperti oggi, non uno storico: per decidere chi sollecitare prima</em></h3>'
-      + '<div class="otab"><table><thead><tr><th>Fornitore</th><th>Ordini scaduti</th>'
+    return '<section class="og" id="ord-pag" data-n="' + righe.length + '"><h3><i class="dt late"></i>Pagella dei fornitori con ordini in ritardo'
+      + '<em class="oghint">ordini aperti oggi su tutte le commesse (anche evase), non uno storico: per decidere chi sollecitare prima</em></h3>'
+      + '<details class="vz-opag"' + (ordPagOn ? ' open' : '') + '><summary>' + (ordPagOn ? 'Chiudi' : 'Apri') + ' la pagella: ' + righe.length + ' fornitori</summary>'
+      + '<div class="otab"><table><thead><tr><th>Fornitore</th><th>Righe scadute</th>'
       + '<th>Ritardo medio</th><th>Valore fermo</th></tr></thead><tbody>'
       + righe.map(function (q){
-          return '<tr><td><b>' + esc(q.f) + '</b></td>'
-            + '<td class="mono late">' + q.scaduti + ' su ' + q.aperti + ' aperti</td>'
+          return '<tr><td><b>' + esc(q.f) + '</b>' + (q.alias.length ? '<span class="osub">scritto anche «' + esc(q.alias.join('», «')) + '»</span>' : '') + '</td>'
+            + '<td class="mono late">' + q.scaduti + ' su ' + q.aperti + ' aperte</td>'
             + '<td class="mono">' + q.ggMedi + ' gg</td>'
             + '<td class="mono">' + (q.valFermo ? esc(eur(q.valFermo)) : '—') + '</td></tr>';
         }).join('')
-      + '</tbody></table></div></section>';
+      + '</tbody></table></div></details></section>';
+  }
+
+  /* R36 fornitori-da-segnalare: in testa a Ordini i primi 12 fornitori per € scaduti sulle commesse in vista (in corso
+     o selezionate), un solo colore; a destra «righe · gg medi · €»; interruttore «per numero di righe»; clic = tabelle
+     filtrate per quel fornitore (ordQ), secondo clic toglie; accanto «Segnala ad acquisti», lo stesso pulsante e la
+     stessa richiesta di Persone › Fornitori (segnalaBtn, SEG, segnalaWire). I nomi scritti in due modi (C&P SNC …)
+     si uniscono con fornKey. Stato solo in memoria: misura e pagella aperta. */
+  var ordFmis = 'e', ordPagOn = false, FKC = {};
+  function fornKeyC(f){ f = f == null ? '' : String(f); return FKC.hasOwnProperty(f) ? FKC[f] : (FKC[f] = fornKey(f)); }
+  function ordForn(att){
+    var per = {}, L = [];
+    att.forEach(function(r){
+      var nm = r.v.f || 'Fornitore non indicato', k = fornKeyC(nm), x = per[k];
+      if (!x){ x = per[k] = {k: k, nomi: {}, n: 0, e: 0, gg: 0, no: 0, cms: {}}; L.push(x); }
+      x.n++; x.e += r.e; x.gg += r.g; if (!r.e) x.no++; if (r.v.cm) x.cms[r.v.cm] = 1;
+      x.nomi[nm] = (x.nomi[nm] || 0) + 1;
+    });
+    L.forEach(function(x){
+      var ns = Object.keys(x.nomi).sort(function(a, b){ return x.nomi[b] - x.nomi[a]; });
+      x.f = ns[0]; x.alias = ns.slice(1); x.ggm = Math.round(x.gg / x.n); x.scad = x.n; x.ncm = Object.keys(x.cms).length;
+    });
+    return L;
+  }
+  function ordFqHtml(){
+    if (!ordQ) return '';
+    return '<div class="fbar vz-offq">Tabelle qui sotto solo per il fornitore <b>' + esc(ordQ) + '</b> <button type="button" class="chip" id="ord-clear" data-ofq="">× tutti i fornitori</button></div>';
+  }
+  function ordFornHtml(){
+    var B = ordB; if (!B) return '';
+    var L = ordForn(B.att), chi = B.nsel ? 'selezionate' : 'in corso';
+    var h = '<h3><i class="dt warn"></i>Fornitori da segnalare ad acquisti<em class="oghint">righe d’ordine scadute sulle commesse ' + chi
+      + ', tutti i ritardi · lo stesso fornitore scritto in due modi conta una volta · clic su una barra: le tabelle qui sotto solo per quel fornitore</em></h3>';
+    if (!L.length) return h + '<p class="ogempty">Nessun ordine scaduto sulle commesse ' + chi + '.</p>' + ordFqHtml();
+    function mv(x){ return ordFmis === 'n' ? x.n : x.e; }
+    L.sort(function(a, b){ return mv(b) - mv(a) || b.n - a.n || b.e - a.e || String(a.f).localeCompare(String(b.f)); });
+    var top = L.slice(0, 12), mx = Math.max.apply(null, top.map(mv)) || 1, qk = ordQ ? fornKeyC(ordQ) : '', totE = 0, totN = 0;
+    L.forEach(function(x){ totE += x.e; totN += x.n; });
+    h += '<div class="vz-of"><div class="vz-orctl"><span class="vz-orgrp"><span class="vz-lab">Ordina</span><span class="vz-seg" role="group" aria-label="Ordina i fornitori">'
+      + '<button type="button" data-ofmis="e" aria-pressed="' + (ordFmis === 'e') + '">per € scaduti</button>'
+      + '<button type="button" data-ofmis="n" aria-pressed="' + (ordFmis === 'n') + '">per numero di righe</button></span></span>'
+      + '<span class="vz-ofsum">' + L.length + ' fornitori · ' + ordRg(totN) + ' · ' + VZ.eurC(totE) + '</span></div>'
+      + '<div class="vz-ofl" role="list" aria-label="Fornitori con righe scadute, ' + (ordFmis === 'n' ? 'per numero di righe' : 'per euro') + '">';
+    top.forEach(function(x){
+      var on = qk === x.k;
+      var tt = [[ordRg(x.n), 'scadute', '1', 'r'], [VZ.eurC(x.e), 'importo' + (x.no ? ' (' + ordN(x.no) + (x.no === 1 ? ' riga senza)' : ' righe senza)') : ''), '', ''],
+        [x.ggm + ' gg', 'ritardo medio', '', ''], [String(x.ncm), x.ncm === 1 ? 'commessa' : 'commesse', '', '']];
+      if (x.alias.length) tt.push(['', 'scritto anche «' + x.alias.join('», «') + '»', '', '']);
+      tt.push(['', on ? 'clic: togli il filtro' : 'clic: tabelle solo per questo fornitore', '', '']);
+      h += '<div class="vz-ofr' + (on ? ' on' : '') + '" role="listitem">'
+        /* div e non button: la copia per il PDF toglie i bottoni, le barre devono restare */
+        + '<div class="vz-ofb" role="button" tabindex="0" data-ofq="' + esc(x.f) + '" aria-pressed="' + on + '"' + VZ.tip(x.f, tt)
+        + ' aria-label="' + esc(x.f + ': ' + ordRg(x.n) + ' scadute, ritardo medio ' + x.ggm + ' giorni, ' + VZ.eur(x.e) + (on ? ', filtro attivo' : '')) + '">'
+        + '<span class="vz-ofk">' + esc(x.f) + (x.alias.length ? '<small> +' + x.alias.length + (x.alias.length === 1 ? ' grafia' : ' grafie') + '</small>' : '') + '</span>'
+        + '<span class="vz-oft" aria-hidden="true"><i style="width:' + ordPc(Math.max(mv(x) / mx, 0.006)) + '"></i></span>'
+        + '<span class="vz-ofv"><b>' + ordRg(x.n) + '</b> · ' + x.ggm + ' gg<span class="vz-ofm"> medi</span> · <b>' + VZ.eurC(x.e) + '</b></span></div>'
+        + segnalaBtn(x) + '</div>';
+    });
+    h += '</div>';
+    if (L.length > top.length){
+      var rE = 0, rN = 0; L.slice(top.length).forEach(function(x){ rE += x.e; rN += x.n; });
+      h += '<p class="vz-ornote">Altri ' + (L.length - top.length) + ' fornitori: ' + ordRg(rN) + ' · ' + VZ.eurC(rE) + '. Ci sono tutti nella pagella qui sotto e in Persone › Fornitori.</p>';
+    }
+    return h + ordFqHtml() + '</div>';
+  }
+  function ordFornAgg(){
+    var s = document.getElementById('ord-forn');
+    if (!s || !ordB) return;
+    s.innerHTML = ordFornHtml(); s.setAttribute('data-n', ordForn(ordB.att).length);
+    segnalaWire(s);
+  }
+  function ordFornClick(e){
+    var el = e.target.closest && e.target.closest('[data-ofq],[data-ofmis],.vz-opag > summary');
+    if (!el || !stage.contains(el) || !ordB) return;
+    if (el.tagName === 'SUMMARY'){
+      /* la pagella si ricorda aperta o chiusa finche' non ricarichi la pagina */
+      setTimeout(function(){ var d = el.parentNode; ordPagOn = !!d.open; el.textContent = (ordPagOn ? 'Chiudi' : 'Apri') + el.textContent.replace(/^(Apri|Chiudi)/, ''); }, 0);
+      return;
+    }
+    if (el.hasAttribute('data-ofmis')){ ordFmis = el.getAttribute('data-ofmis'); ordFornAgg(); var b = stage.querySelector('[data-ofmis="' + ordFmis + '"]'); if (b && e.detail === 0) b.focus(); return; }
+    var v = el.getAttribute('data-ofq');
+    ordQ = !v || (ordQ && fornKeyC(ordQ) === fornKeyC(v)) ? '' : v;
+    ordPag = {};
+    ordAggiorna(); ordFornAgg();
+    if (e.detail === 0){
+      var l = stage.querySelectorAll('.vz-ofb[data-ofq]'), n = null;
+      for (var i = 0; i < l.length; i++) if (l[i].getAttribute('data-ofq') === v){ n = l[i]; break; }
+      if (n || l.length) (n || l[0]).focus();
+    }
   }
 
   /* ---------- DASHBOARD COMMESSE ---------- */
@@ -3095,6 +3191,16 @@ var VZ = (function(){
       + '<span>clicca un punto per filtrare l\'elenco</span></div></div></div>';
   }
 
+  /* R36 viaggi-date: date brevi («15–22 nov», «30 ott – 2 nov») perché «15 novembre – 22 novembre»
+     usciva dalla colonna di 126 px e copriva il nome della città. La data per esteso resta nel title. */
+  function vDate(v){
+    var a = d0(v.dal), b = v.al && v.al !== v.dal ? d0(v.al) : null;
+    if (isNaN(a.getTime())) return it(v.dal);
+    var ma = MESI_BREVI[a.getMonth()];
+    if (!b || isNaN(b.getTime())) return a.getDate() + ' ' + ma;
+    if (a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth()) return a.getDate() + '–' + b.getDate() + ' ' + ma;
+    return a.getDate() + ' ' + ma + ' – ' + b.getDate() + ' ' + MESI_BREVI[b.getMonth()];
+  }
   function vRiga(v){
     var c = VCOL[v.motivo] || VCOL.altro;
     var n = v.al && v.al !== v.dal ? days(v.dal, v.al) + 1 : 1;
@@ -3107,7 +3213,7 @@ var VZ = (function(){
     if (v.con) tags += '<span class="tag">con ' + esc(v.con) + '</span>';
     if (v.copre) tags += '<span class="tag dlg">copre: ' + esc(v.copre) + '</span>';
     return '<li class="trip" style="--c:' + c + '">'
-      + '<div class="when">' + esc(it(v.dal)) + (v.al && v.al !== v.dal ? ' – ' + esc(it(v.al)) : '')
+      + '<div class="when" title="' + esc(it(v.dal) + (v.al && v.al !== v.dal ? ' – ' + it(v.al) : '') + ' ' + v.dal.slice(0,4)) + '">' + esc(vDate(v))
       + '<em>' + esc(v.dal.slice(0,4)) + ' · ' + n + (n === 1 ? ' giorno' : ' giorni') + '</em></div>'
       + '<div><h3>' + esc(v.citta) + ' <span>' + esc(v.paese) + '</span></h3>'
       + '<p>' + esc(v.det) + '</p><div class="tags">' + tags + '</div></div></li>';
@@ -4138,12 +4244,17 @@ var VZ = (function(){
     var ev = eventi().filter(function(e){
       return calFinestra(e) && (calF === 'tutti' || e.k === calF);
     });
+    /* R36 calendario-da-oggi: gli ultimi 30 giorni in una riga compressa in cima, poi da oggi in avanti; il mese
+       corrente e i 3 successivi aperti, quelli dopo chiusi con il loro conteggio. «past» sta sulla singola .cev. */
+    var oggiD = today(), pas = [], fut = [];
+    ev.forEach(function(e){ (d0(e.d) < oggiD ? pas : fut).push(e); });
     var h = '<div class="cm-tools" id="calseg">'
       + ['tutti','agenda','consegna','install','scad','incasso','task','viaggio','ente'].map(function(k){
           return '<button class="chip" data-cal="' + k + '" aria-pressed="' + (calF === k) + '">'
             + (k === 'tutti' ? 'Tutto' : EK[k].l) + '</button>'; }).join('')
+      + '<button class="chip calgo" id="cal-oggi" title="Scorri l’elenco a oggi">Oggi</button>'
       + '<button class="btn" id="riu-apri">' + (riuAperta ? 'chiudi' : '+ Fissa una riunione') + '</button>'
-      + '<span class="cm-hint">' + ev.length + ' eventi nei prossimi 18 mesi'
+      + '<span class="cm-hint">' + fut.length + ' eventi da oggi ai prossimi 18 mesi'
       + (S.gcalup ? ' \u00b7 agenda di tirotta@prestonbarbieri.com allineata il ' + esc(itFull(S.gcalup.slice(0,10))) : '')
       + '</span></div>';
     h += riuForm();
@@ -4153,34 +4264,71 @@ var VZ = (function(){
       calWire();
       return;
     }
-    var mese = null, open = false;
     h += '<div class="cal">';
-    ev.forEach(function(e){
-      var d = new Date(e.d), m = d.getFullYear() + '-' + d.getMonth();
-      if (m !== mese){
-        if (open) h += '</div></div>';
-        var passato = d0(e.d) < today();
-        h += '<div class="calm' + (passato ? ' past' : '') + '"><div class="calh">'
-          + MESI[d.getMonth()].toUpperCase() + ' <b>' + d.getFullYear() + '</b></div><div class="cale">';
-        mese = m; open = true;
-      }
-      var k = days(new Date(), e.d);
-      h += '<div class="cev" style="--c:' + EK[e.k].c + '"' + (e.cm ? ' data-cm="' + esc(e.cm) + '"' : '') + '>'
-        + '<span class="cd">' + d.getDate() + '</span>'
-        + '<div><b>' + esc(e.tit) + '</b><span>' + esc(e.sub || '') + '</span></div>'
-        + '<span class="ck">' + EK[e.k].l + (k < 0 ? ' · passato' : '')
-        /* R13: rendo cliccabile solo http/https: un altro protocollo non deve finire in href. */
-        + (linkOk(e.url) ? '<a class="gml" href="' + esc(e.url) + '" target="_blank" rel="noopener">Apri \u2197</a>' : '')
-        + '</span></div>';
+    if (pas.length){
+      var pInc = pas.filter(function(e){ return e.k === 'incasso'; }).length, pTask = pas.filter(function(e){ return e.k === 'task'; }).length;
+      h += '<details class="calm calpass" id="cal-pass"' + (calPassOn ? ' open' : '') + '><summary>'
+        + '<b>' + pas.length + (pas.length === 1 ? ' evento' : ' eventi') + ' negli ultimi 30 giorni</b><i class="calfr" aria-hidden="true"></i>'
+        + '<span class="calps">dal ' + esc(itFull(isoDi(d0(pas[0].d)))) + ' al ' + esc(itFull(isoDi(d0(pas[pas.length - 1].d))))
+        + (pTask ? ' · ' + pTask + (pTask === 1 ? ' task con scadenza passata, ancora aperto' : ' task con scadenza passata, ancora aperti') : '') + '</span>'
+        + (pInc ? '<span class="pill late calpi"><i class="pico" aria-hidden="true">⚠</i> ' + pInc + (pInc === 1 ? ' incasso' : ' incassi') + ': data passata, da verificare</span>' : '')
+        + '</summary><div class="cale">';
+      var mp = '';
+      pas.forEach(function(e){
+        var d = d0(e.d), km = isoDi(d).slice(0, 7);
+        if (km !== mp){ h += '<div class="calsub">' + MESI[d.getMonth()].toUpperCase() + ' <b>' + d.getFullYear() + '</b></div>'; mp = km; }
+        h += calEv(e, d, days(oggiD, d));
+      });
+      h += '</div></details>';
+    }
+    /* mesi da oggi, raggruppati per AAAA-MM: data-m e' quello che legge calVai */
+    var MM = [], per = {};
+    fut.forEach(function(e){
+      var d = d0(e.d), km = isoDi(d).slice(0, 7);
+      if (!per[km]){ per[km] = {m: km, d: d, l: []}; MM.push(per[km]); }
+      per[km].l.push(e);
     });
-    if (open) h += '</div></div>';
+    var limK = isoDi(new Date(oggiD.getFullYear(), oggiD.getMonth() + 4, 1)).slice(0, 7);
+    MM.forEach(function(g){
+      var chiuso = g.m >= limK, n = g.l.length, t = {}, tit = MESI[g.d.getMonth()].toUpperCase() + ' <b>' + g.d.getFullYear() + '</b>';
+      g.l.forEach(function(e){ t[e.k] = (t[e.k] || 0) + 1; });
+      var comp = CAL_ORD.filter(function(k){ return t[k]; }).sort(function(a, b){ return t[b] - t[a]; }).map(function(k){ return t[k] + ' ' + calNome(k, t[k], false); });
+      var cnt = '<em class="caln">' + n + (n === 1 ? ' evento' : ' eventi')
+        + (chiuso && comp.length > 1 ? ': ' + esc(comp.slice(0, 3).join(', ')) + (comp.length > 3 ? '…' : '') : '') + '</em>';
+      var righe = g.l.map(function(e){ var d = d0(e.d); return calEv(e, d, days(oggiD, d)); }).join('');
+      if (chiuso) h += '<details class="calm calchiusa" data-m="' + g.m + '"' + (calAperti[g.m] ? ' open' : '') + '><summary class="calh">' + tit + cnt
+        + '<i class="calfr" aria-hidden="true"></i></summary><div class="cale">' + righe + '</div></details>';
+      else h += '<div class="calm" data-m="' + g.m + '"><div class="calh">' + tit + cnt + '</div><div class="cale">' + righe + '</div></div>';
+    });
     stage.innerHTML = h + '</div>';
     calWire();
+  }
+  /* stato solo in memoria (nessuna chiave nello stato): riga dei 30 giorni passati aperta e mesi lontani aperti a mano */
+  var calPassOn = false, calAperti = {};
+  function calEv(e, d, k){
+    var pInc = k < 0 && e.k === 'incasso';
+    return '<div class="cev' + (k < 0 ? ' past' : '') + '" data-d="' + isoDi(d) + '" style="--c:' + EK[e.k].c + '"' + (e.cm ? ' data-cm="' + esc(e.cm) + '"' : '') + '>'
+      + '<span class="cd">' + d.getDate() + '</span>'
+      + '<div><b>' + esc(e.tit) + '</b><span>' + esc(e.sub || '') + '</span></div>'
+      + '<span class="ck">' + EK[e.k].l + (k < 0 && !pInc ? ' · passato' : '')
+      /* incassi con la data superata: la dicitura di incassi-scaduti-veri, con icona e parola */
+      + (pInc ? ' <span class="pill late"><i class="pico" aria-hidden="true">⚠</i> data passata, da verificare</span>' : '')
+      /* R13: rendo cliccabile solo http/https: un altro protocollo non deve finire in href. */
+      + (linkOk(e.url) ? '<a class="gml" href="' + esc(e.url) + '" target="_blank" rel="noopener">Apri ↗</a>' : '')
+      + '</span></div>';
   }
   function calWire(){
     calCaricoWire();   /* R35: grafici del carico */
     document.querySelectorAll('#calseg button[data-cal]').forEach(function(b){
       b.addEventListener('click', function(){ calF = b.getAttribute('data-cal'); calendario(); });
+    });
+    /* R36: «Oggi» porta l'elenco al primo evento da oggi in avanti; le righe chiuse ricordano se le hai aperte */
+    var bo = document.getElementById('cal-oggi');
+    if (bo) bo.addEventListener('click', function(){ calVai(isoDi(today()), false); });
+    var cp = document.getElementById('cal-pass');
+    if (cp) cp.addEventListener('toggle', function(){ calPassOn = cp.open; });
+    stage.querySelectorAll('.cal details.calchiusa[data-m]').forEach(function(d){
+      d.addEventListener('toggle', function(){ calAperti[d.getAttribute('data-m')] = d.open; });
     });
     var ra = document.getElementById('riu-apri'), rf = document.getElementById('riuform');
     if (ra && rf){
@@ -4426,19 +4574,28 @@ var VZ = (function(){
   });
   /* scorre l'elenco al mese (o al primo evento del giorno, o al successivo) e lo evidenzia per un attimo */
   function calVai(ds, soloMese){
-    var d = d0(ds), want = d.getFullYear() * 12 + d.getMonth(), best = null, bestK = Infinity;
-    stage.querySelectorAll('.cal .calm').forEach(function(m){
-      var h = m.querySelector('.calh'), p = h ? (h.textContent || '').trim().toLowerCase().split(/\s+/) : [];
-      var k = +p[1] * 12 + MESI.indexOf(p[0]);
-      if (MESI.indexOf(p[0]) >= 0 && k >= want && k < bestK){ best = m; bestK = k; }
-    });
-    if (!best) return;
-    var el = best;
-    if (!soloMese && bestK === want){
-      var cs = best.querySelectorAll('.cev');
-      for (var i = 0; i < cs.length; i++){
-        var cd = cs[i].querySelector('.cd'), n = cd ? parseInt(cd.textContent, 10) : NaN;
-        if (n >= d.getDate() && cs[i].offsetParent !== null){ el = cs[i]; break; }
+    /* R36: il mese si riconosce da data-m="AAAA-MM" (prima dal testo di .calh); un giorno gia' passato sta nella riga
+       compressa dei 30 giorni, un mese oltre i 3 successivi e' chiuso: in entrambi i casi si apre prima di scorrere */
+    var d = d0(ds), ks = isoDi(d), want = ks.slice(0, 7), best = null, bestK = null, el = null, i, cs;
+    var pass = stage.querySelector('.cal details.calpass');
+    if (!soloMese && pass && d < today()){
+      cs = pass.querySelectorAll('.cev[data-d]');
+      for (i = 0; i < cs.length; i++) if (cs[i].getAttribute('data-d') >= ks){ el = cs[i]; break; }
+      if (el){ pass.open = true; calPassOn = true; }
+    }
+    if (!el){
+      stage.querySelectorAll('.cal .calm[data-m]').forEach(function(m){
+        var k = m.getAttribute('data-m');
+        if (k >= want && (bestK === null || k < bestK)){ best = m; bestK = k; }
+      });
+      if (!best) return;
+      if (best.tagName === 'DETAILS' && !best.open){ best.open = true; calAperti[bestK] = true; }
+      el = best;
+      if (!soloMese && bestK === want){
+        cs = best.querySelectorAll('.cev[data-d]');
+        for (i = 0; i < cs.length; i++){
+          if (cs[i].getAttribute('data-d') >= ks && cs[i].offsetParent !== null){ el = cs[i]; break; }
+        }
       }
     }
     /* posizione dal layout (offsetTop) e non da getBoundingClientRect: i mesi non ancora comparsi hanno
@@ -4842,37 +4999,238 @@ var VZ = (function(){
   }
 
   /* ================= RICERCA GLOBALE ================= */
-  function cerca(q){
-    q = q.toLowerCase().trim();
-    if (!q) return [];
-    var r = [];
-    tuttiTask().forEach(function(x){
-      if ((x.t.t + ' ' + x.g.code + ' ' + x.g.name + ' ' + (x.t.n||'')).toLowerCase().indexOf(q) > -1)
-        r.push({t:'task', tit:x.t.t, sub:x.g.code + ' · ' + x.g.name, go:{v:'board', q:x.g.code}});
+  /* R36 ricerca-globale: testo e domanda normalizzati (minuscole, accenti tolti, trattini/barre/punti = spazi) e
+     tutte le parole in AND, così «dt 10 26» trova DT-10-26 e «dona» trova Donà. Risultati per tipo, Commesse prima.
+     Fonti nuove: ordini fornitore (S.ordf.voci), rate (c.pag.voci), termini fornitori (S.fornTermini), agenda
+     (S.gcal) e colleghi (S.team). L'indice col testo normalizzato si costruisce UNA volta, quando il campo prende
+     il fuoco (non a ogni tasto); le righe d'ordine restano in cache finché l'estrazione non cambia. */
+  var GS_T = [['commessa', 'Commesse', 'commessa'], ['task', 'Task', 'task'], ['ordine', 'Ordini fornitore', 'ordine'],
+    ['rata', 'Rate e incassi', 'rata'], ['fornitore', 'Fornitori', 'fornitore'], ['agenda', 'Agenda', 'agenda'],
+    ['viaggio', 'Viaggi', 'viaggio'], ['fattura', 'Da fatturare', 'fattura'], ['attesa', 'Aspettano una tua risposta', 'in attesa'],
+    ['collega', 'Colleghi', 'collega']];
+  var gsIdx = null, gsOrd = null, gsOrdSig = '';
+  function gsNorm(s){
+    s = String(s == null ? '' : s).toLowerCase();
+    if (s.normalize) s = s.normalize('NFD').replace(/[̀-ͯ]/g, '');
+    return s.replace(/_x000d_/g, ' ').replace(/[\s\-‐-―_\/\\.,;:·•'’"«»()\[\]{}|+]+/g, ' ').trim();
+  }
+  function gsVoce(t, tit, sub, go, testo, chiuso){
+    var ht = gsNorm(tit);
+    return {t: t, tit: tit, sub: sub, go: go, ht: ht, h: ' ' + ht + ' ' + gsNorm(testo), chiuso: !!chiuso};
+  }
+  function gsCorto(s, n){ s = String(s || ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+  function gsOrdini(){
+    var o = S.ordf || {}, vs = o.voci || [], sig = vs.length + '|' + (o.agg || '');
+    if (gsOrd && gsOrdSig === sig) return gsOrd;
+    gsOrdSig = sig;
+    gsOrd = vs.map(function(v){
+      var d = ordTesto(v.d);
+      return gsVoce('ordine', 'Ordine ' + (v.n || '—') + ' · ' + (v.f || 'fornitore non indicato'),
+        (v.cm || 'senza commessa') + ' · ' + gsCorto(d, 70) + (v.dp ? ' · consegna prevista ' + itFull(v.dp) : '') + (v.imp ? ' · ' + VZ.eurC(+v.imp) : ''),
+        {ord: v}, [v.art, d, v.cm, v.nd].join(' '));
     });
+    return gsOrd;
+  }
+  function gsIndice(){
+    var L = [];
     (S.commesse || []).forEach(function(c){
-      if ((c.code + ' ' + c.cliente + ' ' + c.desc + ' ' + (c.ncli||'') + ' ' + (c.nint||'') + ' ' + (c.paese||'') + ' ' + (c.capo||'')
-           + ' ' + (c.note||'')).toLowerCase().indexOf(q) > -1)
-        r.push({t:'commessa', tit:c.code + ' · ' + c.cliente, sub:c.desc, go:{v:'dash', cm:c.code}});
+      L.push(gsVoce('commessa', c.code + ' · ' + (c.cliente || ''), (c.desc || '') + (c.ev ? ' · evasa' : c.sp ? ' · sospesa' : ''), {cm: c.code},
+        [c.desc, c.ncli, c.nint, c.paese, c.luogo, c.capo, c.note].join(' '), c.ev));
     });
-    ((S.viaggi && S.viaggi.viaggi) || []).concat((S.viaggi && S.viaggi.aggiunti) || [])
-      .forEach(function(v){
-        if ((v.citta + ' ' + v.paese + ' ' + v.det).toLowerCase().indexOf(q) > -1)
-          r.push({t:'viaggio', tit:v.citta + ' · ' + itFull(v.dal), sub:v.det, go:{v:'trip', city:v.citta}});
+    tuttiTask().forEach(function(x){
+      var t = x.t;
+      L.push(gsVoce('task', t.t, x.g.code + ' · ' + x.g.name + (t.d ? ' · chiuso' : t.due ? ' · scade il ' + itFull(t.due) : ''),
+        {v: 'board', q: x.g.code, tid: t.id}, [x.g.code, x.g.name, ntxt(t), riList(t).join(' '), t.dg].join(' '), t.d));
+    });
+    Array.prototype.push.apply(L, gsOrdini());
+    (S.commesse || []).forEach(function(c){
+      ((c.pag && c.pag.voci) || []).forEach(function(v){
+        var ps = pagStato(v);
+        L.push(gsVoce('rata', c.code + ' · ' + gsCorto(v.c || 'rata', 90), ps.txt + (v.imp ? ' · ' + eur(v.imp) : ' · senza importo')
+          + (v.inc ? ' · incassata il ' + itFull(v.inc) : v.att ? ' · attesa il ' + itFull(v.att) : '') + ' · ' + (c.cliente || ''),
+          {rata: {cm: c.code, c: v.c || ''}}, [v.c, c.cliente, v.n, 'rata incasso'].join(' '), ps.g === 'inc' || c.ev));
       });
-    (S.billing || []).forEach(function(b){
-      if ((b.cli + ' ' + b.ride + ' ' + b.w).toLowerCase().indexOf(q) > -1)
-        r.push({t:'fattura', tit:b.cli + ' · ' + b.ride, sub:b.w, go:{v:'bill'}});
     });
-    (S.attese || []).forEach(function(a){
-      if ((a.chi + ' ' + a.az + ' ' + a.chiede).toLowerCase().indexOf(q) > -1)
-        r.push({t:'in attesa', tit:a.chi + ' · ' + a.az, sub:a.chiede, go:{v:'oggi'}});
+    /* fornitori: uno per nome (stessa chiave di fornKey), dagli ordini e dai termini di pagamento; poi le schede di S.forn */
+    var FK = {}, FL = [];
+    ((S.ordf && S.ordf.voci) || []).forEach(function(v){
+      if (!v.f) return;
+      var k = fornKey(v.f), x = FK[k] || (FK[k] = {f: v.f, n: 0, s: 0, t: ''});
+      if (!x.n) FL.push(x);
+      x.n++; if (v.dp && d0(v.dp) < today()) x.s++;
+    });
+    var FT = S.fornTermini || {};
+    Object.keys(FT).forEach(function(nm){
+      var k = fornKey(nm), x = FK[k];
+      if (!x){ x = FK[k] = {f: nm, n: 0, s: 0, t: ''}; FL.push(x); }
+      x.t = (FT[nm] && FT[nm].testo) || '';
+      x.tr = (FT[nm] && FT[nm].rate) || '';
+    });
+    FL.forEach(function(x){
+      var sub = (x.n ? x.n + (x.n === 1 ? ' riga d’ordine aperta' : ' righe d’ordine aperte') + (x.s ? ', ' + x.s + ' scadute' : '') : 'nessun ordine aperto')
+        + (x.t ? ' · termini: ' + gsCorto(x.t, 80) : '');
+      L.push(gsVoce('fornitore', x.f, sub, {forn: x.f}, [x.t, x.tr].join(' ')));
     });
     (S.forn || []).forEach(function(f){
-      if ((f.n + ' ' + f.cosa + ' ' + f.note).toLowerCase().indexOf(q) > -1)
-        r.push({t:'fornitore', tit:f.n, sub:f.cosa, go:{v:'pers'}});
+      L.push(gsVoce('fornitore', f.n, (f.cosa || '') + (f.cm && f.cm.length ? ' · ' + f.cm.join(', ') : ''), {forn: f.n}, [f.cosa, f.note, (f.cm || []).join(' ')].join(' ')));
     });
-    return r.slice(0, 40);
+    var oggiD = today();
+    (S.gcal || []).forEach(function(a){
+      L.push(gsVoce('agenda', a.tit, itFull(a.d) + ' · ' + agSub(a), {ag: a}, [a.org, a.d].join(' '), d0(a.d) < oggiD));
+    });
+    ((S.viaggi && S.viaggi.viaggi) || []).concat((S.viaggi && S.viaggi.aggiunti) || []).forEach(function(v){
+      L.push(gsVoce('viaggio', (v.citta || '') + ' · ' + (v.dal ? itFull(v.dal) : 'senza data'), v.det, {v: 'trip', city: v.citta, dal: v.dal || ''}, [v.paese, v.det, v.motivo].join(' ')));
+    });
+    (S.billing || []).forEach(function(b){
+      L.push(gsVoce('fattura', b.cli + ' · ' + b.ride, b.w, {bill: b.id}, [b.w, b.stx, b.nx].join(' '), b.d));
+    });
+    (S.attese || []).forEach(function(a){
+      L.push(gsVoce('attesa', a.chi + ' · ' + a.az, a.chiede, {att: {chi: a.chi, az: a.az}}, [a.ogg, a.chiede, a.cm].join(' ')));
+    });
+    (S.team || []).forEach(function(m){
+      L.push(gsVoce('collega', m.n, (m.r || 'senza ruolo') + (m.e ? ' · ' + m.e : ''), {collega: m.n}, [m.r, m.e].join(' ')));
+    });
+    return L;
+  }
+  /* ogni parola deve trovarsi a inizio parola («dt» non trova «DDT»); se cosi' non esce niente, anche a meta' parola.
+     Gruppi nell'ordine di GS_T; dentro il gruppo prima chi ha la frase nel titolo, poi le parole nel titolo */
+  function cerca(q){
+    var qn = gsNorm(q); if (!qn) return [];
+    var W = qn.split(' '), G = {}, idx = gsIdx || (gsIdx = gsIndice()), trovati = 0, pre = W.map(function(w){ return ' ' + w; });
+    function giro(P){
+      idx.forEach(function(x, i){
+        for (var j = 0; j < P.length; j++) if (x.h.indexOf(P[j]) < 0) return;
+        var s = 0, bt = ' ' + x.ht;
+        if (x.ht.indexOf(qn) === 0) s += 6; else if (bt.indexOf(' ' + qn) >= 0) s += 4; else if (x.h.indexOf(' ' + qn) >= 0) s += 2;
+        W.forEach(function(w){ if (bt.indexOf(' ' + w) >= 0) s++; });
+        if (x.chiuso) s -= 3;
+        (G[x.t] || (G[x.t] = [])).push({x: x, s: s, i: i}); trovati++;
+      });
+    }
+    giro(pre);
+    if (!trovati) giro(W);
+    var out = [];
+    GS_T.forEach(function(T){
+      var l = G[T[0]]; if (!l) return;
+      l.sort(function(a, b){ return b.s - a.s || a.i - b.i; });
+      out.push({t: T, l: l.map(function(y){ return y.x; })});
+    });
+    return out;
+  }
+  /* porta all'elemento e lo fa lampeggiare (come vaiA dell'indice, con la posizione dal layout: i blocchi non
+     ancora comparsi hanno la trasformazione .rv e getBoundingClientRect li sposterebbe) */
+  function gsVai(el){
+    if (!el){ try { window.scrollTo({top: 0, behavior: 'smooth'}); } catch (e) {} return; }
+    var y = 0, o = el, bar = document.querySelector('.bar'), off = bar && getComputedStyle(bar).position === 'sticky' ? bar.getBoundingClientRect().height : 0;
+    var jp = stage.querySelector(':scope > .jump'); if (jp && getComputedStyle(jp).position === 'sticky') off += jp.offsetHeight;
+    while (o){ y += o.offsetTop; o = o.offsetParent; }
+    for (o = el; o && o !== stage; o = o.parentNode) if (o.classList && o.classList.contains('rv')) o.classList.add('rv-in');
+    try { window.scrollTo({top: Math.max(y - off - 12, 0), behavior: 'smooth'}); } catch (e) { window.scrollTo(0, Math.max(y - off - 12, 0)); }
+    el.classList.remove('flash-off'); el.classList.add('flash');
+    setTimeout(function(){ el.classList.add('flash-off'); }, 900);
+    setTimeout(function(){ el.classList.remove('flash'); el.classList.remove('flash-off'); }, 1900);
+  }
+  /* dopo il ridisegno: l'indice «In questa pagina» entra dopo 60 ms e sposta il contenuto, quindi si aspetta un po' */
+  function gsDopo(trova){ setTimeout(function(){ gsVai(trova()); }, 160); }
+  function gsTesto(sel, test){
+    var l = stage.querySelectorAll(sel);
+    for (var i = 0; i < l.length; i++) if (test(l[i], (l[i].textContent || '').replace(/\s+/g, ' ').trim())) return l[i];
+    return null;
+  }
+  function gsApri(x){
+    var go = x.go, v, c;
+    if (go.ord){
+      v = go.ord; c = v.cm ? findCm(v.cm) : null;
+      /* Ordini già filtrato: la commessa dell'ordine selezionata da sola, la ricerca sul numero e sulla commessa,
+         i ritardi oltre 90 giorni in tabella se servono, il blocco «da ripulire» aperto se la commessa non è in corso */
+      view = 'dash'; cmode = 'ordini'; sel = {}; cview = 'attive';
+      if (c){ sel[c.code] = true; cview = c.ev ? 'evase' : c.sp ? 'sospese' : 'attive'; }
+      var gr = v.dp ? -days(today(), v.dp) : 0;
+      ordS = [v.n, v.cm].filter(Boolean).join(' '); ordQ = ''; ordCmF = ''; ordPag = {};
+      ordEta = gr > 90 ? 'tutti' : '90'; ordRipOn = !c || !!ordCat(c);
+      setView(); render();
+      gsDopo(function(){
+        var r = gsTesto('#stage .vz-otab tbody tr', function(tr){
+          var n = tr.querySelector('.o-n'), f = tr.querySelector('.o-f b'), d = tr.querySelector('.o-d .vz-odesc');
+          return n && f && (n.textContent || '').indexOf(String(v.n || '—')) === 0 && f.textContent === (v.f || '—')
+            && (!d || d.getAttribute('title') === ordTesto(v.d));
+        });
+        if (!r){
+          var qn = document.getElementById('ord-qn');
+          if (qn) qn.textContent = 'L’ordine ' + (v.n || '') + (v.dp ? ' ha la consegna prevista il ' + itFull(v.dp) : ' non ha data di consegna')
+            + ': qui ci sono solo questa settimana, la prossima e gli scaduti.';
+          return document.querySelector('#stage .vz-ofind');
+        }
+        return r;
+      });
+      return;
+    }
+    if (go.rata){
+      c = findCm(go.rata.cm);
+      if (c && !c.ev){
+        view = 'bill'; denF = 'incassi'; incF = 'tutte'; incCm = c.code; setView(); render();
+        gsDopo(function(){ return gsTesto('#stage .incl-list > li', function(li){ var s = li.querySelector('small'); return s && (s.textContent || '').indexOf(go.rata.c) === 0; }); });
+        return;
+      }
+      go = {cm: go.rata.cm};
+    }
+    if (go.forn){
+      view = 'pers'; perF = 'forn'; fornF = 'tutti'; fornQ = go.forn; setView(); render();
+      gsDopo(function(){ return stage.querySelector('.cards3 > .pcard'); });
+      return;
+    }
+    if (go.collega){
+      view = 'pers'; perF = 'interne'; perR = 'tutti'; setView(); render();
+      gsDopo(function(){ return gsTesto('.cards3 > .pcard', function(p){ var b = p.querySelector('b'); return b && b.firstChild && String(b.firstChild.nodeValue || '').trim() === go.collega; }); });
+      return;
+    }
+    if (go.ag){
+      var a = go.ag, k = days(today(), a.d);
+      view = 'cal'; if (calF !== 'tutti' && calF !== 'agenda') calF = 'tutti';
+      setView(); render();
+      setTimeout(function(){
+        if (k < -30 || k > 550){ gsVai(stage.querySelector('.cal details.calpass > summary') || stage.querySelector('.cal')); return; }
+        calVai(a.d, false);
+        var el = gsTesto('.cal .cev[data-d="' + isoDi(d0(a.d)) + '"]', function(e){ var b = e.querySelector('b'); return b && b.textContent === a.tit; });
+        if (el){ el.classList.add('flash'); setTimeout(function(){ el.classList.add('flash-off'); }, 900); setTimeout(function(){ el.classList.remove('flash'); el.classList.remove('flash-off'); }, 1900); }
+      }, 160);
+      return;
+    }
+    if (go.bill){
+      view = 'bill'; denF = 'fatture'; setView(); render();
+      gsDopo(function(){ return stage.querySelector('.bcard[data-id="' + selId(go.bill) + '"]'); });
+      return;
+    }
+    if (go.att){
+      view = 'oggi'; setView(); render();
+      gsDopo(function(){ return gsTesto('.ogrow', function(r){ var b = r.querySelector('.ogmain > b'), t = b ? (b.textContent || '').replace(/\s+/g, ' ').trim() : ''; return t.indexOf(go.att.chi) === 0 && t.indexOf(go.att.az) > 0; }); });
+      return;
+    }
+    if (go.cm){
+      cmode = 'schede'; apriRis(go);
+      gsDopo(function(){ return stage.querySelector('.cmc'); });
+      return;
+    }
+    if (go.city){
+      apriRis(go);
+      gsDopo(function(){
+        var w = go.dal ? gsTesto('li.trip .when', function(el){ var t = el.getAttribute('title') || ''; return t.indexOf(it(go.dal)) === 0 && t.slice(-4) === go.dal.slice(0, 4); }) : null;
+        return w ? w.parentNode : stage.querySelector('li.trip');
+      });
+      return;
+    }
+    apriRis(go);
+    if (go.tid){
+      var li = stage.querySelector('li[data-id="' + selId(go.tid) + '"]');
+      if (li && li.classList.contains('hide')){
+        /* il task è nascosto dai filtri della bacheca: si torna a «Tutti», senza scadenza/priorità/delegati */
+        filter = 'all'; urgent = prionly = dlgonly = false;
+        ['all', 'open', 'done'].forEach(function(k){ var b = document.getElementById('f-' + k); if (b) b.setAttribute('aria-pressed', String(k === 'all')); });
+        ['f-urg', 'f-pri', 'f-dlg'].forEach(function(id){ var b = document.getElementById(id); if (b) b.setAttribute('aria-pressed', 'false'); });
+        render();
+      }
+      gsDopo(function(){ return stage.querySelector('li[data-id="' + selId(go.tid) + '"]'); });
+    }
   }
   function apriRis(go){
     if (go.cm){ view = 'dash'; sel = {}; sel[go.cm] = true; cview = 'attive';
@@ -5925,7 +6283,9 @@ var VZ = (function(){
   }
   function scadutiDelFornitore(f){
     var t = today(), per = {};
-    ((S.ordf && S.ordf.voci) || []).filter(function(v){ return v.f === f && v.dp && d0(v.dp) < t; })
+    /* R36: stessa chiave di fornKey, cosi' un fornitore scritto in due modi porta con se' tutte le sue righe */
+    var k = fornKey(f);
+    ((S.ordf && S.ordf.voci) || []).filter(function(v){ return v.dp && d0(v.dp) < t && fornKeyC(v.f) === k; })
       .forEach(function(v){ var k = v.n + '|' + (v.cm || ''); if (!per[k]) per[k] = {n:v.n, cm:v.cm || null, dp:v.dp, righe:0}; per[k].righe++; });
     return Object.keys(per).map(function(k){ return per[k]; }).sort(function(a, b){ return d0(a.dp) - d0(b.dp); });
   }
@@ -5940,7 +6300,12 @@ var VZ = (function(){
       ordQ = b.getAttribute('data-ordf'); view = 'dash'; cmode = 'ordini'; setView(); render();
       try{ window.scrollTo(0, 0); }catch(e){}
     }); });
-    document.querySelectorAll('[data-segf]').forEach(function(b){ b.addEventListener('click', function(){
+    segnalaWire(document);
+  }
+  /* R36: i due pulsanti della segnalazione, usati da Persone › Fornitori e da Commesse › Ordini (una sola logica,
+     una sola richiesta nel database: richieste/segnala-<fornKey>) */
+  function segnalaWire(root){
+    root.querySelectorAll('[data-segf]').forEach(function(b){ b.addEventListener('click', function(){
       var f = b.getAttribute('data-segf'), cl = (window.claude && window.claude.use) ? window.claude : null;
       if (!cl){ b.textContent = 'database non disponibile qui'; return; }
       b.disabled = true; b.textContent = 'registro…';
@@ -5954,7 +6319,7 @@ var VZ = (function(){
       }).then(function(){ b.textContent = 'Segnalato ad acquisti ✓'; b.classList.add('on'); })
       .catch(function(){ b.disabled = false; b.textContent = 'non riuscito, riprova'; });
     }); });
-    document.querySelectorAll('[data-segdel]').forEach(function(b){ b.addEventListener('click', function(){
+    root.querySelectorAll('[data-segdel]').forEach(function(b){ b.addEventListener('click', function(){
       var cl = (window.claude && window.claude.use) ? window.claude : null; if (!cl) return;
       b.disabled = true; b.textContent = 'ritiro…';
       cl.use('db').then(function(db){ if (db) return db.doc('richieste/' + b.getAttribute('data-segdel')).delete(); })
@@ -6484,7 +6849,8 @@ var VZ = (function(){
           var sg = {};
           qs.docs.forEach(function(d){ var o = d.data() || {}; if (o.tipo === 'segnala-acquisti' && o.stato !== 'chiusa') sg[o.chiave || fornKey(o.fornitore)] = {id:d.id, creata:o.creata}; });
           var ssig = JSON.stringify(sg), osig = JSON.stringify(SEG);
-          if (ssig !== osig){ SEG = sg; if (view === 'pers' && document.querySelector('[data-segf],[data-segdel]')) persone(); }
+          if (ssig !== osig){ SEG = sg; if (view === 'pers' && document.querySelector('[data-segf],[data-segdel]')) persone();
+            else if (view === 'dash' && cmode === 'ordini') ordFornAgg(); }   /* R36: anche le barre di Ordini */
           var xs = qs.docs.map(function(d){ var o = Object.assign({}, d.data()); o.id = d.id; return o; }).filter(function(r){ return r.tipo === 'export'; });
           var xsig = JSON.stringify(xs.map(function(r){ return [r.id, r.stato, r.url || '']; }));
           if (xsig !== XPsig){ XPsig = xsig; XP = xs; if (view === 'dash' && cmode === 'bdg') bdgRirender(); }
@@ -8168,27 +8534,85 @@ var VZ = (function(){
   /* R28: avvisa anche se l'editor del budget ha modifiche non ancora salvate */
   window.addEventListener('beforeunload', function(e){ if (dirty || (typeof BDG_DIRTY === 'object' && BDG_DIRTY && Object.keys(BDG_DIRTY).length)){ e.preventDefault(); e.returnValue = ''; } });
 
+  /* R36 ricerca-globale: elenco a gruppi (5 per tipo più «altri N»), role=listbox/option con ↑ ↓ Invio Esc,
+     debounce di 120 ms; l'indice si rifà a ogni fuoco del campo, non a ogni tasto. Funziona anche nel menu «⋯»
+     del telefono, dove #gq viene spostato: a scelta fatta il menu si chiude. */
   (function(){
     var gq = document.getElementById('gq'), box = document.getElementById('gsbox');
-    function chiudi(){ box.hidden = true; }
-    gq.addEventListener('input', function(){
-      var r = cerca(gq.value);
-      if (!gq.value.trim()){ chiudi(); return; }
-      box.hidden = false;
-      box.innerHTML = r.length
-        ? r.map(function(x, i){ return '<div class="gsr" data-ri="' + i + '">'
-            + '<span class="gsk">' + esc(x.t) + '</span>'
-            + '<div><b>' + esc(x.tit) + '</b><span>' + esc(x.sub || '') + '</span></div></div>'; }).join('')
-        : '<p class="gsempty">Niente trovato.</p>';
-      box.querySelectorAll('.gsr').forEach(function(n){
-        n.addEventListener('click', function(){
-          chiudi(); gq.value = '';
-          apriRis(r[parseInt(n.getAttribute('data-ri'), 10)].go);
-          window.scrollTo({top:0, behavior:'smooth'});
+    if (!gq || !box) return;
+    var R = [], aperti = {}, att = -1, tmr = null, pend = false, ultima = '';
+    box.setAttribute('role', 'listbox'); box.setAttribute('aria-label', 'Risultati della ricerca');
+    gq.setAttribute('role', 'combobox'); gq.setAttribute('aria-controls', 'gsbox'); gq.setAttribute('aria-expanded', 'false'); gq.setAttribute('aria-autocomplete', 'list');
+    function chiudi(){ box.hidden = true; gq.setAttribute('aria-expanded', 'false'); gq.removeAttribute('aria-activedescendant'); att = -1; }
+    function opz(){ return box.querySelectorAll('[role="option"]'); }
+    function attiva(i){
+      var l = opz(); if (!l.length) return;
+      att = (i + l.length) % l.length;
+      for (var j = 0; j < l.length; j++){ l[j].setAttribute('aria-selected', String(j === att)); l[j].classList.toggle('on', j === att); }
+      gq.setAttribute('aria-activedescendant', l[att].id);
+      var b = box.getBoundingClientRect(), r = l[att].getBoundingClientRect();
+      if (r.top < b.top) box.scrollTop -= b.top - r.top + 30; else if (r.bottom > b.bottom) box.scrollTop += r.bottom - b.bottom + 4;
+    }
+    function disegna(){
+      var q = gq.value;
+      pend = false;
+      if (!gsNorm(q)){ chiudi(); return; }
+      if (q !== ultima){ aperti = {}; ultima = q; }
+      var G = cerca(q), h = '';
+      R = []; att = -1; gq.removeAttribute('aria-activedescendant');
+      G.forEach(function(g){
+        var k = g.t[0], n = g.l.length, lim = aperti[k] ? Math.min(n, 50) : Math.min(n, 5);
+        h += '<div class="gsg" role="presentation"><span>' + esc(g.t[1]) + '</span><em>' + n + '</em></div>';
+        g.l.slice(0, lim).forEach(function(x){
+          var i = R.length; R.push(x);
+          h += '<div class="gsr" role="option" id="gso-' + i + '" data-ri="' + i + '" aria-selected="false">'
+            + '<span class="gsk">' + esc(g.t[2]) + '</span>'
+            + '<div><b>' + esc(x.tit) + '</b><span>' + esc(x.sub || '') + '</span></div></div>';
         });
+        if (n > lim && !aperti[k]){
+          var i2 = R.length; R.push({altri: k});
+          h += '<div class="gsr gsmore" role="option" id="gso-' + i2 + '" data-ri="' + i2 + '" aria-selected="false">'
+            + '<span class="gsk"></span><div><b>altri ' + (n - lim) + ' ▸</b><span>' + esc(g.t[1].toLowerCase()) + ' con queste parole</span></div></div>';
+        } else if (n > lim) h += '<p class="gsempty gsaltri" role="presentation">e altri ' + (n - lim) + ': aggiungi una parola per restringere</p>';
       });
+      box.innerHTML = G.length ? h : '<p class="gsempty">Niente trovato. Più parole valgono tutte insieme; accenti e trattini non contano.</p>';
+      box.hidden = false; gq.setAttribute('aria-expanded', 'true');
+    }
+    function scegli(i){
+      var x = R[i]; if (!x) return;
+      if (x.altri){ aperti[x.altri] = true; disegna(); attiva(i); return; }
+      chiudi(); gq.value = ''; ultima = '';
+      var bar = document.querySelector('.bar');
+      if (bar && bar.classList.contains('altro')){ bar.classList.remove('altro'); var ba = document.getElementById('b-altro'); if (ba) ba.setAttribute('aria-expanded', 'false'); }
+      try { gq.blur(); } catch (e) {}
+      gsApri(x);
+    }
+    gq.addEventListener('focus', function(){ gsIdx = null; });
+    gq.addEventListener('input', function(){
+      clearTimeout(tmr);
+      if (!gsNorm(gq.value)){ pend = false; chiudi(); return; }
+      pend = true; tmr = setTimeout(disegna, 120);
     });
-    gq.addEventListener('keydown', function(e){ if (e.key === 'Escape'){ gq.value = ''; chiudi(); } });
+    gq.addEventListener('keydown', function(e){
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+        e.preventDefault();
+        if (box.hidden || pend){ clearTimeout(tmr); disegna(); }
+        attiva(att < 0 ? (e.key === 'ArrowDown' ? 0 : -1) : att + (e.key === 'ArrowDown' ? 1 : -1));
+      } else if (e.key === 'Enter'){
+        if (!gsNorm(gq.value)) return;
+        e.preventDefault();
+        if (box.hidden || pend){ clearTimeout(tmr); disegna(); }
+        scegli(att >= 0 ? att : 0);
+      } else if (e.key === 'Escape'){
+        e.preventDefault(); gq.value = ''; ultima = ''; chiudi();
+      } else if (e.key === 'Tab') chiudi();
+    });
+    /* il clic non toglie il fuoco al campo (cosi' «altri N» resta nella ricerca) */
+    box.addEventListener('mousedown', function(e){ if (e.target.closest('[role="option"]')) e.preventDefault(); });
+    box.addEventListener('click', function(e){
+      var o = e.target.closest('[role="option"]'); if (!o) return;
+      scegli(parseInt(o.getAttribute('data-ri'), 10));
+    });
     document.addEventListener('click', function(e){
       if (!e.target.closest('.gs')) chiudi(); });
   })();
@@ -8198,7 +8622,11 @@ var VZ = (function(){
     var a = document.activeElement;
     if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT')) return;
     var gq = document.getElementById('gq');
-    if (gq){ e.preventDefault(); gq.focus(); }
+    if (!gq) return;
+    e.preventDefault();
+    /* al telefono il campo sta nel menu «⋯»: lo apro prima */
+    if (!gq.offsetParent){ var ba = document.getElementById('b-altro'); if (ba && ba.getAttribute('aria-expanded') !== 'true') ba.click(); }
+    gq.focus();
   });
 
   loadSel();
@@ -8558,15 +8986,15 @@ var VZ = (function(){
   var TPL = [
     '<header class="pmast">',
     '  <h2>Posta<em>.</em></h2>',
-    '  <span class="ptag">in inbox solo le mail da leggere · archivia solo quando è certo, il resto lo parcheggia e te lo chiede</span>',
+    '  <span class="ptag">etichetto e basta: l’archivio lo fai tu; da solo archivio solo pubblicità e spam evidenti</span>',
     '  <div class="pstatus"><span><span class="ppulse" id="pulse"></span><b id="st-ultimo">—</b></span><span>prossimo giro <b id="st-prossimo">06:30</b></span></div>',
     '</header>',
     '<div class="pbanner" id="banner"></div>',
     '<section class="pkpis" aria-label="Riepilogo posta">',
-    '  <div class="pkpi"><div class="n" id="k-proc">—</div><div class="l">Sistemate</div><div class="d" id="k-proc-d">ultimo giro</div></div>',
+    '  <div class="pkpi"><div class="n" id="k-proc">—</div><div class="l">Etichettate</div><div class="d" id="k-proc-d">ultimo giro</div></div>',
     '  <div class="pkpi warn"><div class="n" id="k-aperte">—</div><div class="l">Da evadere</div><div class="d">aperte adesso</div></div>',
     '  <div class="pkpi ok"><div class="n" id="k-evase">—</div><div class="l">Evase</div><div class="d" id="k-evase-d">ultimo giro</div></div>',
-    '  <div class="pkpi"><div class="n" id="k-arch">—</div><div class="l">Archiviate</div><div class="d" id="k-arch-d">ultimo giro</div></div>',
+    '  <div class="pkpi"><div class="n" id="k-arch">—</div><div class="l">Pubblicità/spam archiviate</div><div class="d" id="k-arch-d">ultimo giro</div></div>',
     '</section>',
     '<section class="pcard">',
     '  <h2>Email sistemate al giorno <small>· ultimi 14 giri</small></h2>',
@@ -8592,7 +9020,7 @@ var VZ = (function(){
     '  <div id="proposte-list"><div class="pempty">Nessuna proposta in attesa.</div></div>',
     '</section>',
     '<section class="pcard" id="tab-regole" role="tabpanel" hidden>',
-    '  <h2>Regole di archiviazione <small>· le tue valgono sempre più di quelle apprese</small></h2>',
+    '  <h2>Regole delle etichette <small>· le tue valgono sempre più di quelle apprese</small></h2>',
     '  <div id="regole-list"><div class="pempty">Nessuna regola ancora.</div></div>',
     '  <form class="prule" id="form-regola">',
     '    <div><label class="pf" for="r-tipo">Se…</label><select id="r-tipo"><option value="mittente">il mittente è</option><option value="dominio">il dominio è</option><option value="oggetto">l’oggetto contiene</option><option value="commessa">la commessa è</option></select></div>',
@@ -8644,10 +9072,10 @@ var VZ = (function(){
     '  <div class="phowto">',
     '    <h2>Come funziona</h2>',
     '    <ul>',
-    '      <li>Ogni mattina alle <b>06:30</b> l’archivista legge le email <b>già lette</b> (posta nuova degli ultimi 10 giorni + ~150 thread del backlog, dal più recente) e manda ogni thread in <b>una</b> destinazione. Regole fissate il 05/09/2026: in inbox restano solo le mail da leggere.</li>',
-    '      <li><span class="pchip dest arch">Archiviata</span> solo se evasa <b>e</b> etichetta sono certe e l’ultimo messaggio ha più di 3 giorni (prima è <span class="pchip dest attesa">In attesa</span>). Evasa ma etichetta incerta → <span class="pchip dest daarch">2026 da archiviare</span> (resta in inbox, archivi tu in blocco). Pubblicità, newsletter, notifiche inutili → <span class="pchip dest canc">Da controllare per cancellazione</span> (tolte dalla inbox, cancelli tu). Non sa se è evasa → <span class="pchip dest dubbi">Dubbi</span> (resta in inbox). Aspetta una tua risposta → <span class="pchip warn">● To respond</span>.</li>',
-    '      <li>Filtro evase / non evase: in Gmail «To respond» = non evasa, «2026 da archiviare» = evasa in attesa del tuo ok, archiviata = evasa certa. Qui sotto trovi lo stesso filtro sulle attività.</li>',
-    '      <li><b>Non</b> cancella mai nulla, <b>non</b> marca spam, <b>non</b> tocca le email non lette, <b>non</b> crea etichette da solo: le propone nella scheda «Proposte di etichette» e aspetta il tuo sì. Ogni azione ha un «Annulla».</li>',
+    '      <li>Ogni mattina alle <b>06:30</b> l’archivista legge le email <b>già lette</b> (posta nuova degli ultimi 10 giorni + ~150 thread del backlog, dal più recente) e le etichetta. Regola fissata il 25/09/2026: <b>etichetta e basta</b>, l’archivio lo fai tu; da solo archivia solo pubblicità e spam evidenti.</li>',
+    '      <li><span class="pchip dest attesa">Etichettata</span> etichetta della commessa o del cliente: la mail resta in inbox finché non la archivi tu. Pubblicità, newsletter, spam evidenti → <span class="pchip dest arch">Pubblicità/spam archiviata</span> (tolte dalla inbox, mai cancellate: le ritrovi in «Tutti i messaggi»). Non sa se è evasa → <span class="pchip dest dubbi">Dubbi</span> (resta in inbox). Aspetta una tua risposta → <span class="pchip warn">● To respond</span>. Fino al 25/09 archiviava anche le mail di lavoro evase: nelle attività di quei giorni trovi ancora <span class="pchip dest arch">Archiviata</span>, <span class="pchip dest attesa">In attesa</span> e <span class="pchip dest daarch">Da archiviare</span>.</li>',
+    '      <li>Filtro evase / non evase: in Gmail «To respond» = non evasa; tutto il resto resta in inbox con la sua etichetta finché non lo archivi tu. Qui sotto trovi lo stesso filtro sulle attività.</li>',
+    '      <li><b>Non</b> cancella mai nulla, <b>non</b> archivia le mail di lavoro, <b>non</b> marca spam, <b>non</b> tocca le email non lette, <b>non</b> crea etichette da solo: le propone nella scheda «Proposte di etichette» e aspetta il tuo sì. Ogni azione ha un «Annulla».</li>',
     '      <li>Le <b>richieste di offerta</b> dei clienti (etichetta «Richiesta di offerta») finiscono nella scheda <b>Offerte</b> qui in alto: ricerca sugli ultimi 6 mesi a ogni giro, per Paese, giostre nuove e ricambi.</li>',
     '      <li>Preferenze, regole e note guidano sia questa sezione sia il comportamento dell’archivista.</li>',
     '    </ul>',
@@ -8696,7 +9124,7 @@ var VZ = (function(){
     if (stage) stage.hidden = true;
     var tf = $('tfilters'); if (tf) tf.hidden = true;
     container.hidden = false;
-    var sl = $('subline'); if (sl) sl.textContent = 'La posta già letta, sistemata ogni mattina dall’archivista: cosa è evaso e cosa aspetta te.';
+    var sl = $('subline'); if (sl) sl.textContent = 'La posta già letta, etichettata ogni mattina dall’archivista: cosa è evaso e cosa aspetta te. L’archivio lo fai tu.';
     document.body.setAttribute('data-view', 'v-posta');
     THEIR_TABS.forEach(function (id) { var n = $(id); if (n) n.setAttribute('aria-pressed', 'false'); });
     if (tabBtn) tabBtn.setAttribute('aria-pressed', 'true');
@@ -8848,9 +9276,14 @@ var VZ = (function(){
   }
   var DEST = {
     archiviata: ['arch', '⇩ Archiviata'], in_attesa: ['attesa', '◷ In attesa (3 gg)'], da_archiviare: ['daarch', '▣ Da archiviare'],
-    da_cancellare: ['canc', '✕ Da controllare per cancellazione'], dubbi: ['dubbi', '? Dubbi'], dubbi_v1: ['dubbi', '? Da verificare'],
+    /* R36 (25/09 «etichetto e basta»): da_cancellare = pubblicità e spam evidenti tolti dalla inbox, mai cancellati */
+    da_cancellare: ['arch', '⇩ Pubblicità/spam archiviata'], dubbi: ['dubbi', '? Dubbi'], dubbi_v1: ['dubbi', '? Da verificare'],
+    etichettata: ['attesa', '· Etichettata, resta in inbox'],
     da_evadere: ['warn', '● In inbox, To respond'], nessuna: ['attesa', '· In inbox']
   };
+  /* le attività che hanno tolto la mail dalla inbox: fino al 25/09 anche lavoro evaso, da allora solo pubblicità e spam */
+  function destArch(d) { return d === 'archiviata' || d === 'da_cancellare'; }
+  function spamArch(n) { return n.destinazione === 'da_cancellare' && !!(n.undo && n.undo.removedInbox); }
   function chipDest(n) {
     var d = DEST[n.destinazione]; if (!d) return '';
     var extra = n.fonte === 'backlog' ? ' <small>backlog</small>' : '';
@@ -8886,22 +9319,26 @@ var VZ = (function(){
   function destOk(n) {
     if (filtroDest === 'tutte') return true;
     if (filtroDest === 'dubbi') return n.destinazione === 'dubbi' || n.destinazione === 'dubbi_v1';
+    if (filtroDest === 'archiviata') return destArch(n.destinazione);
     return n.destinazione === filtroDest;
   }
+  /* R36: niente più filtri «Da archiviare» e «Da cancellare» (etichetta e basta dal 25/09); «Archiviate» raccoglie
+     quello che è uscito dalla inbox: lavoro evaso fino al 25/09, poi solo pubblicità e spam */
+  var FD = [['tutte', 'Tutte'], ['etichettata', 'Etichettate'], ['archiviata', 'Archiviate'], ['in_attesa', 'In attesa'], ['dubbi', 'Dubbi']];
   function renderAttivita() {
     var box = $('attivita-list'); var html = '';
+    if (!FD.some(function (f) { return f[0] === filtroDest; })) filtroDest = 'tutte';
     var giorni = state.giorni.slice().sort(function (a, b) { return a.id < b.id ? 1 : -1; }).slice(0, 10);
     var tot = { tutte: 0, aperte: 0, evase: 0, nessuna: 0 };
-    var totD = { tutte: 0, archiviata: 0, in_attesa: 0, da_archiviare: 0, da_cancellare: 0, dubbi: 0 };
+    var totD = { tutte: 0, etichettata: 0, archiviata: 0, in_attesa: 0, dubbi: 0 };
     giorni.forEach(function (g) { vociDi(g).forEach(function (n) {
       tot.tutte++; if (aperta(n)) tot.aperte++; else if (n.stato === 'evasa') tot.evase++; else if (n.stato === 'nessuna') tot.nessuna++;
-      totD.tutte++; var d = (n.destinazione === 'dubbi_v1') ? 'dubbi' : n.destinazione; if (totD[d] != null) totD[d]++;
+      totD.tutte++; var d = (n.destinazione === 'dubbi_v1') ? 'dubbi' : destArch(n.destinazione) ? 'archiviata' : n.destinazione; if (totD[d] != null) totD[d]++;
     }); });
     var F = [['tutte', 'Tutte'], ['aperte', 'Non evase'], ['evase', 'Evase'], ['nessuna', 'Solo lette']];
     html += '<div class="pfilt" role="group" aria-label="Filtra per stato"><span class="pflab">Stato</span>' + F.map(function (f) {
       return '<button class="pbtn" data-filt="' + f[0] + '" aria-pressed="' + String(filtroAtt === f[0]) + '">' + f[1] + ' <small>' + tot[f[0]] + '</small></button>';
     }).join('') + '</div>';
-    var FD = [['tutte', 'Tutte'], ['archiviata', 'Archiviate'], ['in_attesa', 'In attesa'], ['da_archiviare', 'Da archiviare'], ['da_cancellare', 'Da cancellare'], ['dubbi', 'Dubbi']];
     html += '<div class="pfilt" role="group" aria-label="Filtra per destinazione"><span class="pflab">Dove è finita</span>' + FD.map(function (f) {
       return '<button class="pbtn" data-fdest="' + f[0] + '" aria-pressed="' + String(filtroDest === f[0]) + '">' + f[1] + ' <small>' + totD[f[0]] + '</small></button>';
     }).join('') + '</div>';
@@ -9022,21 +9459,34 @@ var VZ = (function(){
       var gid = String(last.data || last.id || '').slice(0, 10);
       var g = state.giorni.filter(function (x) { return x.id === gid; })[0];
       var c = g ? contaGiorno(g) : null;
-      $('k-proc').textContent = last.processate != null ? last.processate : (c ? c.tot : '—');
-      $('k-proc-d').textContent = 'giro del ' + dstr(gid);
+      /* R36: «Etichettate» = runs.etichettate del giro; in mancanza, le voci del giorno con almeno un'etichetta */
+      var et = last.etichettate != null ? last.etichettate : null;
+      if (et == null && g) { et = 0; vociDi(g).forEach(function (n) { if (n.etichette.length || n.commessa) et++; }); }
+      $('k-proc').textContent = et != null ? et : '—';
+      $('k-proc-d').textContent = 'giro del ' + dstr(gid) + (last.processate != null ? ' · ' + last.processate + ' thread letti' : '');
       $('k-evase').textContent = last.evase != null ? last.evase : (c ? c.ev : '—');
       $('k-evase-d').textContent = c && c.ne ? 'ultimo giro · ' + c.ne + ' solo lette' : 'ultimo giro';
       $('st-ultimo').textContent = 'ultimo giro: ' + dstr(gid) + (last.fine ? ' ' + String(last.fine).slice(11, 16) + ' UTC' : '');
       var err = last.errori; var hasErr = Array.isArray(err) ? err.length > 0 : (typeof err === 'number' ? err > 0 : false);
       $('pulse').style.background = hasErr ? 'var(--p-warn)' : 'var(--p-ok)';
     }
-    var lastA = state.runs[0];
-    var arch = lastA && lastA.archiviate != null ? lastA.archiviate : null;
-    if (arch == null && lastA) { var gA = state.giorni.filter(function (x) { return x.id === String(lastA.data || lastA.id || '').slice(0, 10); })[0]; if (gA) { arch = 0; vociDi(gA).forEach(function (n) { if (n.destinazione === 'archiviata') arch++; }); } }
+    /* R36: «Pubblicità/spam archiviate» = voci del giorno dell'ultimo giro con destinazione da_cancellare e INBOX tolto
+       (runs.archiviate fino al 25/09 contava anche il lavoro evaso, quindi qui non si usa) */
+    var lastA = state.runs[0], arch = null, arch7 = 0;
+    if (lastA) {
+      var gidA = String(lastA.data || lastA.id || '').slice(0, 10), da7 = '';
+      try { var t7 = new Date(gidA + 'T12:00:00'); t7.setDate(t7.getDate() - 6); da7 = t7.toISOString().slice(0, 10); } catch (e) {}
+      state.giorni.forEach(function (x) {
+        var gx = String(x.id || '').slice(0, 10);
+        if (gx > gidA || gx < da7) return;
+        vociDi(x).forEach(function (n) { if (!spamArch(n)) return; arch7++; if (gx === gidA) arch = (arch || 0) + 1; });
+        if (gx === gidA && arch == null) arch = 0;
+      });
+    }
     $('k-arch').textContent = arch != null ? arch : '—';
     var bk = state.cfg && state.cfg.backlog;
-    var bkTxt = bk && bk.attivo ? 'backlog: ' + (bk.processatiTotali || 0).toLocaleString('it-IT') + ' / ' + (bk.stimaTotale || 0).toLocaleString('it-IT') + (bk.cursore ? ' · fino al ' + String(bk.cursore).slice(0, 10) : ' · parte dal più recente') : 'ultimo giro';
-    $('k-arch-d').textContent = bkTxt;
+    var bkTxt = bk && bk.attivo ? 'backlog: ' + (bk.processatiTotali || 0).toLocaleString('it-IT') + ' / ' + (bk.stimaTotale || 0).toLocaleString('it-IT') + (bk.cursore ? ' · fino al ' + String(bk.cursore).slice(0, 10) : ' · parte dal più recente') : '';
+    $('k-arch-d').textContent = 'ultimo giro · ' + arch7 + ' negli ultimi 7 giorni' + (bkTxt ? ' · ' + bkTxt : '');
     if (state.cfg && state.cfg.prossimoRun) $('st-prossimo').textContent = state.cfg.prossimoRun;
   }
 
