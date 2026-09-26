@@ -8633,7 +8633,13 @@ var VZ = (function(){
   function z(n){ return (n<10?'0':'')+n; }
   function oggi(){ var d=new Date(); return z(d.getDate())+'/'+z(d.getMonth()+1)+'/'+d.getFullYear(); }
   function oggiISO(){ var d=new Date(); return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate()); }
-  function testo(el,sel){ var n=el.querySelector(sel); return n?(n.textContent||'').trim():''; }
+  /* R35: il titolo è solo il testo del titolo, senza il sottotitolo grigio (.oghint) e i pulsanti del riquadro */
+  function testo(el,sel){
+    var n=el.querySelector(sel); if(!n) return '';
+    var c=n.cloneNode(true), x;
+    while((x=c.querySelector('.oghint, .pstampa, button'))) x.parentNode.removeChild(x);
+    return (c.textContent||'').replace(/\s+/g,' ').trim();
+  }
   function puro(s){ return String(s||'').replace(/[&<>]/g,''); }
 
   /* ---------- avviso a schermo ---------- */
@@ -8743,13 +8749,16 @@ var VZ = (function(){
               var cl=[sv].concat(Array.prototype.slice.call(cd)), orig=[oR[usati-1]].concat(Array.prototype.slice.call(od));
               cl.forEach(function(el,q){ var s0=orig[q].getAttribute('style'); if(s0) el.setAttribute('style',s0); else el.removeAttribute('style'); });
               cl.forEach(function(el){ var st=doc.defaultView.getComputedStyle(el); PR.forEach(function(pn){ var v=st.getPropertyValue(pn); if(v) el.style.setProperty(pn,v); }); });
+              sv.setAttribute('data-pdfok','1');
             });
           }catch(e){}
           /* R35 calendario: sugli elementi SVG html2canvas copia in linea lo stile calcolato sulla pagina, cioe' i colori
              e le variabili --vz-* del tema scuro, che vincono sugli attributi appena sostituiti. Li tolgo tutti e poi
              ricalcolo i colori qui, nel tema chiaro (due giri: prima si toglie ovunque, cosi' anche l'ereditato torna giusto). */
+          /* dopo l'unione dei rami R35: qui passano solo gli SVG che il blocco sopra non ha potuto abbinare all'originale */
           try{
-            var SP=['fill','stroke','stop-color','color'], sv=a.querySelectorAll('svg, svg *');
+            var SP=['fill','stroke','stop-color','color'], sv=[];
+            Array.prototype.forEach.call(a.querySelectorAll('svg:not([data-pdfok])'), function(g){ sv.push(g); Array.prototype.push.apply(sv, g.querySelectorAll('*')); });
             Array.prototype.forEach.call(sv, function(el){
               for(var j=el.style.length-1;j>=0;j--){ var p=el.style.item(j); if(p.indexOf('--')===0 || SP.indexOf(p)>=0) el.style.removeProperty(p); }
             });
