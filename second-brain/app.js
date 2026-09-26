@@ -198,27 +198,30 @@ var VZ = (function(){
   }
 
   /* ---------- 6. HEATMAP A CALENDARIO (settimane in colonna, lun-dom in riga) ---------- */
-  /* days = [{d:'2026-09-21', n, det:'…'}] a partire da un lunedì ; o = {oggi} */
+  /* days = [{d:'2026-09-21', n, det:'…', parts:[righe del tooltip], tit:'titolo del tooltip' (facoltativo)}] a partire da un lunedì ; o = {oggi, lab} */
   function heat(days, o){
     o = o || {};
     var cs = 15, g = 3, top = 18, left = 26, weeks = Math.ceil(days.length / 7);
     var W = left + weeks * (cs + g), H = top + 7 * (cs + g);
     function b(n){ return n === 0 ? '--vz-empty' : n === 1 ? '--vz-seq-1' : n <= 3 ? '--vz-seq-2' : n <= 6 ? '--vz-seq-3' : '--vz-seq-4'; }
     var MM = ['gen','feb','mar','apr','mag','giu','lug','ago','set','ott','nov','dic'], GG = ['lun','mar','mer','gio','ven','sab','dom'];
+    var fuoco = days.length ? days[0].d : '';
+    days.forEach(function(x){ if (x.d === o.oggi) fuoco = x.d; });   /* un solo punto di tabulazione: oggi, altrimenti il primo giorno */
     var s = '<svg class="vz-heat" viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H + '" role="grid" aria-label="' + esc(o.lab || 'Carico per giorno') + '">';
     [0, 2, 4].forEach(function(r){ s += '<text x="0" y="' + (top + r * (cs + g) + 11) + '" class="vz-tick">' + GG[r] + '</text>'; });
     var lastM = -1;
     days.forEach(function(x, i){
       var w = Math.floor(i / 7), r = i % 7, dt = new Date(x.d + 'T12:00:00'), m = dt.getMonth();
       if (r === 0 && m !== lastM){ s += '<text x="' + (left + w * (cs + g)) + '" y="11" class="vz-tick">' + MM[m] + '</text>'; lastM = m; }
-      var today = x.d === o.oggi;
+      var today = x.d === o.oggi, gl = dt.toLocaleDateString('it-IT', {weekday: 'long', day: 'numeric', month: 'long'});
       s += '<rect x="' + (left + w * (cs + g)) + '" y="' + (top + r * (cs + g)) + '" width="' + cs + '" height="' + cs + '" rx="3" fill="var(' + b(x.n) + ')"'
         + (today ? ' stroke="var(--vz-ink)" stroke-width="2"' : '')
-        + ' tabindex="' + (today ? 0 : -1) + '" role="gridcell" aria-label="' + esc(dt.toLocaleDateString('it-IT', {weekday: 'long', day: 'numeric', month: 'long'}) + ': ' + (x.n ? x.n + ' — ' + x.det : 'niente in agenda')) + '"'
-        + tipAttr(dt.toLocaleDateString('it-IT', {weekday: 'long', day: 'numeric', month: 'long'}), x.n ? x.parts : [['0', 'niente in agenda', '', '']]) + ' data-d="' + x.d + '"/>';
+        + ' tabindex="' + (x.d === fuoco ? 0 : -1) + '" role="gridcell" aria-label="' + esc(gl + ': ' + (x.n ? x.n + ' — ' + x.det : 'nessuna voce')) + '"'
+        + tipAttr(x.tit || gl, x.n ? x.parts : [['0', 'nessuna voce', '', '']]) + ' data-d="' + x.d + '"/>';
     });
     s += '</svg>';
-    var leg = '<div class="vz-hleg">' + [['--vz-empty','0'],['--vz-seq-1','1'],['--vz-seq-2','2–3'],['--vz-seq-3','4–6'],['--vz-seq-4','7+']].map(function(x){ return '<i style="background:var(' + x[0] + ')"></i><span>' + x[1] + '</span>'; }).join('') + '<span style="margin-left:6px">voci al giorno</span></div>';
+    var leg = '<div class="vz-hleg">' + [['--vz-empty','0'],['--vz-seq-1','1'],['--vz-seq-2','2–3'],['--vz-seq-3','4–6'],['--vz-seq-4','7+']].map(function(x){ return '<i style="--k:var(' + x[0] + ');background:var(--k)"></i><span>' + x[1] + '</span>'; }).join('') + '<span style="margin-left:6px">voci al giorno</span>'
+      + (o.oggi && fuoco === o.oggi ? '<i class="rg"></i><span>oggi</span>' : '') + '</div>';
     return '<div class="vz-heatbox">' + s + leg + '</div>';
   }
 
@@ -3038,8 +3041,7 @@ var VZ = (function(){
   }
   function calendario(){
     var ev = eventi().filter(function(e){
-      var k = days(new Date(), e.d);
-      return k >= -30 && k <= 550 && (calF === 'tutti' || e.k === calF);
+      return calFinestra(e) && (calF === 'tutti' || e.k === calF);
     });
     var h = '<div class="cm-tools" id="calseg">'
       + ['tutti','agenda','consegna','install','scad','incasso','task','viaggio','ente'].map(function(k){
@@ -3050,6 +3052,7 @@ var VZ = (function(){
       + (S.gcalup ? ' \u00b7 agenda di tirotta@prestonbarbieri.com allineata il ' + esc(itFull(S.gcalup.slice(0,10))) : '')
       + '</span></div>';
     h += riuForm();
+    h += calCarico();   /* R35: grafici del carico, tra le chip e l'elenco */
     if (!ev.length){
       stage.innerHTML = h + '<p class="empty">Niente con questo filtro.</p>';
       calWire();
@@ -3080,6 +3083,7 @@ var VZ = (function(){
     calWire();
   }
   function calWire(){
+    calCaricoWire();   /* R35: grafici del carico */
     document.querySelectorAll('#calseg button[data-cal]').forEach(function(b){
       b.addEventListener('click', function(){ calF = b.getAttribute('data-cal'); calendario(); });
     });
@@ -3114,6 +3118,266 @@ var VZ = (function(){
       document.getElementById('riu-chiudi').addEventListener('click', function(){
         riuAperta = false; rf.hidden = true; ra.textContent = '+ Fissa una riunione'; });
     }
+  }
+
+  /* ================= R35 CALENDARIO · carico a colpo d'occhio (calendario-heatmap) =================
+     Due grafici tra le chip e l'elenco, contati sugli STESSI eventi dell'elenco: eventi() nella finestra
+     di calendario() (calFinestra) e filtrati dalla chip calF, cosi' i numeri coincidono con l'elenco.
+     1) 18 mesi: colonne a una tinta con i soli eventi di commessa (consegne, installazioni, incassi,
+        scadenze, enti), rombi per le consegne da contratto e due file di numeri per task e agenda:
+        esistono solo nel breve e, dentro le colonne, settembre schiaccerebbe tutti gli altri mesi.
+     2) 13 settimane da lunedi': VZ.heat per giorno e tre riquadri (questa settimana, la prossima,
+        il resto) con i picchi. Clic su un mese o su un giorno: l'elenco scorre li'.
+     Nessuno stato nuovo: si ricalcola a ogni calendario(). */
+  function calFinestra(e){ var k = days(new Date(), e.d); return k >= -30 && k <= 550; }
+  var CAL_COM = ['consegna','install','scad','incasso','ente'];
+  var CAL_ORD = ['task','scad','incasso','ente','agenda','consegna','install','viaggio'];
+  var CAL_TL = {agenda:['impegno in agenda','impegni in agenda'], consegna:['consegna da contratto','consegne da contratto'],
+    install:['installazione','installazioni'], scad:['scadenza di commessa','scadenze di commessa'],
+    incasso:['incasso atteso','incassi attesi'], task:['task in scadenza','task in scadenza'], viaggio:['viaggio','viaggi'],
+    ente:['scadenza ente di controllo','scadenze ente di controllo']};
+  /* con la data gia' passata: per gli incassi la dicitura di incassi-scaduti-veri (correzione di calendario-da-oggi) */
+  var CAL_TLP = {incasso:['incasso con data passata, da verificare','incassi con data passata, da verificare'],
+    task:['task con scadenza passata, ancora aperto','task con scadenza passata, ancora aperti']};
+  var CAL_GG = ['dom','lun','mar','mer','gio','ven','sab'];
+  var calCar = null, calRs = null;
+  function calTx(c, x, y, a, s, op){
+    return '<text x="' + x + '" y="' + y + '"' + (a ? ' text-anchor="' + a + '"' : '') + ' class="' + c + '"' + (op ? ' opacity="' + op + '"' : '') + '>' + s + '</text>';
+  }
+  function calDM(d){ return ('0' + d.getDate()).slice(-2) + '/' + ('0' + (d.getMonth() + 1)).slice(-2); }
+  function calNome(k, n, pass){ var t = (pass && CAL_TLP[k]) || CAL_TL[k] || [k, k]; return t[n === 1 ? 0 : 1]; }
+  /* composizione per tipo, dal piu' numeroso: t = conteggi per tipo, tp = quanti hanno la data gia' passata */
+  function calComp(t, tp, solo){
+    var r = [];
+    CAL_ORD.forEach(function(k){
+      if (solo && solo.indexOf(k) < 0) return;
+      var n = t[k] || 0, p = CAL_TLP[k] ? Math.min((tp && tp[k]) || 0, n) : 0;
+      if (n - p > 0) r.push({k: k, n: n - p, l: calNome(k, n - p, false)});
+      if (p > 0) r.push({k: k, n: p, l: calNome(k, p, true)});
+    });
+    return r.sort(function(a, b){ return b.n - a.n; });
+  }
+  function calRighe(c){ return c.map(function(x){ return [String(x.n), x.l, '', '']; }); }
+  function calSel(k){ return calF === 'tutti' || k === calF; }
+  function calCol(m){
+    if (calF === 'tutti') return CAL_COM.reduce(function(a, k){ return a + (m.t[k] || 0); }, 0);
+    return CAL_COM.indexOf(calF) >= 0 ? (m.t[calF] || 0) : 0;
+  }
+  function calPeriodo(a, b){
+    var o = {n: 0, t: {}, tp: {}, pk: null, pn: 0, a: calCar.gg[a].dt, b: calCar.gg[b].dt};
+    for (var i = a; i <= b; i++){
+      var g = calCar.gg[i], pass = g.d < calCar.oggi;
+      o.n += g.n;
+      for (var k in g.t){ o.t[k] = (o.t[k] || 0) + g.t[k]; if (pass) o.tp[k] = (o.tp[k] || 0) + g.t[k]; }
+      if (g.n > o.pn){ o.pn = g.n; o.pk = g; }
+    }
+    return o;
+  }
+  function calCarico(){
+    var tutti = eventi().filter(calFinestra), oggiD = today(), i;
+    if (!tutti.some(function(e){ return calSel(e.k); })){ calCar = null; return ''; }
+    /* 18 mesi dal mese corrente e 91 giorni dal lunedi' di questa settimana */
+    var mesi = [], mi = {}, gg = [], gi = {};
+    for (i = 0; i < 18; i++){
+      var dm = new Date(oggiD.getFullYear(), oggiD.getMonth() + i, 1), km = isoDi(dm).slice(0, 7);
+      mi[km] = i; mesi.push({m: km, d: dm, t: {}, tp: {}, cons: []});
+    }
+    var lun = new Date(oggiD.getFullYear(), oggiD.getMonth(), oggiD.getDate() - (oggiD.getDay() + 6) % 7);
+    for (i = 0; i < 91; i++){
+      var dg = new Date(lun.getFullYear(), lun.getMonth(), lun.getDate() + i), kg = isoDi(dg);
+      gi[kg] = i; gg.push({d: kg, dt: dg, t: {}, n: 0});
+    }
+    var fine = new Date(oggiD.getFullYear(), oggiD.getMonth() + 18, 1), oltre = 0;
+    tutti.forEach(function(e){
+      var d = d0(e.d), ks = isoDi(d), m = mi[ks.slice(0, 7)], g = gi[ks];
+      if (m != null){
+        m = mesi[m]; m.t[e.k] = (m.t[e.k] || 0) + 1;
+        if (d < oggiD) m.tp[e.k] = (m.tp[e.k] || 0) + 1;
+        if (e.k === 'consegna' && e.cm) m.cons.push(e.cm);
+      } else if (d >= fine && calSel(e.k)) oltre++;
+      if (g != null && calSel(e.k)){ gg[g].t[e.k] = (gg[g].t[e.k] || 0) + 1; gg[g].n++; }
+    });
+    calCar = {mesi: mesi, gg: gg, oggi: isoDi(oggiD), oltre: oltre};
+    var fl = calF === 'tutti' ? '' : ' · filtro «' + EK[calF].l + '»';
+    var ultimo = mesi[17].d;
+
+    /* ---- 13 settimane: celle della heatmap, riquadri, frase ---- */
+    var hd = gg.map(function(g){
+      var pass = g.d < calCar.oggi, c = calComp(g.t, pass ? g.t : null), rr = calRighe(c);
+      var gl = g.dt.toLocaleDateString('it-IT', {weekday: 'long', day: 'numeric', month: 'long'});
+      return {d: g.d, n: g.n, det: rr.map(function(r){ return r[0] + ' ' + r[1]; }).join(', '),
+        parts: g.n ? rr.concat([['', 'clic: vai al giorno nell’elenco', '', '']]) : rr,
+        tit: gl + (g.d === calCar.oggi ? ' · oggi' : pass ? ' · passato' : '') + ' · ' + (g.n ? g.n + (g.n === 1 ? ' voce' : ' voci') : 'nessuna voce') + fl};
+    });
+    var a0 = gg[0].dt, a1 = gg[90].dt;
+    var per = a0.getFullYear() === a1.getFullYear() ? calDM(a0) + ' – ' + itFull(gg[90].d) : itFull(gg[0].d) + ' – ' + itFull(gg[90].d);
+    function arco(o){ return o.a.getMonth() === o.b.getMonth() ? ('0' + o.a.getDate()).slice(-2) + '–' + calDM(o.b) : calDM(o.a) + '–' + calDM(o.b); }
+    function riq(o, lab){
+      var pk = o.pk ? 'picco ' + CAL_GG[o.pk.dt.getDay()] + ' ' + calDM(o.pk.dt) + ': ' + o.pn + (o.pn === 1 ? ' voce' : ' voci') : 'nessuna voce';
+      if (!o.n) return '<div class="vz-calit vuoto"><b>0</b><span>' + esc(lab) + '</span><small>' + pk + '</small></div>';
+      return '<div class="vz-calit" role="button" tabindex="0" data-calgo="' + o.pk.d + '"'
+        + VZ.tip(lab + fl, [[String(o.n), o.n === 1 ? 'voce' : 'voci', '1', 'r']].concat(calRighe(calComp(o.t, o.tp)), [['', 'clic: vai al giorno di picco nell’elenco', '', '']]))
+        + ' aria-label="' + esc(lab + ': ' + o.n + (o.n === 1 ? ' voce, ' : ' voci, ') + pk) + '">'
+        + '<b>' + o.n + '</b><span>' + esc(lab) + '</span><small>' + pk + '</small></div>';
+    }
+    var s1 = calPeriodo(0, 6), s2 = calPeriodo(7, 13), s3 = calPeriodo(14, 90), tot = 0, pieni = 0;
+    gg.forEach(function(g){ tot += g.n; if (g.n) pieni++; });
+
+    var h = '<section class="og vz-cal" aria-label="Carico a colpo d’occhio">'
+      + '<h3><i class="dt cy"></i>Carico a colpo d’occhio<em class="oghint">stessi eventi dell’elenco · le chip filtrano anche i grafici · clic su un mese o su un giorno: l’elenco scorre lì</em></h3>'
+      + '<div class="vz-calb">'
+      + '<span class="vz-calt">Prossimi 18 mesi · eventi di commessa al mese' + esc(fl) + '</span>'
+      + '<div class="vz-leg">'
+      + '<span><i class="rc" style="--k:var(--vz-1);background:var(--k)"></i>eventi di commessa: consegne, installazioni, incassi, scadenze, enti</span>'
+      + '<span><svg class="vz-caldm" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M5 .5L9.5 5L5 9.5L.5 5Z" fill="var(--vz-ink)"/></svg>consegne da contratto (numero se più di una)</span>'
+      + '<span>task e agenda: in una fila a parte, perché esistono solo nel breve</span>'
+      + (oltre ? '<span>' + oltre + (oltre === 1 ? ' evento' : ' eventi') + ' dopo ' + MESI[ultimo.getMonth()] + ' ' + ultimo.getFullYear() + ': solo nell’elenco</span>' : '')
+      + '</div>'
+      + '<div class="vz-calst" id="vz-calst"></div>'
+      + '<div class="vz-calh"><div class="vz-calhb">'
+      + '<span class="vz-calt">Voci al giorno · ' + per + '</span>'
+      + VZ.heat(hd, {oggi: calCar.oggi, lab: 'Voci al giorno, 13 settimane dal ' + itFull(gg[0].d) + fl})
+      + '</div><div class="vz-calside">'
+      + riq(s1, 'questa settimana · ' + arco(s1))
+      + riq(s2, 'prossima settimana · ' + arco(s2))
+      + riq(s3, 'dal ' + calDM(s3.a) + ' al ' + calDM(s3.b) + ' · 11 settimane')
+      + '<p class="vz-calnota">' + (tot ? tot + (tot === 1 ? ' voce' : ' voci') + ' su ' + pieni + (pieni === 1 ? ' giorno' : ' giorni') + ' dei 91; <b>' + (91 - pieni) + ' giorni vuoti</b>.'
+        : 'Nessuna voce in queste 13 settimane' + (CAL_COM.indexOf(calF) >= 0 ? ': le date sono più avanti, nella striscia dei mesi.' : '.'))
+      + (calF === 'tutti' && s3.n < s1.n + s2.n ? ' I task hanno scadenze solo nel breve: oltre la seconda settimana la griglia resta quasi vuota e ci restano consegne, incassi e scadenze di commessa.' : '')
+      + '</p></div></div>';
+
+    /* ---- tabella dei dati: gli stessi numeri dei due grafici ---- */
+    var t = '<details class="vz-caltab"><summary>Tabella dei dati</summary>'
+      + '<div class="otab"><table><thead><tr><th>Mese</th><th>Eventi di commessa' + (calF === 'tutti' ? '' : ' (' + esc(EK[calF].l) + ')') + '</th><th>Consegne da contratto</th><th>Task</th><th>Agenda</th></tr></thead><tbody>';
+    mesi.forEach(function(m){
+      t += '<tr><td>' + MESI[m.d.getMonth()] + ' ' + m.d.getFullYear() + '</td><td class="mono n">' + calCol(m) + '</td><td class="mono n">' + (m.t.consegna || 0)
+        + '</td><td class="mono n">' + (m.t.task || 0) + '</td><td class="mono n">' + (m.t.agenda || 0) + '</td></tr>';
+    });
+    t += '</tbody></table></div><div class="otab"><table><thead><tr><th>Giorno</th><th>Voci</th><th>Composizione</th></tr></thead><tbody>';
+    hd.forEach(function(x){ if (x.n) t += '<tr><td class="mono">' + itFull(x.d) + '</td><td class="mono n">' + x.n + '</td><td class="cmp">' + esc(x.det) + '</td></tr>'; });
+    t += '</tbody></table></div></details>';
+    return h + t + '</div></section>';
+  }
+  /* striscia dei 18 mesi, disegnata alla larghezza vera del riquadro (al telefono almeno 620 px e scorre dentro il riquadro) */
+  function calStrip(W){
+    var C = calCar, PL = 74, PR = 8, TOP = 22, PH = 92, N = C.mesi.length;
+    var band = (W - PL - PR) / N, cw = Math.min(24, band * 0.6);
+    var soloCom = calF === 'tutti' || CAL_COM.indexOf(calF) >= 0;
+    var fl = calF === 'tutti' ? '' : ' · filtro «' + EK[calF].l + '»';
+    var vals = C.mesi.map(calCol), mx = Math.max.apply(null, vals.concat([0]));
+    var step = Math.max(1, VZ.nice(Math.max(mx, 1), 4)), ymax = Math.max(step, Math.ceil(mx / step) * step);
+    if (ymax === mx) ymax += step;   /* spazio per il numero sopra la colonna piu' alta */
+    function Y(v){ return TOP + PH - v / ymax * PH; }
+    var AX = TOP + PH, L0 = AX + 40, LH = 18, H = L0 + LH * 3 + 4, i, v;
+    var s = '<svg class="vz-calsvg" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" role="group" aria-label="' + esc('Eventi di commessa per mese, prossimi 18 mesi' + fl) + '">';
+    for (v = 0; v <= (soloCom ? ymax : 0); v += step){
+      s += '<line x1="' + PL + '" x2="' + (W - PR) + '" y1="' + Y(v) + '" y2="' + Y(v) + '" stroke="var(' + (v ? '--vz-grid' : '--vz-axis') + ')" stroke-width="1" shape-rendering="crispEdges"/>'
+        + calTx('vz-tick', PL - 8, Y(v) + 3.5, 'end', v);
+    }
+    /* numero diretto solo sulle colonne piu' alte: il massimo e, se regge il confronto, la seconda */
+    var ord = vals.map(function(x, j){ return [x, j]; }).sort(function(a, b){ return b[0] - a[0]; }), lab = {};
+    ord.slice(0, 2).forEach(function(x, j){ if (x[0] > 0 && (j === 0 || x[0] >= ord[0][0] / 2)) lab[x[1]] = 1; });
+    var dimC = calSel('consegna') ? '' : '.4', dimT = calSel('task') ? '' : '.4', dimA = calSel('agenda') ? '' : '.4';
+    s += calTx('vz-dl2', PL - 8, L0 + LH / 2 + 4, 'end', 'consegne', dimC) + calTx('vz-dl2', PL - 8, L0 + LH * 1.5 + 4, 'end', 'task', dimT)
+      + calTx('vz-dl2', PL - 8, L0 + LH * 2.5 + 4, 'end', 'agenda', dimA)
+      + '<line x1="' + PL + '" x2="' + (W - PR) + '" y1="' + (L0 - 3) + '" y2="' + (L0 - 3) + '" stroke="var(--vz-grid)" stroke-width="1" shape-rendering="crispEdges"/>';
+    C.mesi.forEach(function(m, i){
+      var x = PL + i * band, cx = x + band / 2, n = vals[i], mm = m.d.getMonth();
+      if (n > 0) s += '<path d="' + VZ.barPath(cx - cw / 2, Y(n), cw, AX - Y(n), 'su') + '" fill="var(--vz-1)"/>';
+      if (lab[i]) s += calTx('vz-dl', cx, Y(n) - 5, 'middle', n);
+      s += calTx('vz-tick', cx, AX + 14, 'middle', MESI_BREVI[mm]);
+      if (i === 0 || mm === 0) s += calTx('vz-tick yr', cx, AX + 27, 'middle', m.d.getFullYear());
+      var nc = m.t.consegna || 0, nt = m.t.task || 0, na = m.t.agenda || 0, y = L0 + LH / 2;
+      if (nc){
+        var dx = nc > 1 ? cx - 5 : cx;
+        s += '<g' + (dimC ? ' opacity="' + dimC + '"' : '') + '><path d="M' + dx + ',' + (y - 5) + 'L' + (dx + 5) + ',' + y + 'L' + dx + ',' + (y + 5) + 'L' + (dx - 5) + ',' + y + 'Z" fill="var(--vz-ink)" stroke="var(--vz-surface)" stroke-width="1.5"/>'
+          + (nc > 1 ? calTx('vz-dl', dx + 8, y + 4, '', nc) : '') + '</g>';
+      }
+      if (nt) s += calTx('vz-tick', cx, L0 + LH * 1.5 + 4, 'middle', nt, dimT);
+      if (na) s += calTx('vz-tick', cx, L0 + LH * 2.5 + 4, 'middle', na, dimA);
+      /* tooltip: composizione del mese, con i codici delle consegne */
+      var tit = MESI[mm] + ' ' + m.d.getFullYear() + fl, rows = [], nSel = 0, k;
+      for (k in m.t) if (calSel(k)) nSel += m.t[k];
+      if (calF === 'tutti') rows.push([String(n), n === 1 ? 'evento di commessa' : 'eventi di commessa', '1', 'r']);
+      /* prima le voci della colonna, poi quelle nelle file a parte; per gli incassi si separano quelli con la data passata */
+      var tpi = {incasso: m.tp.incasso || 0};
+      (calF === 'tutti' ? calComp(m.t, tpi, CAL_COM).concat(calComp(m.t, null, ['task', 'agenda', 'viaggio'])) : calComp(m.t, tpi, [calF])).forEach(function(c){
+        var l = c.l + (c.k === 'consegna' && m.cons.length ? ' (' + m.cons.slice(0, 6).join(', ') + (m.cons.length > 6 ? ', …' : '') + ')' : '');
+        /* chiave: tinta della colonna se la voce e' la colonna filtrata, inchiostro per i rombi delle consegne */
+        var key = calF !== 'tutti' && soloCom ? '1' : c.k === 'consegna' ? '--vz-ink' : '';
+        rows.push([String(c.n), l, key, key ? 'r' : '']);
+      });
+      if (!nSel) rows.push(['0', 'voci con questo filtro', '', '']);
+      else rows.push(['', 'clic: vai al mese nell’elenco', '', '']);
+      s += '<rect class="vz-hit" x="' + x + '" y="' + (TOP - 14) + '" width="' + band + '" height="' + (H - TOP + 12) + '" fill="transparent"'
+        + ' tabindex="' + (i ? -1 : 0) + '" role="button" data-ri="' + i + '"' + (nSel ? ' data-calgo="' + m.m + '-01" data-calmese="1"' : '')
+        + ' aria-label="' + esc(tit + ': ' + rows.slice(0, -1).map(function(r){ return r[0] + ' ' + r[1]; }).join(', ')) + '"' + VZ.tip(tit, rows) + '/>';
+    });
+    if (!soloCom) s += calTx('vz-dl2', PL + 12, TOP + PH / 2, '', 'La striscia conta solo eventi di commessa: per «' + esc(EK[calF].l) + '» guarda '
+      + (calF === 'viaggio' ? 'la griglia dei giorni' : 'la fila «' + esc(EK[calF].l) + '» qui sotto e la griglia dei giorni') + '.');
+    return s + '</svg>';
+  }
+  function calStripDisegna(){
+    var box = document.getElementById('vz-calst');
+    if (!box || !calCar) return;
+    var W = Math.max(Math.floor(box.clientWidth), 620);
+    if (box.getAttribute('data-w') === String(W)) return;
+    box.setAttribute('data-w', W);
+    box.innerHTML = calStrip(W);
+  }
+  window.addEventListener('resize', function(){
+    clearTimeout(calRs);
+    calRs = setTimeout(calStripDisegna, 150);
+  });
+  /* scorre l'elenco al mese (o al primo evento del giorno, o al successivo) e lo evidenzia per un attimo */
+  function calVai(ds, soloMese){
+    var d = d0(ds), want = d.getFullYear() * 12 + d.getMonth(), best = null, bestK = Infinity;
+    stage.querySelectorAll('.cal .calm').forEach(function(m){
+      var h = m.querySelector('.calh'), p = h ? (h.textContent || '').trim().toLowerCase().split(/\s+/) : [];
+      var k = +p[1] * 12 + MESI.indexOf(p[0]);
+      if (MESI.indexOf(p[0]) >= 0 && k >= want && k < bestK){ best = m; bestK = k; }
+    });
+    if (!best) return;
+    var el = best;
+    if (!soloMese && bestK === want){
+      var cs = best.querySelectorAll('.cev');
+      for (var i = 0; i < cs.length; i++){
+        var cd = cs[i].querySelector('.cd'), n = cd ? parseInt(cd.textContent, 10) : NaN;
+        if (n >= d.getDate() && cs[i].offsetParent !== null){ el = cs[i]; break; }
+      }
+    }
+    /* posizione dal layout (offsetTop) e non da getBoundingClientRect: i mesi non ancora comparsi hanno
+       la trasformazione dell'effetto .rv, che li sposta di migliaia di pixel finche' non entrano in vista */
+    var y = 0, o = el, bar = document.querySelector('.bar'), off = bar && getComputedStyle(bar).position === 'sticky' ? bar.getBoundingClientRect().height : 0;
+    while (o){ y += o.offsetTop; o = o.offsetParent; }
+    window.scrollTo({top: Math.max(y - off - 10, 0), behavior: 'smooth'});
+    el.classList.add('vz-calgo');
+    setTimeout(function(){ el.classList.remove('vz-calgo'); }, 2600);
+  }
+  function calCaricoWire(){
+    var sec = stage.querySelector('.vz-cal');
+    if (!sec || !calCar) return;
+    calStripDisegna();
+    function bersaglio(t){ return t && t.closest ? t.closest('[data-calgo], .vz-heat [data-d]') : null; }
+    sec.addEventListener('click', function(e){
+      var t = bersaglio(e.target);
+      if (t) calVai(t.getAttribute('data-calgo') || t.getAttribute('data-d'), t.hasAttribute('data-calmese'));
+    });
+    sec.addEventListener('keydown', function(e){
+      var t = e.target;
+      if (e.key === 'Enter' || e.key === ' '){
+        if (t === bersaglio(t)){ e.preventDefault(); calVai(t.getAttribute('data-calgo') || t.getAttribute('data-d'), t.hasAttribute('data-calmese')); }
+        return;
+      }
+      /* striscia dei mesi: un solo punto di tabulazione, le frecce spostano il fuoco */
+      if (!t.hasAttribute || !t.hasAttribute('data-ri')) return;
+      if (e.key === 'Escape'){ t.blur(); return; }
+      var l = sec.querySelectorAll('.vz-calst [data-ri]'), i = +t.getAttribute('data-ri'), n = -1;
+      if (e.key === 'ArrowRight') n = i + 1; else if (e.key === 'ArrowLeft') n = i - 1;
+      else if (e.key === 'Home') n = 0; else if (e.key === 'End') n = l.length - 1;
+      if (n < 0 || n >= l.length || n === i) return;
+      e.preventDefault(); t.setAttribute('tabindex', '-1'); l[n].setAttribute('tabindex', '0'); l[n].focus();
+    });
   }
 
   /* ================= DENARO ================= */
@@ -7615,6 +7879,16 @@ var VZ = (function(){
             Array.prototype.forEach.call(a.querySelectorAll('svg [fill^="var("], svg [stroke^="var("]'), function(el){
               ['fill','stroke'].forEach(function(at){ var v=el.getAttribute(at), m=v&&v.match(/^var\((--[\w-]+)\)$/); if(m){ var c=cs.getPropertyValue(m[1]).trim(); if(c) el.setAttribute(at,c); } });
             });
+          }catch(e){}
+          /* R35 calendario: sugli elementi SVG html2canvas copia in linea lo stile calcolato sulla pagina, cioe' i colori
+             e le variabili --vz-* del tema scuro, che vincono sugli attributi appena sostituiti. Li tolgo tutti e poi
+             ricalcolo i colori qui, nel tema chiaro (due giri: prima si toglie ovunque, cosi' anche l'ereditato torna giusto). */
+          try{
+            var SP=['fill','stroke','stop-color','color'], sv=a.querySelectorAll('svg, svg *');
+            Array.prototype.forEach.call(sv, function(el){
+              for(var j=el.style.length-1;j>=0;j--){ var p=el.style.item(j); if(p.indexOf('--')===0 || SP.indexOf(p)>=0) el.style.removeProperty(p); }
+            });
+            Array.prototype.forEach.call(sv, function(el){ var st=doc.defaultView.getComputedStyle(el); SP.forEach(function(p){ var v=st.getPropertyValue(p); if(v) el.style.setProperty(p,v); }); });
           }catch(e){}
           var k=doc.body.children, i;
           for(i=0;i<k.length;i++) if(k[i]!==a && k[i].tagName!=='SCRIPT') k[i].style.display='none';

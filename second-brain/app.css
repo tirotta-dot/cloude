@@ -644,6 +644,47 @@ section.og h3 .oghint{display:block;margin-top:3px;font-family:"IBM Plex Sans",s
 .cev span{display:block;font-size:12px;color:var(--muted);margin-top:2px}
 .ck{font-family:"Barlow Condensed",sans-serif;font-size:11px;letter-spacing:.12em;text-transform:uppercase;
   color:var(--c);white-space:nowrap}
+/* R35 calendario-heatmap: carico a colpo d'occhio, tra le chip e l'elenco (colori solo --vz-*) */
+section.og.vz-cal{margin:0 0 16px}
+.vz-calb{padding:14px 16px 16px;min-width:0}
+.vz-calt{display:block;margin:0 0 6px;font:600 11px "Barlow Condensed",sans-serif;letter-spacing:.15em;text-transform:uppercase;color:var(--vz-ink2)}
+.vz-cal .vz-leg{align-items:center}
+.vz-caldm{display:block;flex:none}
+.vz-calst{overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;max-width:100%}
+.vz-calst svg{display:block}
+.vz-calst .vz-hit{cursor:pointer}
+.vz-calh{display:flex;flex-wrap:wrap;gap:18px 28px;align-items:flex-start;margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}
+.vz-calhb{display:flex;flex-direction:column;min-width:0}
+.vz-cal .vz-hleg{flex-wrap:wrap;row-gap:4px}
+.vz-hleg i.rg{background:none;border:2px solid var(--vz-ink);margin-left:10px}
+.vz-cal .vz-heat rect[data-d]{cursor:pointer}
+.vz-calside{flex:1;min-width:250px;max-width:520px;display:flex;flex-direction:column;gap:8px}
+.vz-calit{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;align-items:baseline;padding:7px 10px;border:1px solid var(--line);border-radius:6px;cursor:pointer;outline:none}
+.vz-calit b{grid-row:span 2;font:600 20px/1.1 "IBM Plex Sans",sans-serif;color:var(--vz-ink);font-variant-numeric:proportional-nums}
+.vz-calit span{font-size:12.5px;color:var(--vz-ink)}
+.vz-calit small{font-size:11.5px;color:var(--vz-tick)}
+.vz-calit:hover,.vz-calit.vz-on{background:color-mix(in srgb,var(--vz-ink) 5%,transparent)}
+.vz-calit:focus-visible{outline:2px solid var(--cy);outline-offset:2px}
+.vz-calit.vuoto{cursor:default}
+.vz-calnota{margin:2px 0 0;font-size:12px;line-height:1.45;color:var(--vz-tick)}
+.vz-calnota b{color:var(--vz-ink2);font-weight:600}
+details.vz-caltab{margin-top:14px}
+details.vz-caltab summary{cursor:pointer;font:600 11.5px "Barlow Condensed",sans-serif;letter-spacing:.14em;text-transform:uppercase;color:var(--vz-ink2)}
+details.vz-caltab .otab{display:inline-block;vertical-align:top;max-width:100%;margin:8px 12px 0 0}
+details.vz-caltab .otab table{min-width:0;width:auto}
+details.vz-caltab th,details.vz-caltab td{white-space:nowrap}
+details.vz-caltab td.n{text-align:right}
+details.vz-caltab td.cmp{white-space:normal;min-width:240px;max-width:520px}
+.calm.vz-calgo,.cev.vz-calgo{outline:2px solid var(--cy);outline-offset:-2px}
+/* PDF: #printarea * toglie tutti gli sfondi; le chiavi delle legende li riprendono da --k (tema chiaro nella copia) */
+#printarea .vz-cal .vz-leg i,#printarea .vz-hleg i{background:var(--k,transparent)!important}
+#printarea .vz-hleg i.rg{border-color:var(--vz-ink)!important}
+#printarea details.vz-caltab:not([open]){display:none!important}
+#printarea details.vz-caltab summary{list-style:none}
+@media (max-width:640px){
+  .vz-calb{padding:12px}
+  .vz-calside{min-width:0;max-width:none;width:100%}
+}
 
 /* ============ DENARO ============ */
 .flow{display:flex;flex-direction:column;gap:7px;background:var(--panel);border:1px solid var(--line);
