@@ -2260,6 +2260,144 @@ body[data-view="v-offerte"] .bar-in > .seg button[aria-pressed="true"]{backgroun
 .otab.bdgt tr.tot td:first-child,.otab.bdgt tr[data-bdgcm]:hover td:first-child{background:var(--panel-2)}
 .bdgprz input.sel{margin:0 4px}
 
+/* R36 (26/09/2026): «Impegnato su budget» per nodo, sopra la tabella della singola commessa. Righe HTML su una griglia
+   nodo · barra · valore · stato; i segni hanno il colore in --k, così nel PDF (#printarea [style*="--k:"]) lo riprendono. */
+.bdgbul{margin:4px 0 14px;padding:12px 14px 10px;border:1px solid var(--line);border-radius:8px}
+.bb-top{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center;margin:0 0 6px}
+.bb-top .vz-leg{margin:0}
+.bb-leg i.tk{width:2px;height:13px;border-radius:0;display:inline-block}
+.bb-plot{--bb-cols:240px minmax(0,1fr) 150px 128px;font-size:12.5px}
+.bb-ax,.bb-row,.bb-zero{display:grid;grid-template-columns:var(--bb-cols);column-gap:12px;align-items:center;padding:0 6px}
+.bb-ax{height:18px}
+.bb-ax .bb-tr{position:relative;height:100%;min-height:0}
+.bb-ax em{position:absolute;bottom:2px;transform:translateX(-50%);font:500 10.5px "IBM Plex Mono",monospace;font-style:normal;color:var(--vz-tick);white-space:nowrap}
+.bb-ax em.z{transform:none}
+.bb-ax em.f{transform:translateX(-100%)}
+.bb-row{min-height:30px;border-radius:6px;outline:none}
+.bb-row:hover,.bb-row.vz-on,.bb-row:focus-visible,.bb-zero:focus-visible{background:color-mix(in srgb,var(--vz-ink) 6%,transparent)}
+.bb-row:focus-visible,.bb-zero:focus-visible{box-shadow:0 0 0 2px var(--cy);outline:none}
+.bb-row.tot{min-height:36px;border-bottom:1px solid var(--line-2);border-radius:6px 6px 0 0}
+.bb-row.tot .bb-k b{font-family:"Barlow Condensed",sans-serif;font-size:14px;letter-spacing:.06em;text-transform:uppercase}
+.bb-k{min-width:0;display:flex;flex-direction:column;line-height:1.25}
+.bb-k b{font-weight:600;color:var(--vz-ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bb-k small{font-size:11px;color:var(--vz-tick);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bb-tr{position:relative;align-self:stretch;min-height:30px}
+.bb-bin{position:absolute;left:0;width:66.667%;top:50%;height:16px;margin-top:-8px;border-radius:2px;background:var(--k)}
+.bb-s{position:absolute;top:50%;height:8px;margin-top:-4px;min-width:2px;background:var(--k)}
+.bb-s.ult{border-radius:0 3px 3px 0}
+.bb-tk{position:absolute;left:66.667%;top:50%;width:2px;height:22px;margin:-11px 0 0 -1px;background:var(--k)}
+.bb-cut{position:absolute;left:calc(100% - 18px);top:50%;width:5px;height:14px;margin-top:-7px;background:var(--k);transform:skewX(-24deg)}
+.bb-v{text-align:right;white-space:nowrap;font:500 12px "IBM Plex Mono",monospace;color:var(--vz-ink);font-variant-numeric:tabular-nums}
+.bb-v b{font-weight:600}
+.bb-v small{color:var(--vz-tick);font-size:11px}
+.bb-st{font:500 11.5px "IBM Plex Mono",monospace;color:var(--vz-ink2);white-space:nowrap;font-variant-numeric:tabular-nums}
+.bb-st.late{color:var(--late)}
+.bb-st.warn{color:var(--warn)}
+.bb-st i{font-style:normal;font-size:9.5px}
+.bb-gh{padding:10px 6px 3px;font:600 11.5px "Barlow Condensed",sans-serif;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-2)}
+.bb-avv{margin:6px 6px 2px;font-size:12px;line-height:1.5;color:var(--ink-2)}
+.bb-avv>i{font-style:normal;color:var(--warn)}
+.bb-avv b{color:var(--warn);font-weight:600}
+.bb-zero{align-items:start;padding-top:8px;padding-bottom:6px;margin-top:6px;border-top:1px dashed var(--line-2);outline:none;border-radius:0 0 6px 6px}
+.bb-zn{grid-column:2 / -1;font-size:11.5px;line-height:1.6;color:var(--vz-ink2)}
+.bb-zn>span{white-space:nowrap}
+.bb-zn b{font:500 11px "IBM Plex Mono",monospace;color:var(--vz-tick)}
+.bb-note{margin:10px 6px 0;line-height:1.5}
+/* R36: confronto con le commesse simili dentro la proposta di budget (.bdgprop) */
+.bdgcf{margin:12px 0 4px;padding:10px 0 0;border-top:1px solid rgba(176,124,6,.30)}
+.bcf-top{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;margin:0 0 6px}
+.bcf-top .chip{margin-left:auto;font-size:11px;padding:3px 9px}
+.bcf-hint{font-size:12px;color:var(--ink-2)}
+.bcf-leg{margin:0 0 8px;font-size:11.5px}
+.bcf-leg i.md{width:2px;height:12px;border-radius:0;display:inline-block}
+.bcf-leg i.pt{border-radius:50%}
+.bcf-leg i.pp{transform:rotate(45deg);width:8px;height:8px;border-radius:1px}
+.bcf-tab{background:var(--panel);border:1px solid var(--line);border-radius:6px}
+.bcf-tab table{min-width:760px;width:100%;border-collapse:collapse;font-size:12.5px}
+.bcf-tab th,.bcf-tab td{padding:6px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+.bcf-tab th{font:600 11px "Barlow Condensed",sans-serif;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-2);text-align:left;vertical-align:bottom}
+.bcf-tab th small,.bcf-tab td small{display:block;font:400 10.5px "IBM Plex Sans",sans-serif;letter-spacing:0;text-transform:none;color:var(--muted);margin-top:2px}
+.bcf-tab th b{font:600 12.5px "IBM Plex Mono",monospace;letter-spacing:0;color:var(--ink)}
+.bcf-tab th small{max-width:150px;margin-left:auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bcf-tab th em{display:block;margin-top:3px;font:500 10.5px "IBM Plex Sans",sans-serif;font-style:normal;letter-spacing:0;text-transform:none;color:var(--cy)}
+.bcf-tab th.num,.bcf-tab td.num{text-align:right}
+.bcf-tab td.num{font:500 12px "IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;color:var(--ink);white-space:nowrap}
+.bcf-tab td.nodo b{display:block;font-weight:600;color:var(--ink)}
+.bcf-tab td.nodo .osub{display:block;font-size:11px;color:var(--muted);white-space:normal}
+.bcf-tab th[data-v]{cursor:pointer;border-radius:4px}
+.bcf-tab th[data-v]:hover,.bcf-tab th[data-v]:focus-visible{background:color-mix(in srgb,var(--cy) 12%,transparent);outline:none}
+.bcf-tab th[data-v]:focus-visible{box-shadow:inset 0 0 0 2px var(--cy)}
+.bcf-tab th.on{box-shadow:inset 0 -2px 0 var(--cy)}
+.bcf-tab td.on{background:color-mix(in srgb,var(--cy) 7%,transparent)}
+.bcf-tab tbody.bcf-head tr.tot td{border-bottom:1px solid var(--line-2);font-weight:600}
+.bcf-tab tbody.bcf-head tr:last-child td,.bcf-tab tbody:not(.bcf-head):not(.bcf-foot) tr:last-child td{border-bottom:2px solid var(--line-2)}
+.bcf-tab tbody.bcf-foot tr.prz td{font-weight:600}
+.bcf-tab td.anom{box-shadow:inset 0 0 0 1px var(--warn);border-radius:4px}
+.bcf-tab td.anom small.warn{color:var(--warn);font-family:"IBM Plex Mono",monospace}
+.bcf-tab td.anom small i{font-style:normal}
+.bcf-tab td.neg{color:var(--late)}
+.bcf-d{white-space:nowrap;min-width:170px}
+.bcf-st{position:relative;display:inline-block;vertical-align:middle;width:120px;height:14px}
+.bcf-st i{position:absolute;background:var(--k)}
+.bcf-st i.ax{left:0;right:0;top:50%;height:1px}
+.bcf-st i.rg{top:50%;height:2px;margin-top:-1px}
+.bcf-st i.md{top:0;width:2px;height:14px;margin-left:-1px}
+.bcf-st i.pt{top:50%;width:8px;height:8px;margin:-4px 0 0 -4px;border-radius:50%;box-shadow:0 0 0 1.5px var(--vz-surface)}
+.bcf-st i.pt.sel{width:10px;height:10px;margin:-5px 0 0 -5px;box-shadow:0 0 0 2px var(--vz-ink)}
+.bcf-st i.pp{top:50%;width:7px;height:7px;margin:-3.5px 0 0 -3.5px;transform:rotate(45deg)}
+.bcf-x{display:inline-block;min-width:40px;margin-left:8px;font:500 11.5px "IBM Plex Mono",monospace;color:var(--ink-2);vertical-align:middle}
+.bcf-x.alto{color:var(--ink);font-weight:600}
+.bcf-mr{font:500 11.5px "IBM Plex Mono",monospace;color:var(--ink-2)}
+.bcf-note{margin:8px 0 0;line-height:1.5}
+.bcf-tab th:first-child,.bcf-tab td:first-child{position:sticky;left:0;background:var(--panel);z-index:1;min-width:150px;max-width:220px}
+/* R36: ore del gestionale nel riepilogo di Budget: riquadro «dove mancano» e colonna Ore (colonnine mensili + ufficio/produzione) */
+.bdg-orebox{margin:0 0 16px}
+.bo-in{padding:14px 16px 12px}
+.bo-figs{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px;margin:0 0 12px}
+.bo-fig{border:1px solid var(--line);border-radius:6px;padding:9px 12px;background:var(--panel-2);min-width:0;display:flex;flex-direction:column;gap:2px}
+html[data-sb-theme="jarvis"] .bo-fig{background:rgba(255,255,255,.03)}
+.bo-n{font:600 26px/1.1 "IBM Plex Sans",sans-serif;color:var(--vz-ink);font-variant-numeric:proportional-nums;margin:2px 0 1px}
+.bo-n small{font:500 13px "IBM Plex Sans",sans-serif;color:var(--vz-ink2)}
+.bo-fig>small{font-size:11.5px;line-height:1.45;color:var(--vz-ink2)}
+.bo-fig>small b{color:var(--warn)}
+.bo-lh{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;margin:4px 0 8px}
+.bo-lh>b{font:600 12.5px "Barlow Condensed",sans-serif;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-2)}
+.bo-lh>span{font-size:12px;color:var(--ink-2)}
+.bo-lh .chip{margin-left:auto;font-size:11px;padding:3px 9px}
+.bo-tab table{min-width:560px}
+.bo-tab tr[data-bdgcm]{cursor:pointer}
+.bo-tab tr[data-bdgcm]:hover td{background:rgba(255,255,255,.04)}
+.bo-tab td.nodo b{display:block;color:var(--ink)}
+.bo-leg{margin:12px 0 0;font-size:11.5px}
+.bo-note{margin:8px 0 0;line-height:1.5}
+.bdgt td.bo-cell{min-width:186px}
+.bo-w{display:flex;flex-direction:column;align-items:flex-start;gap:5px}
+.bo-r{display:flex;align-items:flex-end;gap:8px}
+.bo-mc{display:inline-flex;align-items:flex-end;gap:2px;height:22px;width:82px;flex:none;border-bottom:1px solid var(--vz-axis)}
+.bo-mc i{flex:1 1 0;background:var(--k);border-radius:1px 1px 0 0;min-height:1px}
+.bo-mc i.z{height:1px}
+.bo-tt{display:inline-flex;flex-direction:column;gap:2px;min-width:74px;outline:none;border-radius:3px}
+.bo-tt:focus-visible{box-shadow:0 0 0 2px var(--cy)}
+.bo-tt b{font:600 12px "IBM Plex Mono",monospace;color:var(--ink);font-variant-numeric:tabular-nums}
+.bo-tt small{font-size:10.5px;color:var(--muted);white-space:nowrap}
+.bo-sp{display:flex;gap:1px;height:4px;width:74px}
+.bo-sp i{display:block;height:4px;background:var(--k);min-width:1px}
+.bo-w .pill{font-size:10.5px;white-space:nowrap}
+@media (max-width:640px){ .bo-in{padding:12px 10px 10px} .bo-n{font-size:22px} .bo-lh .chip{margin-left:0} .bo-tab table{min-width:0} .bo-tab .bo-h0{display:none} }
+@media (max-width:640px){
+  .bdgbul{padding:10px 8px 8px}
+  .bb-plot{--bb-cols:minmax(0,1fr) auto}
+  .bb-ax{display:none}
+  .bb-row{grid-template-areas:"k st" "tr v";padding:4px 4px}
+  .bb-row .bb-k{grid-area:k}
+  .bb-row .bb-st{grid-area:st;text-align:right}
+  .bb-row .bb-tr{grid-area:tr;min-height:24px}
+  .bb-row .bb-v{grid-area:v}
+  .bb-zero{grid-template-columns:1fr;row-gap:4px;padding:8px 4px 6px}
+  .bb-zn{grid-column:1;white-space:normal}
+  .bb-zn>span{white-space:normal}
+}
+
 /* R35 (26/09/2026): «Costi impegnati sul valore a contratto» — Denaro › Margini e riepilogo di Commesse › Budget.
    Righe HTML su una griglia a tre colonne (commessa · barra · valore); le linee guida sono un livello sotto le righe
    con le stesse colonne, così restano continue anche tra i gruppi. Colori solo da --vz-*, stato solo testo + icona. */

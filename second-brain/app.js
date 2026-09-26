@@ -6682,6 +6682,19 @@ var VZ = (function(){
       .replace(/[Ò-Ö]/g, 'O').replace(/[Ù-Ü]/g, 'U').replace(/[^A-Z0-9]+/g, ' ').trim();
     NN_CACHE[k] = v; return v;
   }
+  /* R36 (26/09/2026): sinonimi dei nomi di nodo SOLO per la presentazione e i confronti (barre «Impegnato su budget» e
+     confronto con le commesse simili). Il modello (bdgModello, bdgProposta, bdgMappa e il suo specchio budget_xlsx.py)
+     resta su normNodo: budget, costi e proposte non cambiano. Unione per parola: Imp. = Impianto, Vetture = Vettura,
+     Trasferte = Trasferta, Documentaz. = Documentazione, Est. Di = Esterne (Spese Est. Di Progettaz. = Spese Esterne
+     Progettaz.; vale anche per Certificaz., Imp. Pneumatico, Prod. Int. Vetture). */
+  var NA_CACHE = {};
+  function nodoAlias(s){
+    var k = String(s || '');
+    if (NA_CACHE[k] !== undefined) return NA_CACHE[k];
+    var v = k === '-' ? '-' : (' ' + normNodo(k) + ' ').replace(/ IMP (?=\S)/g, ' IMPIANTO ').replace(/ VETTURE /g, ' VETTURA ').replace(/ TRASFERTE /g, ' TRASFERTA ')
+      .replace(/ DOCUMENTAZ /g, ' DOCUMENTAZIONE ').replace(/ EST DI /g, ' ESTERNE ').trim();
+    NA_CACHE[k] = v; return v;
+  }
   /* numeri scritti all'italiana ("1.500,50", "380,5") o con il punto decimale ("380.5"): il punto è
      separatore delle migliaia solo se c'è anche la virgola o se è seguito da tre cifre esatte */
   function numIt(v){
@@ -6907,6 +6920,99 @@ var VZ = (function(){
     var w = Math.min(r.pct, 1.5) / 1.5 * 100;
     return '<div class="bdgbar"><i style="width:' + w.toFixed(1) + '%"></i></div>';
   }
+  /* R36 (26/09/2026): «Impegnato su budget» della singola commessa, sopra la tabella (che resta com'è ed è quella di
+     «Copia per Excel»). Binario = budget esterno con la tacca a 2/3 della larghezza: si legge fino al 150%. Riempimento
+     impilato per certezza con 2 px di stacco: fatturato (fatture, contabilizzato, altri costi), consegnato (DDT), ordinato.
+     Oltre il 150% la barra si interrompe e lo stato dice «▲ N%»; senza budget: barra neutra sulla scala comune delle righe
+     senza budget e «budget da inserire». Prima il totale, poi i nodi per budget decrescente; i nodi con budget ancora a
+     0 € stanno in una riga sola, con i nomi in chiaro. Sinonimi uniti con nodoAlias (solo qui). Numeri tutti da M. */
+  function bdgBulGruppi(M){
+    var G = {}, L = [];
+    M.righe.forEach(function(r){
+      var k = nodoAlias(r.n) || r.id, g = G[k];
+      if (!g){ g = G[k] = {n: r.n, bx: -1, nomi: [], righe: [], ext: 0, fat: 0, ddt: 0, ord: 0, imp: 0}; L.push(g); }
+      g.righe.push(r); g.nomi.push(r.n);
+      if (r.ext > g.bx){ g.bx = r.ext; g.n = r.n; }
+      g.ext += r.ext; g.fat += r.fat + r.con + r.alt; g.ddt += r.ddt; g.ord += r.ord; g.imp += r.imp;
+    });
+    return L;
+  }
+  function bdgBulPct(p){ return Math.round(p * 100).toLocaleString('it-IT') + '%'; }
+  /* o = {n, sub, b, fat, ddt, ord, imp, mx (scala delle righe senza budget), cls, primo, uniti} */
+  function bdgBulRiga(o){
+    var b = o.b > 0 ? o.b : 0, pct = b ? o.imp / b : null, fuori = pct != null && pct > 1.5, bar = '';
+    var sc = b ? 1 / (b * 1.5) : (o.mx > 0 ? 1 / o.mx : 0);
+    if (b) bar += '<i class="bb-bin" style="--k:var(--vz-track)"></i>';
+    var parti = b ? [[o.fat, '--vz-out-3'], [o.ddt, '--vz-out-2'], [o.ord, '--vz-out-1']] : [[o.imp, '--vz-rest-ink']], acc = 0, ult = -1;
+    parti.forEach(function(q, j){ if (q[0] > 0 && acc * sc < 1){ ult = j; acc += q[0]; } });
+    acc = 0;
+    parti.forEach(function(q, j){
+      if (!(q[0] > 0) || j > ult) return;
+      var a = Math.min(acc * sc, 1); acc += q[0]; var e = Math.min(acc * sc, 1); if (e <= a) return;
+      var w = ((e - a) * 100).toFixed(3) + '%';
+      bar += '<i class="bb-s' + (j === ult ? ' ult' : '') + '" style="--k:var(' + q[1] + ');left:' + (a * 100).toFixed(3) + '%;width:' + (j < ult ? 'calc(' + w + ' - 2px)' : w) + '"></i>';
+    });
+    if (fuori) bar += '<i class="bb-cut" style="--k:var(--vz-surface)"></i>';
+    if (b) bar += '<i class="bb-tk" style="--k:var(--vz-ink)"></i>';
+    var st, cl = '';
+    if (pct == null){ st = '<i aria-hidden="true">⚠</i> budget da inserire'; cl = ' warn'; }
+    else if (pct > 1){ st = '<i aria-hidden="true">▲</i> ' + bdgBulPct(pct); cl = ' late'; }
+    else st = bdgBulPct(pct);
+    var tt = [[b ? VZ.eur(b) : 'da inserire', 'budget esterno', '', ''], [VZ.eur(o.fat), 'fatturato: fatture, contabilizzato, altri costi', 'out-3', 'r'],
+      [VZ.eur(o.ddt), 'consegnato (DDT)', 'out-2', 'r'], [VZ.eur(o.ord), 'ordinato', 'out-1', 'r'], [VZ.eur(o.imp) + (pct != null ? ' · ' + bdgBulPct(pct) : ''), 'impegnato', '', '']];
+    if (b) tt.push(o.imp > b ? ['▲ +' + VZ.eur(o.imp - b), 'oltre il budget', '', ''] : [VZ.eur(b - o.imp), 'ancora nel budget', '', '']);
+    if (o.uniti) tt.push(['', 'unisce i nodi ' + o.uniti, '', '']);
+    var aria = o.n + ': impegnato ' + eurR(o.imp) + (b ? ' su budget ' + eurR(b) + ', ' + bdgBulPct(pct) : ', budget da inserire');
+    return '<div class="bb-row' + (o.cls ? ' ' + o.cls : '') + '" role="listitem" tabindex="' + (o.primo ? 0 : -1) + '"' + VZ.tip(o.n, tt) + ' aria-label="' + esc(aria) + '">'
+      + '<span class="bb-k"><b>' + esc(o.n) + '</b>' + (o.sub ? '<small>' + esc(o.sub) + '</small>' : '') + '</span>'
+      + '<span class="bb-tr" aria-hidden="true">' + bar + '</span>'
+      + '<span class="bb-v"><b>' + esc(VZ.eurC(o.imp)) + '</b><small> / ' + (b ? esc(VZ.eurC(b)) : '—') + '</small></span>'
+      + '<span class="bb-st' + cl + '">' + st + '</span></div>';
+  }
+  function bdgBulletHtml(M){
+    if (!M.righe.length || bdgVista !== 'scost' || (M.chiusa && !(M.tot.ext > 0))) return '';
+    var L = bdgBulGruppi(M), T = M.tot, prop = M.proposta && M.rif.length;
+    function nullo(g){ return Math.abs(g.imp) < 0.5; }
+    function riga(g, mx, primo){
+      var al = g.nomi.filter(function(x){ return x !== g.n; });
+      return bdgBulRiga({n: g.n, sub: al.length ? '+ ' + al.join(', ') : '', b: g.ext, fat: g.fat, ddt: g.ddt, ord: g.ord, imp: g.imp, mx: mx, primo: primo, uniti: al.length ? g.nomi.join(' e ') : ''});
+    }
+    var conB = L.filter(function(g){ return g.ext > 0 && !nullo(g); }).sort(function(a, b){ return b.ext - a.ext || b.imp - a.imp; });
+    var senzaB = L.filter(function(g){ return !(g.ext > 0) && !nullo(g); }).sort(function(a, b){ return b.imp - a.imp; });
+    var zeri = L.filter(nullo).sort(function(a, b){ return b.ext - a.ext; }), nB = 0, eB = 0, nV = 0;
+    zeri.forEach(function(g){ g.righe.forEach(function(r){ if (r.ext > 0){ nB++; eB += r.ext; } else nV++; }); });
+    var mxNo = 0; senzaB.forEach(function(g){ if (g.imp > mxNo) mxNo = g.imp; });
+    var nUniti = 0; L.forEach(function(g){ if (g.nomi.length > 1) nUniti += g.nomi.length - 1; });
+    var h = '<div class="bdgbul"><div class="bb-top"><span class="im-lab">Impegnato su budget</span>'
+      + '<span class="vz-leg bb-leg"><span><i class="rc" style="--k:var(--vz-out-3);background:var(--k)"></i>fatturato</span><span><i class="rc" style="--k:var(--vz-out-2);background:var(--k)"></i>consegnato (DDT)</span>'
+      + '<span><i class="rc" style="--k:var(--vz-out-1);background:var(--k)"></i>ordinato</span><span><i class="tk" style="--k:var(--vz-ink);background:var(--k)"></i>budget ' + (prop ? 'proposto' : 'esterno') + ' (tacca a 2/3: la barra arriva al 150%)</span>'
+      + (senzaB.length || !(T.ext > 0) ? '<span><i class="rc" style="--k:var(--vz-rest-ink);background:var(--k)"></i>senza budget: scala a parte</span>' : '') + '</span></div>'
+      + '<div class="bb-plot" role="list" aria-label="Impegnato su budget per nodo">'
+      + '<div class="bb-ax" aria-hidden="true"><span></span><span class="bb-tr"><em class="z" style="left:0">0</em><em style="left:66.667%">budget</em><em class="f" style="left:100%">150%</em></span><span></span><span></span></div>';
+    h += bdgBulRiga({n: 'Totale commessa', sub: 'costi esterni · ' + M.righe.length + (M.righe.length === 1 ? ' nodo' : ' nodi'), b: T.ext, fat: T.fat + T.con + T.alt, ddt: T.ddt, ord: T.ord, imp: T.imp, mx: T.imp, cls: 'tot', primo: true});
+    /* avviso: costi su nodi senza budget e nodi oltre il 150%; se i costi fuori budget (nodi non a budget o oltre 10 volte il
+       loro budget, come Giostra Completa di DR-11-25: 620 k€ su 200 €) sono più di metà dell'impegnato, e l'impegnato non è
+       solo un inizio (almeno il 10% del budget), anche i nodi a budget ancora a 0 €: i costi stanno su nodi diversi */
+    var over = conB.filter(function(g){ return g.imp > g.ext * 1.5; }), fuori = 0, avv = [];
+    senzaB.forEach(function(g){ fuori += g.imp; }); conB.forEach(function(g){ if (g.imp > g.ext * 10) fuori += g.imp; });
+    function nomi(a, f){ return a.slice(0, 4).map(f).join(', ') + (a.length > 4 ? ' e altri ' + (a.length - 4) : ''); }
+    if (senzaB.length) avv.push('<b class="warn">costi su un nodo non a budget</b>: ' + nomi(senzaB, function(g){ return esc(g.n) + ' ' + esc(VZ.eurC(g.imp)); }));
+    if (over.length) avv.push('oltre il 150% del budget: ' + nomi(over, function(g){ return esc(g.n) + ' ' + esc(VZ.eurC(g.imp)) + ' su ' + esc(VZ.eurC(g.ext)); }));
+    if (avv.length && nB && T.imp > 0 && fuori > 0.5 * T.imp && T.imp >= 0.1 * T.ext) avv.push('intanto ' + nB + (nB === 1 ? ' nodo a budget è' : ' nodi a budget sono') + ' ancora a 0 € (' + eurR(eB) + '): i costi stanno su nodi diversi da quelli del budget');
+    if (avv.length) h += '<p class="bb-avv"><i class="warn" aria-hidden="true">⚠</i> ' + avv.join(' · ') + '.</p>';
+    var primo = false;
+    if (conB.length){ h += '<div class="bb-gh">Nodi a budget con costi · ' + conB.length + '</div>'; conB.forEach(function(g){ h += riga(g, 0, primo); }); }
+    if (senzaB.length){ h += '<div class="bb-gh">Costi su nodi non a budget · ' + senzaB.length + '</div>'; senzaB.forEach(function(g){ h += riga(g, mxNo, primo); }); }
+    if (zeri.length){
+      var tit = nB ? nB + (nB === 1 ? ' nodo ancora senza costi' : ' nodi ancora senza costi') : nV + (nV === 1 ? ' nodo senza budget né costi' : ' nodi senza budget né costi');
+      var sub = nB ? eurR(eB) + ' a budget' + (nV ? ' · ' + nV + ' senza budget né costi' : '') : '';
+      h += '<div class="bb-zero" role="listitem" tabindex="-1" aria-label="' + esc(tit + (sub ? ', ' + sub : '')) + '"><span class="bb-k"><b>' + esc(tit) + '</b>' + (sub ? '<small>' + esc(sub) + '</small>' : '') + '</span>'
+        + '<span class="bb-zn">' + zeri.map(function(g){ return '<span>' + esc(g.nomi.join(' + ')) + ' <b>' + (g.ext > 0 ? esc(VZ.eurC(g.ext)) : '—') + '</b></span>'; }).join(' · ') + '</span></div>';
+    }
+    h += '</div><p class="srcline bb-note">Impegnato = fatturato + consegnato + ordinato del gestionale, come nella tabella qui sotto (le ore sono nella tabella Ore interne).'
+      + (nUniti ? ' Qui i nomi scritti in due modi sono uniti (' + nUniti + (nUniti === 1 ? ' nodo' : ' nodi') + '); la tabella e «Copia per Excel» restano con i nomi del budget.' : '') + '</p></div>';
+    return h;
+  }
   /* R30: un solo nome per il consuntivo rivalutato, «Costi a prezzi Y», in tabella, KPI, riepilogo, CSV ed Excel */
   var BDG_TIT_IDX = 'costi esterni rivalutati con gli indici ISTAT dei Parametri (dal 2025 stime); le ore restano alle tariffe di quest\'anno';
   function bdgTabella(M){
@@ -7001,6 +7107,155 @@ var VZ = (function(){
       + '<button class="btn" data-bdgprz="' + esc(code) + '">Salva prezzo</button> · '
       + (M.valore != null ? 'valore a contratto (scheda Economics): cambialo qui se serve' : M.prezzo != null ? 'oggi preso da ' + esc(M.prezzoFonte) + (M.prezzoDubbio ? ', <b>probabilmente incompleto</b>' : M.prezzoDaConfermare ? ', da confermare' : '') + ': scrivi qui quello vero' : 'nessun prezzo trovato: scrivilo qui') + '</p>';
   }
+  /* R36 (26/09/2026): confronto nodo per nodo con le commesse simili, dentro la proposta di budget. Colonne: le 1-3 simili di
+     bdgSimili a prezzi dell'anno corrente (costiIdxNodi), la mediana solo tra le simili che hanno il nodo («n/3»), la
+     dispersione (da minimo a massimo) e la proposta di bdgProposta così com'è (per nodo la media con gli zeri: il modello non
+     cambia). In testa i totali per riferimento, con evidenziato quello lontano dagli altri, e il margine consuntivo di
+     ciascuno; in fondo ore e prezzo di vendita col margine dei Parametri. Con un solo riferimento, solo i totali. Nodi uniti
+     con nodoAlias (solo presentazione). Il clic su una colonna la sceglie come riferimento (BDG_RIF, come la tendina). */
+  function bdgMediana(a){ var s = a.slice().sort(function(x, y){ return x - y; }), n = s.length; return n ? (n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2) : null; }
+  function bcfEur(n){
+    if (n == null) return '—';
+    var a = Math.abs(n), s = n < 0 ? '−' : '';
+    if (a >= 1e6) return s + (a / 1e6).toLocaleString('it-IT', {maximumFractionDigits: 2}) + ' M€';
+    if (a >= 1e4) return s + Math.round(a / 1e3).toLocaleString('it-IT') + ' k€';
+    if (a >= 1e3) return s + (a / 1e3).toLocaleString('it-IT', {maximumFractionDigits: 1}) + ' k€';
+    return s + Math.round(a) + ' €';
+  }
+  function bcfPct(m){ return m == null ? '—' : (m > 0 ? '+' : m < 0 ? '−' : '') + Math.abs(Math.round(m * 100)) + '%'; }
+  function bdgConfronto(M){
+    var R = M.simili || [];
+    if (!M.proposta || !R.length) return null;
+    var mp = {}, rows = {}, L = [], nR = R.length;
+    M.nodi.forEach(function(o){ var k = normNodo(o.n); if (k && !mp[k]) mp[k] = o; bdgAl(o).forEach(function(a){ var q = a === '-' ? '-' : normNodo(a); if (q && !mp[q]) mp[q] = o; }); });
+    function chiave(o){ return bdgAl(o).indexOf('-') >= 0 ? '-' : nodoAlias(o.n); }
+    function riga(k, n){ var r = rows[k]; if (!r){ r = rows[k] = {n: n, v: {}, prop: 0, nomi: []}; L.push(r); } if (r.nomi.indexOf(n) < 0) r.nomi.push(n); return r; }
+    M.nodi.forEach(function(o){ if (Number(o.ext) > 0) riga(chiave(o), o.n).prop += Number(o.ext); });
+    R.forEach(function(s){ Object.keys(s.nodi).forEach(function(nd){
+      var o = mp[nd === '-' ? '-' : normNodo(nd)];
+      var r = o ? riga(chiave(o), o.n) : riga(nd === '-' ? '-' : nodoAlias(nd), nd === '-' ? 'Varie (senza nodo)' : titolo(nd));
+      r.v[s.code] = (r.v[s.code] || 0) + s.nodi[nd];
+    }); });
+    L.forEach(function(r){
+      var a = R.filter(function(s){ return r.v[s.code] != null; }).map(function(s){ return r.v[s.code]; });
+      r.n_ = a.length; r.med = bdgMediana(a); r.mn = a.length ? Math.min.apply(null, a) : null; r.mx = a.length ? Math.max.apply(null, a) : null;
+    });
+    L.sort(function(a, b){ return b.prop - a.prop || (b.med || 0) - (a.med || 0); });
+    /* nodi del contratto o del gestionale che nessuna simile ha: restano visibili in una riga di testo */
+    var senza = M.nodi.filter(function(o){ return !(Number(o.ext) > 0) && !rows[chiave(o)]; }).map(function(o){ return o.n; });
+    var tU = M.tU, tO = M.tO;
+    var rif = R.map(function(s){
+      var Mr = bdgModello(s.c), o = Mr.ore, costo = s.tot + o.cEur;
+      return {code: s.code, anno: s.anno, desc: s.c.desc || s.c.cliente || '', tot: s.tot, marg: Mr.marg, prezzoR: Mr.prezzo, cU: o.cU, cO: o.cO, oreEur: o.cEur, costo: costo, prezzo: prezzoVendita(costo)};
+    });
+    /* valore anomalo (con 3 riferimenti): il totale più lontano dalla media degli altri due, se ne dista almeno ×1,67 in su
+       o in giù (−40%); uno solo, così si vede quale riferimento sposta la proposta */
+    var totMed = bdgMediana(rif.map(function(x){ return x.tot; })), peggio = null;
+    rif.forEach(function(x){
+      var alt = 0; rif.forEach(function(y){ if (y !== x) alt += y.tot; }); alt = nR > 1 ? alt / (nR - 1) : 0;
+      x.dev = alt > 0 ? x.tot / alt - 1 : 0; x.lg = alt > 0 && x.tot > 0 ? Math.abs(Math.log(x.tot / alt)) : 0;
+      if (nR >= 3 && x.lg >= Math.log(1 / 0.6) && (!peggio || x.lg > peggio.lg)) peggio = x;
+    });
+    rif.forEach(function(x){ x.anom = x === peggio; });
+    function med(f){ var a = rif.map(f).filter(function(v){ return v != null && v > 0; }); return {m: bdgMediana(a), n: a.length}; }
+    var margs = rif.map(function(x){ return x.marg; }).filter(function(v){ return v != null; });
+    return {M: M, R: rif, rows: L, senza: senza, nR: nR, totMed: totMed, sel: M.rifMode === 'media' ? null : M.rifMode,
+      mU: med(function(x){ return x.cU; }), mO: med(function(x){ return x.cO; }), mC: med(function(x){ return x.costo; }), mP: med(function(x){ return x.prezzo; }),
+      margMin: margs.length ? Math.min.apply(null, margs) : null, margMax: margs.length ? Math.max.apply(null, margs) : null, margMed: bdgMediana(margs),
+      pU: M.ore.hCm.u || 0, pO: M.ore.hCm.o || 0, pC: M.budgetTot, pP: prezzoVendita(M.budgetTot), tU: tU, tO: tO};
+  }
+  /* striscia della dispersione: 0 → massimo della riga; pallini = simili, tacca = mediana, rombo = proposta */
+  function bcfStriscia(vals, med, prop, sel){
+    var mx = Math.max.apply(null, vals.map(function(v){ return v.v; }).concat([prop || 0, 1])), x = function(v){ return (Math.max(0, v) / mx * 100).toFixed(2) + '%'; };
+    var vv = vals.map(function(v){ return v.v; }), h = '<span class="bcf-st" aria-hidden="true"><i class="ax" style="--k:var(--vz-grid)"></i>';
+    if (vv.length > 1) h += '<i class="rg" style="--k:var(--vz-rest-ink);left:' + x(Math.min.apply(null, vv)) + ';width:calc(' + x(Math.max.apply(null, vv)) + ' - ' + x(Math.min.apply(null, vv)) + ')"></i>';
+    if (med != null) h += '<i class="md" style="--k:var(--vz-ink);left:' + x(med) + '"></i>';
+    vals.forEach(function(v){ h += '<i class="pt' + (sel && v.code === sel ? ' sel' : '') + '" style="--k:var(--vz-1);left:' + x(v.v) + '"></i>'; });
+    if (prop > 0) h += '<i class="pp" style="--k:var(--vz-2);left:' + x(prop) + '"></i>';
+    return h + '</span>';
+  }
+  function bdgConfrontoHtml(M){
+    var D = bdgConfronto(M); if (!D) return '';
+    var code = esc(M.c.code), R = D.R, nR = D.nR, mg = Number(bcfg().marg) || 0, soloTot = nR < 2;
+    function th(x){
+      var on = D.sel === x.code;
+      return '<th class="num bcf-rif' + (on ? ' on' : '') + '"' + (nR > 1 ? ' data-bdgrif="' + code + '" data-v="' + esc(x.code) + '" role="button" tabindex="0" aria-pressed="' + on + '" title="' + (on ? 'Torna alla media delle ' + nR + ' simili' : 'Usa solo ' + esc(x.code) + ' come riferimento') + '"' : '') + '>'
+        + '<b>' + esc(x.code) + '</b><small>' + (x.anno ? x.anno + ' · ' : '') + esc(x.desc) + '</small>' + (nR > 1 ? '<em>' + (on ? '● riferimento scelto' : 'usa come riferimento') + '</em>' : '') + '</th>';
+    }
+    var h = '<div class="bdgcf"><div class="bcf-top"><span class="im-lab">Confronto con ' + (nR > 1 ? 'le ' + nR + ' commesse simili' : 'l\'unica commessa simile') + '</span>'
+      + '<span class="bcf-hint">costi consuntivi a prezzi ' + M.Y + (nR > 1 ? ' · clic su una commessa: la uso come riferimento, di nuovo per tornare alla media' : ' · con un solo riferimento solo i totali') + '</span>'
+      + '<button class="chip" data-bdgcfcopy="' + code + '">Copia per Excel</button></div>';
+    if (nR > 1) h += '<div class="vz-leg bcf-leg"><span><i class="rc pt" style="--k:var(--vz-1);background:var(--k)"></i>simili</span><span><i class="md" style="--k:var(--vz-ink);background:var(--k)"></i>mediana</span><span><i class="rc pp" style="--k:var(--vz-2);background:var(--k)"></i>proposta</span><span>dispersione: da minimo a massimo, × = massimo ÷ minimo</span></div>';
+    h += '<div class="otab bcf-tab"><table><thead><tr><th>' + (soloTot ? '' : 'Nodo') + '</th>' + R.map(th).join('')
+      + (nR > 1 ? '<th class="num">Mediana<small>tra le simili che hanno il nodo</small></th><th>Dispersione</th>' : '')
+      + '<th class="num bcf-rif' + (D.sel ? '' : ' on') + '"' + (nR > 1 && D.sel ? ' data-bdgrif="' + code + '" data-v="media" role="button" tabindex="0" aria-pressed="false" title="Torna alla media delle ' + nR + ' simili"' : '') + '><b>Proposta</b><small>'
+      + (nR > 1 ? (D.sel ? 'solo ' + esc(D.sel) : 'media delle ' + nR + ', nodo assente = 0') : 'da ' + esc(R[0].code)) + '</small>' + (nR > 1 && D.sel ? '<em>torna alla media</em>' : '') + '</th></tr></thead>';
+    var vals = function(f){ return R.map(function(x){ return {code: x.code, v: f(x)}; }).filter(function(q){ return q.v != null && q.v > 0; }); };
+    function disp(a, med, prop, txt){
+      var vv = a.map(function(q){ return q.v; }), mn = vv.length ? Math.min.apply(null, vv) : null, mx = vv.length ? Math.max.apply(null, vv) : null;
+      var r = vv.length > 1 && mn > 0 ? '×' + (mx / mn).toLocaleString('it-IT', {maximumFractionDigits: 1}) : vv.length === 1 ? '1 sola' : '—';
+      return '<td class="bcf-d"' + VZ.tip(txt, a.map(function(q){ return [bcfEur(q.v), q.code, '1', 'r']; }).concat(med != null ? [[bcfEur(med), 'mediana', '--vz-ink', 'l']] : [], prop > 0 ? [[bcfEur(prop), 'proposta', '2', 'r']] : [])) + '>'
+        + bcfStriscia(a, med, prop, D.sel) + '<span class="bcf-x' + (vv.length > 1 && mn > 0 && mx / mn >= 2 ? ' alto' : '') + '">' + r + '</span></td>';
+    }
+    /* testa: totali per riferimento e margine consuntivo */
+    h += '<tbody class="bcf-head"><tr class="tot"><td class="nodo"><b>Totale costi esterni</b><span class="osub">a prezzi ' + M.Y + '</span></td>'
+      + R.map(function(x){ return '<td class="num' + (x.anom ? ' anom' : '') + (D.sel === x.code ? ' on' : '') + '"><b>' + bcfEur(x.tot) + '</b>' + (x.anom ? '<small class="warn"><i aria-hidden="true">⚠</i> ' + bcfPct(x.dev) + ' sulle altre</small>' : '') + '</td>'; }).join('')
+      + (nR > 1 ? '<td class="num">' + bcfEur(D.totMed) + '<small>' + nR + '/' + nR + '</small></td>' + disp(vals(function(x){ return x.tot; }), D.totMed, M.propTot, 'Totale costi esterni') : '')
+      + '<td class="num prop"><b>' + bcfEur(M.propTot) + '</b></td></tr>'
+      + '<tr><td class="nodo"><b>Margine consuntivo</b><span class="osub">utile ÷ prezzo della commessa chiusa</span></td>'
+      + R.map(function(x){ return '<td class="num' + (x.marg != null && x.marg < 0 ? ' neg late' : '') + '">' + (x.marg != null && x.marg < 0 ? '<i aria-hidden="true">▼</i> ' : '') + bcfPct(x.marg) + '</td>'; }).join('')
+      + (nR > 1 ? '<td class="num">' + bcfPct(D.margMed) + '</td><td class="bcf-d"><span class="bcf-mr">' + (D.margMin != null && D.margMax !== D.margMin ? 'da ' + bcfPct(D.margMin) + ' a ' + bcfPct(D.margMax) : '') + '</span></td>' : '')
+      + '<td class="num">' + (M.marg != null ? bcfPct(M.marg) + '<small>a budget proposto</small>' : '—') + '</td></tr></tbody>';
+    /* nodi: solo con 2 o 3 riferimenti */
+    if (!soloTot){
+      h += '<tbody>';
+      D.rows.forEach(function(r){
+        h += '<tr><td class="nodo"><b>' + esc(r.n) + '</b>' + (r.nomi.length > 1 ? '<span class="osub">+ ' + esc(r.nomi.filter(function(x){ return x !== r.n; }).join(', ')) + '</span>' : '') + '</td>'
+          + R.map(function(x){ var v = r.v[x.code]; return '<td class="num' + (D.sel === x.code ? ' on' : '') + '">' + (v != null ? bcfEur(v) : '<span class="osub">—</span>') + '</td>'; }).join('')
+          + '<td class="num">' + bcfEur(r.med) + '<small>' + r.n_ + '/' + nR + '</small></td>'
+          + disp(R.filter(function(x){ return r.v[x.code] != null; }).map(function(x){ return {code: x.code, v: r.v[x.code]}; }), r.med, r.prop, r.n)
+          + '<td class="num prop">' + (r.prop ? '<b>' + bcfEur(r.prop) + '</b>' : '<span class="osub">—</span>') + '</td></tr>';
+      });
+      h += '</tbody>';
+    }
+    /* fondo: ore, costo totale, prezzo col margine dei Parametri */
+    function fr(tit, sub, f, m, p, fmt, cls){
+      return '<tr class="' + (cls || '') + '"><td class="nodo"><b>' + tit + '</b>' + (sub ? '<span class="osub">' + sub + '</span>' : '') + '</td>'
+        + R.map(function(x){ var v = f(x); return '<td class="num' + (D.sel === x.code ? ' on' : '') + '">' + (v ? fmt(v) : '<span class="osub">—</span>') + '</td>'; }).join('')
+        + (nR > 1 ? '<td class="num">' + (m.m != null ? fmt(m.m) + '<small>' + m.n + '/' + nR + '</small>' : '—') + '</td><td></td>' : '')
+        + '<td class="num prop">' + (p ? '<b>' + fmt(p) + '</b>' : '—') + '</td></tr>';
+    }
+    var hh = function(v){ return oreTxt(Math.round(v)); };
+    h += '<tbody class="bcf-foot">'
+      + fr('Ore ufficio', 'dal file ore', function(x){ return x.cU; }, D.mU, D.pU, hh)
+      + fr('Ore produzione', 'dal file ore', function(x){ return x.cO; }, D.mO, D.pO, hh)
+      + fr('Costo totale', 'esterni + ore alle tariffe ' + M.Y, function(x){ return x.costo; }, D.mC, D.pC, bcfEur)
+      + fr('Prezzo di vendita', 'col ' + mg + '% di margine' + (bcfg().margTipo === 'ricarico' ? ' (ricarico)' : ''), function(x){ return x.prezzo; }, D.mP, D.pP, bcfEur, 'prz')
+      + '</tbody></table></div>';
+    var an = R.filter(function(x){ return x.anom; });
+    h += '<p class="srcline bcf-note">' + (an.length ? an.map(function(x){ return esc(x.code) + ' è ' + bcfPct(x.dev) + ' rispetto alla media delle altre simili: pesa sulla media della proposta'; }).join(' · ') + '. ' : '')
+      + (nR === 2 && R[0].tot > 0 && R[1].tot > 0 ? 'I due riferimenti differiscono di ×' + (Math.max(R[0].tot, R[1].tot) / Math.min(R[0].tot, R[1].tot)).toLocaleString('it-IT', {maximumFractionDigits: 1}) + '. ' : '')
+      + (D.sel || nR < 2 ? 'La proposta per nodo sono i costi di ' + esc(D.sel || R[0].code) + ' a prezzi ' + M.Y + '.'
+        : 'La proposta per nodo è la media delle ' + nR + ' simili con zero dove il nodo manca: per questo può stare sotto la mediana; ore proposte = media delle simili con ore nel file.')
+      + (M.prezzo != null ? ' Prezzo della commessa: ' + eurR(M.prezzo) + ' (' + esc(M.prezzoFonte || '') + ').' : '')
+      + (D.senza.length ? ' Nodi senza costi nelle simili: ' + D.senza.map(esc).join(', ') + '.' : '') + '</p></div>';
+    return h;
+  }
+  /* righe per «Copia per Excel» del confronto: valori esatti, arrotondati all'euro */
+  function bdgConfrontoRighe(M){
+    var D = bdgConfronto(M); if (!D) return null;
+    var R = D.R, nR = D.nR, rows = [['Confronto con le commesse simili', M.c.code, 'costi a prezzi ' + M.Y], [], ['Nodo'].concat(R.map(function(x){ return x.code; }), nR > 1 ? ['Mediana', 'Simili con il nodo', 'Minimo', 'Massimo'] : [], ['Proposta'])];
+    function n(v){ return v == null ? '' : Math.round(v); }
+    function r(tit, f, m, p, extra){ rows.push([tit].concat(R.map(function(x){ return n(f(x)); }), nR > 1 ? [n(m), extra ? extra[0] : '', extra ? n(extra[1]) : '', extra ? n(extra[2]) : ''] : [], [n(p)])); }
+    var tt = R.map(function(x){ return x.tot; });
+    r('Totale costi esterni', function(x){ return x.tot; }, D.totMed, M.propTot, [nR, Math.min.apply(null, tt), Math.max.apply(null, tt)]);
+    rows.push(['Margine consuntivo %'].concat(R.map(function(x){ return x.marg == null ? '' : Math.round(x.marg * 100); }), nR > 1 ? [D.margMed == null ? '' : Math.round(D.margMed * 100), '', '', ''] : [], [M.marg == null ? '' : Math.round(M.marg * 100)]));
+    if (nR > 1) D.rows.forEach(function(q){ rows.push([q.nomi.join(' + ')].concat(R.map(function(x){ return q.v[x.code] == null ? '' : Math.round(q.v[x.code]); }), [n(q.med), q.n_, n(q.mn), n(q.mx)], [q.prop ? Math.round(q.prop) : ''])); });
+    r('Ore ufficio', function(x){ return x.cU; }, D.mU.m, D.pU); r('Ore produzione', function(x){ return x.cO; }, D.mO.m, D.pO);
+    r('Costo totale (esterni + ore)', function(x){ return x.costo; }, D.mC.m, D.pC);
+    r('Prezzo di vendita col ' + (Number(bcfg().marg) || 0) + '% di margine', function(x){ return x.prezzo; }, D.mP.m, D.pP);
+    return rows;
+  }
   function bdgPropostaHtml(M){
     if (M.chiusa || (!M.proposta && M.conf)) return '';
     var nomi = M.nodi.map(function(n){ return esc(n.n); }).join(', '), code = esc(M.c.code), h = '<div class="bdgprop">';
@@ -7016,7 +7271,7 @@ var VZ = (function(){
       } else h += ' <b>Nessuna commessa simile chiusa con costi nel gestionale</b>' + (famCm(M.c.code) ? ' (famiglia ' + esc(famCm(M.c.code)) + ')' : '') + ': il budget per nodo lo inserisci tu qui sotto.';
       h += ' <b>Vanno bene?</b>';
     } else h += '<b>Nodi da confermare per ' + code + '</b>' + (M.c.bdg && M.c.bdg.fonte ? ' (' + esc(M.c.bdg.fonte) + ')' : '') + ': ' + (nomi || '<i>nessun nodo</i>') + '. <b>Confermi?</b>';
-    return h + '<div class="actions" style="margin-top:8px"><button class="btn" data-bdgconf="' + code + '">' + (M.proposta && M.rif.length ? 'Confermo nodi e budget proposto' : 'Confermo questi nodi') + '</button>'
+    return h + bdgConfrontoHtml(M) + '<div class="actions" style="margin-top:8px"><button class="btn" data-bdgconf="' + code + '">' + (M.proposta && M.rif.length ? 'Confermo nodi e budget proposto' : 'Confermo questi nodi') + '</button>'
       + '<button class="chip" data-bdgedit="' + code + '">Li modifico</button></div></div>';
   }
   function bdgEditorHtml(M){
@@ -7072,6 +7327,98 @@ var VZ = (function(){
       return '<a href="' + esc(x.url) + '" target="_blank" rel="noopener" data-bdgfile="' + esc(x.url) + '">' + esc(x.nome || x.url) + ' ↗</a>' + (x.data ? ' <span class="osub">del ' + esc(itFull(x.data)) + '</span>' : '') + (x.nota ? ' · ' + esc(x.nota) : '');
     }).join(' · ') + '</p>';
   }
+  /* R36 (26/09/2026): dove mancano le ore del file del gestionale (c.ore, S.oreG). Stato per commessa:
+     «ore fino al gg/mm» (ci sono ore; gg/mm = ultima ora registrata nell'estrazione, S.oreG.agg); «ore mancanti» (costi nel
+     gestionale ma zero ore: per le non evase servono ordini aperti); «non ancora iniziata» (nessun costo e nessuna ora; per le
+     evase «nessun costo né ore»); «nessuna ora» (non evasa con soli costi contabilizzati e nessun ordine, es. provvigioni).
+     Solo lettura: niente mail né richieste, «Copia l'elenco» mette il testo negli appunti. */
+  function oreTot(c){ var o = c.ore || {}; return (Number(o.uff) || 0) + (Number(o.off) || 0) + (Number(o.est) || 0); }
+  function oreAggTxt(lungo){ var a = S.oreG && S.oreG.agg; return a ? (lungo ? itFull(a) : a.slice(8, 10) + '/' + a.slice(5, 7)) : ''; }
+  function oreCosti(c){
+    var cc = consCm(c.code), imp = 0, ord = 0;
+    if (cc) Object.keys(cc.nd || {}).forEach(function(nd){ Object.keys(cc.nd[nd] || {}).forEach(function(y){ var a = cc.nd[nd][y] || {};
+      ['fat', 'con', 'ddt', 'ord', 'alt'].forEach(function(k){ imp += Number(a[k]) || 0; }); ord += Number(a.ord) || 0; }); });
+    return {imp: imp, ord: ord};
+  }
+  function oreStato(c){
+    if (oreTot(c) > 0) return {k: 'ok', t: oreAggTxt() ? 'ore fino al ' + oreAggTxt() : 'ore nel file'};
+    var k = oreCosti(c);
+    if (!(Math.abs(k.imp) >= 0.5)) return {k: 'no', t: c.ev ? 'nessun costo né ore' : 'non ancora iniziata', costi: k};
+    if (c.ev || k.ord >= 0.5) return {k: 'manca', t: 'ore mancanti', costi: k};
+    return {k: 'solo', t: 'nessuna ora', costi: k};
+  }
+  function oreCopertura(){
+    var R = {ev: 0, evN: 0, evCm: 0, evCmN: 0, ne: 0, neN: 0, manca: [], no: [], solo: []};
+    (S.commesse || []).forEach(function(c){
+      var st = oreStato(c), senza = st.k !== 'ok';
+      if (c.ev){ R.ev++; if (senza) R.evN++; if (!cmAltro(c)){ R.evCm++; if (senza) R.evCmN++; } return; }
+      R.ne++; if (!senza) return;
+      R.neN++; R[st.k].push({c: c, k: st.costi});
+    });
+    R.manca.sort(function(a, b){ return b.k.ord - a.k.ord; });
+    return R;
+  }
+  /* 12 mesi di ore (c.ore.storia): per le non evase fino al mese dell'estrazione, per le evase fino all'ultima ora registrata */
+  function oreMesi(c){
+    var o = c.ore || {}, st = o.storia || [], fine = c.ev ? (o.last || (st.length ? st[st.length - 1][0] : '')) : ((S.oreG && S.oreG.agg) || '').slice(0, 7);
+    if (!/^\d{4}-\d{2}/.test(fine || '')) return [];
+    var y = Number(fine.slice(0, 4)), m = Number(fine.slice(5, 7)), mp = {}, out = [], i;
+    st.forEach(function(x){ mp[x[0]] = (mp[x[0]] || 0) + (Number(x[1]) || 0); });
+    for (i = 11; i >= 0; i--){ var mm = m - i, yy = y; while (mm < 1){ mm += 12; yy--; } var k = yy + '-' + (mm < 10 ? '0' : '') + mm; out.push([k, mp[k] || 0]); }
+    return out;
+  }
+  function oreCella(c){
+    var st = oreStato(c), o = c.ore || {}, tot = oreTot(c), h = '';
+    var pill = st.k === 'manca' ? '<span class="pill warn"><i class="pico" aria-hidden="true">⚠</i> ' + st.t + '</span>' : '<span class="pill mute">' + st.t + '</span>';
+    if (tot > 0){
+      var ME = oreMesi(c), mx = 0, fmt = function(v){ return (Math.round(v * 10) / 10).toLocaleString('it-IT') + ' h'; }, U = Number(o.uff) || 0, O = Number(o.off) || 0, E = Number(o.est) || 0;
+      ME.forEach(function(x){ if (x[1] > mx) mx = x[1]; });
+      var pk = null; (o.storia || []).forEach(function(x){ if (!pk || x[1] > pk[1]) pk = x; });
+      var tt = [[fmt(tot), 'ore registrate in tutto', '', ''], [fmt(U), 'ufficio e tecnico', '1', 'r'], [fmt(O), 'produzione', '2', 'r']];
+      if (E) tt.push([fmt(E), 'ditte esterne', '3', 'r']);
+      if (o.first && o.last) tt.push(['', 'da ' + mese(o.first) + ' a ' + mese(o.last), '', '']);
+      if (pk) tt.push([fmt(pk[1]), 'mese più carico: ' + mese(pk[0]), '', '']);
+      if (ME.length) tt.push(['', 'colonnine: ' + mese(ME[0][0]) + ' → ' + mese(ME[ME.length - 1][0]), '', '']);
+      h += '<span class="bo-r"><span class="bo-mc" aria-hidden="true">' + ME.map(function(x){ return '<i' + (x[1] > 0 ? ' style="--k:var(--vz-rest-ink);height:' + Math.max(8, Math.round(x[1] / (mx || 1) * 100)) + '%"' : ' class="z" style="--k:var(--vz-grid)"') + '></i>'; }).join('') + '</span>'
+        + '<span class="bo-tt"' + VZ.tip(c.code + ' · ore', tt) + ' tabindex="0" aria-label="' + esc(c.code + ': ' + fmt(tot) + ', ufficio ' + fmt(U) + ', produzione ' + fmt(O) + (E ? ', esterne ' + fmt(E) : '')) + '"><b>' + esc(fmt(tot)) + '</b>'
+        + '<span class="bo-sp" aria-hidden="true">' + [[U, '--vz-1'], [O, '--vz-2'], [E, '--vz-3']].filter(function(q){ return q[0] > 0; }).map(function(q){ return '<i style="--k:var(' + q[1] + ');width:' + (q[0] / tot * 100).toFixed(2) + '%"></i>'; }).join('') + '</span>'
+        + '<small>uff. ' + esc(Math.round(U).toLocaleString('it-IT')) + ' · prod. ' + esc(Math.round(O).toLocaleString('it-IT')) + '</small></span></span>';
+    } else if (st.costi) h += '<span class="bo-tt"><small>' + (Math.abs(st.costi.imp) >= 0.5 ? esc(VZ.eurC(st.costi.imp)) + ' di costi, 0 h' : '0 h') + '</small></span>';
+    return '<td class="bo-cell"><span class="bo-w">' + h + pill + '</span></td>';
+  }
+  function oreBoxHtml(){
+    var R = oreCopertura(), G = S.oreG || {}, ctl = G.controllo || {}, fuori = ctl.progettiNonInPagina || [], nAl = Object.keys(G.alias || {}).length;
+    var hr = function(v){ return Math.round(v).toLocaleString('it-IT') + ' h'; };
+    var h = '<section class="og bdg-orebox"><h3 class="cfh"><i class="dt warn"></i>Ore del gestionale: dove mancano<em class="oghint">'
+      + (G.file ? esc(G.file) + ' · ' : '') + (G.agg ? 'ore registrate fino al ' + esc(oreAggTxt(true)) : 'data dell\'estrazione non indicata') + '</em></h3><div class="bo-in">'
+      + '<div class="bo-figs">'
+      + '<div class="bo-fig"><span class="vz-lab">Non evase senza ore</span><b class="bo-n">' + R.neN + '<small> su ' + R.ne + '</small></b><small>'
+      + [R.manca.length ? '<b class="warn">⚠ ' + R.manca.length + '</b> con ordini: ore mancanti' : '', R.no.length ? R.no.length + ' non ancora iniziate' : '', R.solo.length ? R.solo.length + ' con soli costi contabilizzati, senza ordini' : ''].filter(Boolean).join(' · ') + '</small></div>'
+      + '<div class="bo-fig"><span class="vz-lab">Evase senza ore</span><b class="bo-n">' + R.evN + '<small> su ' + R.ev + '</small></b><small>' + R.evCmN + ' tra le ' + R.evCm + ' commesse · ' + (R.evN - R.evCmN) + ' tra fiere, ricambi e progetti interni</small></div>'
+      + '<div class="bo-fig"><span class="vz-lab">Progetti del file ore non in pagina</span><b class="bo-n">' + fuori.length + '</b><small>' + (fuori.length ? fuori.slice(0, 3).map(function(x){ return esc(x[0]) + ' ' + hr(x[1]); }).join(' · ') + (fuori.length > 3 ? '…' : '') : 'nessuno') + '</small></div>'
+      + '</div>';
+    if (R.manca.length){
+      h += '<div class="bo-lh"><b>Con ordini ma zero ore · ' + R.manca.length + '</b><span>da chiedere a Luca Tirotta: ore sotto un altro codice progetto o non ancora caricate?</span><button class="chip" data-bdgorecopy="1">Copia l\'elenco</button></div>'
+        + '<div class="otab bo-tab"><table><thead><tr><th>Commessa</th><th class="num">Ordini aperti</th><th class="num">Costi nel gestionale</th><th class="bo-h0">Ore</th></tr></thead><tbody>'
+        + R.manca.map(function(x){ var c = x.c; return '<tr data-bdgcm="' + esc(c.code) + '" title="Apri il budget di ' + esc(c.code) + '"><td class="nodo"><b>' + esc(c.code) + '</b><span class="osub">' + esc(c.cliente || '') + (c.desc ? ' · ' + esc(c.desc) : '') + '</span></td>'
+          + '<td class="num mono">' + eurR(x.k.ord) + '</td><td class="num mono">' + eurR(x.k.imp) + '</td><td class="bo-h0"><span class="pill warn"><i class="pico" aria-hidden="true">⚠</i> 0 h</span></td></tr>'; }).join('')
+        + '</tbody></table></div>';
+    }
+    h += '<div class="vz-leg bo-leg"><span>Colonna Ore della tabella: colonnine = ore al mese negli ultimi 12 mesi, poi</span><span><i class="rc" style="--k:var(--vz-1);background:var(--k)"></i>ufficio e tecnico</span>'
+      + '<span><i class="rc" style="--k:var(--vz-2);background:var(--k)"></i>produzione</span><span><i class="rc" style="--k:var(--vz-3);background:var(--k)"></i>ditte esterne</span></div>';
+    h += '<p class="srcline bo-note">' + (R.no.length ? 'Non ancora iniziate (nessun costo e nessuna ora): ' + R.no.map(function(x){ return esc(x.c.code); }).join(', ') + '. ' : '')
+      + (R.solo.length ? 'Soli costi contabilizzati, senza ordini: ' + R.solo.map(function(x){ return esc(x.c.code) + ' ' + esc(VZ.eurC(x.k.imp)); }).join(', ') + '. ' : '')
+      + 'Codici progetto indicati da Luca per ore registrate altrove (oreG.alias): ' + (nAl ? nAl : 'nessuno finora') + '. Le commesse del 2026 possono avere zero ore vere: l\'estrazione arriva al ' + esc(oreAggTxt(true) || '—') + '.</p></div></section>';
+    return h;
+  }
+  function oreElencoTesto(){
+    var R = oreCopertura(), G = S.oreG || {};
+    var t = 'Commesse non evase con ordini aperti ma nessuna ora nel file ore del gestionale' + (G.file ? ' (' + G.file + (G.agg ? ', ore registrate fino al ' + oreAggTxt(true) : '') + ')' : '') + ':\n';
+    R.manca.forEach(function(x){ var c = x.c; t += '- ' + c.code + ' · ' + (c.cliente || '') + (c.desc ? ' · ' + c.desc : '') + ': ordini aperti ' + eurR(x.k.ord) + ', costi nel gestionale ' + eurR(x.k.imp) + '\n'; });
+    t += '\nDa verificare: le ore sono registrate sotto un altro codice progetto, oppure non sono ancora state caricate?\n'
+      + '\nIn tutto: non evase senza ore ' + R.neN + ' su ' + R.ne + '; evase senza ore ' + R.evN + ' su ' + R.ev + ' (' + R.evCmN + ' commesse, ' + (R.evN - R.evCmN) + ' fiere, ricambi e progetti interni).';
+    return t;
+  }
   function bdgRiepilogo(list){
     var altre = list.filter(cmAltro), cms = list.filter(function(c){ return !cmAltro(c); });
     var righe = cms.map(bdgModello), tB = 0, tI = 0, tP = 0, tU = 0, tPU = 0, nB = 0, nProp = 0, nP = 0, nU = 0, nCh = 0, nAp = 0, nDc = 0;
@@ -7096,9 +7443,10 @@ var VZ = (function(){
     /* R35: sopra la tabella, quanto è già impegnato di ogni commessa non evasa (stessi modelli, niente ricalcoli) */
     var rImp = righe.filter(function(M){ return !M.chiusa; }).map(function(M){ return {c: M.c, m: margine(M.c, M)}; });
     if (rImp.length) h += impegnoHtml('bdg', rImp);
-    h += '<section class="og"><h3 class="cfh"><i class="dt cy"></i>Tutte le commesse in vista<em class="oghint">' + righe.length + ' commesse · seleziona una commessa per i nodi</em>'
+    h += oreBoxHtml();   /* R36: dove mancano le ore del file del gestionale */
+    h += '<section class="og bdg-riep"><h3 class="cfh"><i class="dt cy"></i>Tutte le commesse in vista<em class="oghint">' + righe.length + ' commesse · seleziona una commessa per i nodi</em>'
       + '<span class="cfbtn"><button class="chip" data-bdgcopy="*">Copia per Excel</button><button class="chip" data-bdgcsv="*">Scarica .csv</button>' + (nCh ? '' : '<button class="chip" data-bdgxls="*">Excel su Drive</button>') + '</span></h3>'
-      + '<div class="otab cf bdgt"><table><thead><tr><th>Commessa</th><th>Nodi</th><th class="num">Prezzo di vendita</th>' + (colBdg ? '<th class="num">' + (tuttoChiuso ? 'Budget (memoria)' : 'Budget totale') + '</th>' : '') + '<th class="num">' + (tuttoChiuso ? 'Costi consuntivi' : 'Costi a oggi') + '</th>' + (tuttoChiuso ? '<th class="num" title="' + BDG_TIT_IDX + '">Costi a prezzi ' + Yr + '</th><th class="num" title="' + BDG_TIT_IDX + '">Costi a prezzi ' + (Yr + 1) + '</th>' : '') + (colBdg ? '<th class="num">Scost. esterni</th>' : '') + '<th class="num">Utile</th><th class="num">Margine</th></tr></thead><tbody>';
+      + '<div class="otab cf bdgt"><table><thead><tr><th>Commessa</th><th>Nodi</th><th class="num">Prezzo di vendita</th>' + (colBdg ? '<th class="num">' + (tuttoChiuso ? 'Budget (memoria)' : 'Budget totale') + '</th>' : '') + '<th class="num">' + (tuttoChiuso ? 'Costi consuntivi' : 'Costi a oggi') + '</th>' + (tuttoChiuso ? '<th class="num" title="' + BDG_TIT_IDX + '">Costi a prezzi ' + Yr + '</th><th class="num" title="' + BDG_TIT_IDX + '">Costi a prezzi ' + (Yr + 1) + '</th>' : '') + '<th title="Ore del file del gestionale: 12 mesi (le non evase fino a ' + esc(oreAggTxt()) + ', le evase fino all\'ultima ora), ufficio contro produzione">Ore</th>' + (colBdg ? '<th class="num">Scost. esterni</th>' : '') + '<th class="num">Utile</th><th class="num">Margine</th></tr></thead><tbody>';
     righe.forEach(function(M){
       var c = M.c, st = M.tot.stato;
       h += '<tr class="' + esc(st) + '" data-bdgcm="' + esc(c.code) + '"><td class="nodo"><b>' + esc(c.code) + '</b><span class="osub">' + esc(c.cliente || '') + (c.desc ? ' · ' + esc(c.desc) : '') + '</span></td>'
@@ -7107,6 +7455,7 @@ var VZ = (function(){
         + (colBdg ? '<td class="num mono">' + (M.haBudget ? eurR(M.budgetTot) : '<span class="osub">' + (M.chiusa ? '—' : 'da inserire') + '</span>') + '</td>' : '')
         + '<td class="num mono"><b>' + eurR(M.costoOggi) + '</b></td>'
         + (tuttoChiuso ? '<td class="num mono">' + eurR(M.costoIdxY) + '</td><td class="num mono">' + eurR(M.costoIdxY1) + '</td>' : '')
+        + oreCella(c)
         + (colBdg ? '<td class="num mono pct">' + (M.tot.ext > 0 ? (M.tot.sc > 0 ? '+' : '') + eurR(M.tot.sc) + ' (' + pctTxt(M.tot.pct) + ')' : '—') + '</td>' : '')
         + '<td class="num mono' + (M.utile != null && M.utile < 0 ? ' bad' : '') + '">' + (M.utile != null ? eurR(M.utile) + '<span class="osub">' + esc(M.utileTipo) + '</span>' : '<span class="osub">' + (M.prezzo == null ? 'senza prezzo' : M.chiusa ? (M.prezzoDubbio ? 'prezzo incompleto' : '—') : 'senza budget') + '</span>') + '</td>'
         + '<td class="num mono">' + (M.marg != null ? Math.round(M.marg * 100) + '%' : '—') + '</td></tr>';
@@ -7136,7 +7485,7 @@ var VZ = (function(){
       h += '<section class="og" id="bdg-' + esc(c.code) + '"><h3 class="cfh"><i class="dt cy"></i>' + esc(c.code) + ' · ' + esc(c.cliente || '') + '<em class="oghint">' + esc(c.desc || '') + '</em>'
         + '<span class="cfbtn"><button class="chip" data-bdgcopy="' + esc(c.code) + '">Copia per Excel</button><button class="chip" data-bdgcsv="' + esc(c.code) + '">Scarica .csv</button><button class="chip" data-bdgxls="' + esc(c.code) + '">Excel su Drive</button></span></h3>';
       h += bdgPropostaHtml(M) + bdgKpi(M);
-      h += M.righe.length ? bdgTabella(M) : '<p class="ogempty">Nessun nodo: inseriscili qui sotto o conferma i proposti.</p>';
+      h += M.righe.length ? bdgBulletHtml(M) + bdgTabella(M) : '<p class="ogempty">Nessun nodo: inseriscili qui sotto o conferma i proposti.</p>';
       if (avv.length) h += '<p class="srcline">Da verificare con Luca nell\'estrazione: ' + avv.join(' · ') + ' (possibili doppioni o consegne parziali; i numeri qui sopra sono quelli del gestionale).</p>';
       h += bdgPianoHtml(M) + bdgOreHtml(M) + bdgEditorHtml(M) + '</section>';
     });
@@ -7246,6 +7595,32 @@ var VZ = (function(){
     document.querySelectorAll('[data-bdgprz]').forEach(function(b){ b.addEventListener('click', function(){ bdgSalvaPrezzo(b.getAttribute('data-bdgprz')); }); });
     document.querySelectorAll('[data-bdgv]').forEach(function(b){ b.addEventListener('click', function(){ bdgVista = b.getAttribute('data-bdgv'); bdgRirender(); }); });
     document.querySelectorAll('[data-bdgrif]').forEach(function(s){ s.addEventListener('change', function(){ BDG_RIF[s.getAttribute('data-bdgrif')] = s.value; bdgRirender(); }); });
+    /* R36: frecce su/giù tra le righe di «Impegnato su budget» (un solo punto di tabulazione per grafico) */
+    document.querySelectorAll('.bb-plot').forEach(function(pl){ pl.addEventListener('keydown', function(e){
+      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+      var L = Array.prototype.slice.call(pl.querySelectorAll('.bb-row,.bb-zero')), i = L.indexOf(e.target), nx = L[i + (e.key === 'ArrowDown' ? 1 : -1)];
+      if (i < 0 || !nx) return;
+      e.preventDefault(); e.target.setAttribute('tabindex', '-1'); nx.setAttribute('tabindex', '0'); nx.focus();
+    }); });
+    /* R36: nel confronto con le simili il clic (o Invio) sull'intestazione di una commessa la sceglie come riferimento;
+       di nuovo sulla stessa, o su «Proposta», si torna alla media. Poi «Confermo» salva come oggi. */
+    document.querySelectorAll('th[data-bdgrif][data-v]').forEach(function(t){
+      function scegli(){ var code = t.getAttribute('data-bdgrif'), v = t.getAttribute('data-v'); BDG_RIF[code] = (BDG_RIF[code] || 'media') === v ? 'media' : v; bdgRirender(); }
+      t.addEventListener('click', scegli);
+      t.addEventListener('keydown', function(e){ if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); scegli(); } });
+    });
+    /* R36: l'elenco delle commesse con ordini ma zero ore va solo negli appunti (niente mail, niente richieste) */
+    document.querySelectorAll('[data-bdgorecopy]').forEach(function(b){ b.addEventListener('click', function(){
+      var txt = oreElencoTesto(), p = null; try { p = navigator.clipboard.writeText(txt); } catch (e) {}
+      if (p) p.then(function(){ b.textContent = 'copiato negli appunti'; setTimeout(function(){ b.textContent = 'Copia l\'elenco'; }, 3000); }, function(){ window.prompt('Copia questo elenco:', txt); });
+      else window.prompt('Copia questo elenco:', txt);
+    }); });
+    document.querySelectorAll('[data-bdgcfcopy]').forEach(function(b){ b.addEventListener('click', function(){
+      var M = BDG_CACHE[b.getAttribute('data-bdgcfcopy')], rows = M && bdgConfrontoRighe(M); if (!rows) return;
+      var txt = tsv(rows), p = null; try { p = navigator.clipboard.writeText(txt); } catch (e) {}
+      if (p) p.then(function(){ b.textContent = 'copiato · incolla in Excel'; setTimeout(function(){ b.textContent = 'Copia per Excel'; }, 3000); }, function(){ window.prompt('Copia queste righe e incollale in Excel:', txt); });
+      else window.prompt('Copia queste righe e incollale in Excel:', txt);
+    }); });
     document.querySelectorAll('[data-bdgcm]').forEach(function(tr){ tr.addEventListener('click', function(){ var code = tr.getAttribute('data-bdgcm'); sel = {}; sel[code] = true; saveSel(); bdgRirender(); }); });
     document.querySelectorAll('.bdged').forEach(function(ed){ var code = ed.id.replace(/^bdged-/, ''); ed.addEventListener('input', function(){ BDG_DIRTY[code] = 1; var m = document.getElementById('bdgmsg-' + code); if (m && !/non ancora/.test(m.textContent)) m.innerHTML = '<b>modifiche non ancora salvate</b>'; }); });
     document.querySelectorAll('[data-bdgedit]').forEach(function(b){ b.addEventListener('click', function(){ var ed = document.getElementById('bdged-' + b.getAttribute('data-bdgedit')); if (ed){ ed.open = true; ed.scrollIntoView({block: 'start', behavior: 'smooth'}); var i = ed.querySelector('input'); if (i) i.focus(); } }); });
