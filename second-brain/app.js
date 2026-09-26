@@ -3863,44 +3863,8 @@ var VZ = (function(){
 
     if (denF === 'incassi') h += incassiHtml(inc, cm, fermi);
 
-    if (denF === 'flusso'){
-      var mesi = {};
-      var senzaData = 0, nSenzaData = 0;
-      inc.forEach(function(x){
-        /* R6 (08/09/2026): una rata gia' incassata va nel mese in cui e' entrata, non in
-           quello in cui era attesa. Se la data effettiva manca, la tengo fuori dal grafico
-           e la dichiaro sotto, invece di attribuirle in silenzio il mese previsto. */
-        var incassata = x.v.st === 'incassato';
-        var d = incassata ? x.v.inc : (x.v.att || x.v.inc);
-        if (!x.v.imp) return;
-        if (!d){ if (incassata){ senzaData += x.v.imp; nSenzaData++; } return; }
-        var k = d.slice(0, 7);
-        mesi[k] = mesi[k] || {in:0, gia:0};
-        if (incassata) mesi[k].gia += x.v.imp; else mesi[k].in += x.v.imp;
-      });
-      var keys = Object.keys(mesi).sort();
-      if (!keys.length) h += '<div class="ore-wait">Il flusso di cassa si popola con le milestone di '
-        + 'pagamento dei contratti. Appena li carichi vedi qui quando entrano i soldi, mese per mese.</div>';
-      else {
-        var max = 0; keys.forEach(function(k){ max = Math.max(max, mesi[k].in + mesi[k].gia); });
-        h += '<div class="flow">';
-        keys.forEach(function(k){
-          var m = mesi[k], tot = m.in + m.gia;
-          var d = new Date(k + '-01');
-          h += '<div class="frow"><span class="fm">' + MESI[d.getMonth()] + ' ' + d.getFullYear() + '</span>'
-            + '<span class="ftr">'
-            + (m.gia ? '<i class="gia" style="width:' + (m.gia * 100 / max) + '%"></i>' : '')
-            + (m.in ? '<i class="att" style="width:' + (m.in * 100 / max) + '%"></i>' : '')
-            + '</span><span class="fv">' + esc(eur(tot)) + '</span></div>';
-        });
-        h += '</div><div class="maplegend" style="color:var(--muted)">'
-          + '<span><i style="background:var(--gr)"></i>incassato</span>'
-          + '<span><i style="background:var(--cy)"></i>atteso</span></div>'
-          + (nSenzaData ? '<p class="srcline">' + nSenzaData + (nSenzaData === 1
-              ? ' rata risulta incassata ma senza data: ' : ' rate risultano incassate ma senza data: ')
-              + esc(eur(senzaData)) + ' non compaiono nel grafico.</p>' : '');
-      }
-    }
+    /* R35 (26/09): le 29 barre orizzontali .flow (incassi per mese, solo i mesi con dati) sono sostituite dal grafico
+       di cassa qui sotto (cassaHtml): mesi continui, incassi e uscite dello stesso modello del Cash flow. */
 
     if (denF === 'fatture'){
       var list = S.billing || [];
@@ -3937,6 +3901,7 @@ var VZ = (function(){
 
     if (denF === 'flusso') h += cassaHtml(cm);
     stage.innerHTML = h;
+    if (denF === 'flusso') csgDisegna();
     document.querySelectorAll('#denseg button').forEach(function(b){
       b.addEventListener('click', function(){ denF = b.getAttribute('data-den'); denaro(); });
     });
@@ -4499,7 +4464,7 @@ var VZ = (function(){
   var CF_CACHE = {};
   function cashHtml(list, nsel){
     var aperte = list.filter(function(c){ return !c.ev && !c.sp && !cmAltro(c); }), h = '';
-    CF_CACHE = {};
+    CF_CACHE = {}; CSG = {};
     h += '<div class="ore-wait" style="margin-bottom:14px"><b>Cash flow delle commesse in corso.</b> <b>Incassi</b>: le rate del contratto, ognuna al suo evento — anticipo, spedizione (con le % che spedisci mese per mese), installazione e commissioning, invio documenti, lavorazioni, collaudo — che imposti nella <b>scheda della commessa</b>, riquadro «Cash flow · date chiave e incassi». '
       + '<b>Uscite</b>: fatture e DDT dal gestionale e ordini aperti, alla data in cui paghi (documento o consegna più i termini del fornitore), più la <b>stima</b> del budget non ancora ordinato, sui mesi che scrivi in <b>Budget → Piano mensile della spesa</b>: quando arriva un ordine la stima del nodo cala da sola. Solo costi esterni, niente ore.</div>';
     h += cfBarHtml(cfAperte().length);
@@ -4508,16 +4473,32 @@ var VZ = (function(){
     if (!nsel){
       var A = cfAggrega(Ms); CF_CACHE['*'] = A;
       h += '<section class="og"><h3 class="cfh"><i class="dt cy"></i>Tutte le commesse in vista<em class="oghint">' + Ms.length + ' commesse · incassi più, uscite meno, mese per mese</em>'
-        + '<span class="cfbtn"><button class="chip" data-cfcopy="*">Copia per Excel</button></span></h3>' + cfTabellaHtml(A)
+        + '<span class="cfbtn"><button class="chip" data-cfcopy="*">Copia per Excel</button></span></h3>'
+        + '<div class="vz-cs-body">' + csgBlocco(A, Ms, {n: 12, ctl: true, ctlTot: true, compatto: true, tondo: true, aria: 'Cassa delle commesse in vista, prossimi 12 mesi'}) + '</div>' + cfTabellaHtml(A)
         + '<p class="srcline">Seleziona una o più commesse qui sopra per vedere la tabella di ciascuna con le rate, la stima per nodo e le cose che mancano.</p></section>';
       return h;
     }
-    Ms.forEach(function(M){
+    /* R35: fino a 6 commesse un grafico sopra ogni tabella, con mesi e scala comuni per confrontarle;
+       con piu' commesse solo il grafico della somma, e le tabelle di ciascuna chiuse (restano per «Copia per Excel») */
+    var molte = Ms.length > 6, keysC = null;
+    if (molte){
+      var As = cfAggrega(Ms); CF_CACHE['*'] = As;
+      h += '<section class="og"><h3 class="cfh"><i class="dt cy"></i>Le ' + Ms.length + ' commesse selezionate<em class="oghint">somma delle commesse in corso selezionate · incassi più, uscite meno, mese per mese</em>'
+        + '<span class="cfbtn"><button class="chip" data-cfcopy="*">Copia per Excel</button></span></h3>'
+        + '<div class="vz-cs-body">' + csgBlocco(As, Ms, {n: 12, ctl: true, ctlTot: true, compatto: true, tondo: true, aria: 'Cassa delle ' + Ms.length + ' commesse selezionate, prossimi 12 mesi'})
+        + '<details class="vz-cs-tab"><summary>Tabella mese per mese · per «Copia per Excel»</summary>' + cfTabellaHtml(As) + '</details>'
+        + '<p class="srcline">Con più di 6 commesse il grafico mostra la somma; qui sotto le tabelle di ciascuna, chiuse.</p></div></section>';
+    } else {
+      var kMax = ''; Ms.forEach(function(M){ var z = M.mesi[M.mesi.length - 1]; if (z > kMax) kMax = z; });
+      keysC = ymRange(Ms[0].k0, kMax || Ms[0].k0);
+    }
+    Ms.forEach(function(M, i){
       var c = M.c;
       h += '<section class="og"><h3 class="cfh"><i class="dt cy"></i>' + esc(c.code) + ' · ' + esc(c.cliente || '') + '<em class="oghint">' + esc(c.desc || '') + '</em>'
         + '<span class="cfbtn"><button class="chip" data-cfcopy="' + esc(c.code) + '">Copia per Excel</button></span></h3>';
       if (M.avvisi.length) h += '<p class="srcline cfavv">Da completare: ' + M.avvisi.map(esc).join(' · ') + '.</p>';
-      h += cfTabellaHtml(M);
+      if (molte) h += '<div class="vz-cs-body"><details class="vz-cs-tab"><summary>Tabella mese per mese · per «Copia per Excel»</summary>' + cfTabellaHtml(M) + '</details></div>';
+      else h += '<div class="vz-cs-body">' + csgBlocco(M, [M], {ctl: i === 0, compatto: true, tondo: true, gruppo: 'cm', aria: 'Cash flow di ' + c.code}, keysC) + '</div>' + cfTabellaHtml(M);
       if (M.nodi.length){
         h += '<details class="cfforn"><summary>Stima per nodo · da spendere ' + eur(Math.round(M.stTot)) + ' su budget ' + eur(Math.round(M.nodi.reduce(function(a, n){ return a + n.ext; }, 0))) + '</summary><table><thead><tr><th>Nodo</th><th class="num">Budget</th><th class="num">Fatture e DDT</th><th class="num">Ordini aperti</th><th class="num">Da spendere</th><th>Mesi</th></tr></thead><tbody>'
           + M.nodi.map(function(n){ return '<tr><td><b>' + esc(n.n) + '</b></td><td class="num mono">' + eur(Math.round(n.ext)) + '</td><td class="num mono">' + eur(Math.round(n.doc)) + '</td><td class="num mono">' + eur(Math.round(n.ord)) + '</td><td class="num mono">' + eur(Math.round(n.res)) + '</td><td class="osub">' + (n.usaPiano ? 'piano mensile' : 'parti uguali fino alla spedizione') + '</td></tr>'; }).join('')
@@ -4551,6 +4532,7 @@ var VZ = (function(){
     return rows;
   }
   function wireCash(){
+    csgDisegna();
     document.querySelectorAll('[data-cfcopy]').forEach(function(b){
       b.addEventListener('click', function(){
         var M = CF_CACHE[b.getAttribute('data-cfcopy')]; if (!M) return;
@@ -5306,19 +5288,382 @@ var VZ = (function(){
     return h + '</tbody></table></div>';
   }
 
+  /* ---------- R35 (26/09/2026): GRAFICO DI CASSA — Denaro › Flusso di cassa e Commesse › Cash flow ----------
+     Stesso modello del Cash flow (cfModello → cfAggrega, righe CF_R): nessun calcolo nuovo, i numeri sono quelli delle
+     tabelle. Due pannelli sullo stesso asse dei mesi (continui), senza doppio asse:
+     - entrate e uscite del mese con zero unico; incassi su, uscite giu dalla piu' certa alla meno certa (palette §2.4:
+       documenti, termini da confermare, stima); gli arretrati (incassi con data passata e documenti fornitori datati
+       prima di questo mese) stanno in una colonna a parte, tratteggiata, prima del mese corrente;
+     - progressivo: linea piena come in tabella, tratteggiata l'altro scenario sugli incassi arretrati.
+     Si disegna dopo stage.innerHTML alla larghezza vera del contenitore, e di nuovo al resize (150 ms).
+     Gli interruttori valgono per la pagina aperta e non vanno nello stato. */
+  var CSG = {}, CSG_N = 0, CSG_ARR = 'in', CSG_ST = 'si', CSG_WIRED = false;
+  function csgDati(A, keys, tondo){
+    function v(r, k){ var x = A.R[r][k] || 0; return tondo ? Math.round(x) : x; }
+    function som(rr, o){ var t = 0; rr.forEach(function(r){ t += tondo ? Math.round(o[r] || 0) : (o[r] || 0); }); return t; }
+    var D = {keys: keys, k0: A.k0, ent: [], arr: [], doc: [], term: [], stima: [], arrTot: 0};
+    keys.forEach(function(k){
+      D.ent.push(v('inc', k) + v('incSp', k) + v('incEv', k)); D.arr.push(v('incScad', k));
+      D.doc.push(v('fat', k) + v('ddt', k) + v('ord', k)); D.term.push(v('fornDa', k)); D.stima.push(v('stima', k));
+    });
+    D.arr.forEach(function(x){ D.arrTot += x; });
+    D.pInc = som(['inc', 'incSp', 'incEv', 'incScad'], A.prima); D.pDoc = som(['fat', 'ddt', 'ord'], A.prima); D.pTerm = som(['fornDa'], A.prima);
+    D.sEnt = som(['inc', 'incSp', 'incEv', 'incScad'], A.senza); D.sOrd = som(['ord'], A.senza); D.sUsc = som(['fat', 'ddt', 'ord', 'fornDa', 'stima'], A.senza);
+    D.vuoto = !Math.round(D.arrTot) && !Math.round(D.pDoc + D.pTerm) && !keys.some(function(k, i){ return Math.round(D.ent[i]) || Math.round(D.doc[i] + D.term[i] + D.stima[i]); });
+    return D;
+  }
+  /* saldo e progressivo da questo mese in poi: con o senza gli incassi arretrati (messi nel mese corrente), con o senza la stima */
+  function csgSerie(D, conArr, conSt){
+    var p = 0, saldo = [], prog = [];
+    D.keys.forEach(function(k, i){ var s = D.ent[i] + (conArr ? D.arr[i] : 0) - D.doc[i] - D.term[i] - (conSt ? D.stima[i] : 0); saldo.push(s); p += s; prog.push(p); });
+    return {saldo: saldo, prog: prog};
+  }
+  function csgMin(a, n){ var m = 0; for (var i = 1; i < n; i++) if (a[i] < a[m]) m = i; return m; }
+  function csgA(k){ var l = ymLabel(k); return (/^[aeiou]/.test(l) ? 'ad ' : 'a ') + l; }
+  function csgLungo(k){ return MESI[+k.slice(5, 7) - 1] + ' ' + k.slice(0, 4); }
+  /* segnaposto: il grafico si disegna in csgDisegna(), quando il contenitore ha la sua larghezza */
+  function csgBlocco(A, Ms, o, keys){
+    var id = 'g' + (++CSG_N), D = csgDati(A, keys || A.mesi, !!o.tondo);
+    var sp = Ms.filter(function(M){ return Object.keys(M.R.incSp).length; });
+    o.sped = {tot: sp.length, n: sp.filter(function(M){ return !(M.SP && M.SP.tot > 0); }).length};
+    o.stimaParti = Ms.filter(function(M){ return (M.nodi || []).some(function(x){ return !x.usaPiano && x.res > 0; }); }).length;
+    o.nCm = Ms.length;
+    CSG[id] = {uid: id, D: D, n: Math.min(o.n || D.keys.length, D.keys.length), o: o,
+      slot0: !!(Math.round(D.arrTot / 1000) || Math.round((D.pDoc + D.pTerm) / 1000))};
+    return '<div class="vz-cs" data-csg="' + id + '"></div>';
+  }
+  function csgEstremi(X){
+    var D = X.D, n = X.n, conSt = CSG_ST === 'si', e = {vmax: 0, vmin: 0, bmax: 0, bmin: 0};
+    X.main = csgSerie(D, CSG_ARR === 'in', conSt); X.alt = csgSerie(D, CSG_ARR !== 'in', conSt);
+    if (X.arrSlot){ e.vmax = D.arrTot; e.vmin = -(D.pDoc + D.pTerm); }
+    for (var i = 0; i < n; i++){
+      e.vmax = Math.max(e.vmax, D.ent[i]); e.vmin = Math.min(e.vmin, -(D.doc[i] + D.term[i] + (conSt ? D.stima[i] : 0)));
+      e.bmax = Math.max(e.bmax, X.main.prog[i], X.alt.prog[i]); e.bmin = Math.min(e.bmin, X.main.prog[i], X.alt.prog[i]);
+    }
+    return e;
+  }
+  function csgSvg(X, W, E){
+    var D = X.D, n = X.n, keys = D.keys, cmp = !!X.o.compatto, tel = W < 640, conSt = CSG_ST === 'si', arrIn = CSG_ARR === 'in';
+    var slot = !!X.arrSlot, main = X.main, alt = X.alt, i;
+    var nomeM = arrIn ? 'con arretrati' : 'senza arretrati', nomeA = arrIn ? 'senza arretrati' : 'con arretrati';
+    var padL = tel ? 44 : 60, padR = tel ? 60 : 104, gap = slot ? (tel ? 8 : 16) : 0, top = cmp ? 34 : 40;
+    var slotW = (W - padL - padR - gap) / (n + (slot ? 1 : 0)), bw = Math.min(24, slotW * 0.46);
+    var hA = cmp ? (tel ? 150 : 170) : (tel ? 190 : 230), hB = cmp ? (tel ? 110 : 130) : (tel ? 150 : 170), yA0 = top, yB0 = top + hA + 64, H = yB0 + hB + 8;
+    function cx(j){ return j < 0 ? padL + slotW / 2 : padL + gap + slotW * (j + (slot ? 1.5 : 0.5)); }
+    function sL(j){ return j < 0 ? padL : padL + gap + slotW * (j + (slot ? 1 : 0)); }
+    /* scale con passi 1-2-5; sotto la colonna e sotto il minimo resta posto per l'etichetta, senza un tick in piu' */
+    var vmax = Math.max(E.vmax, 1), vmin = Math.min(E.vmin, -1), stA = VZ.nice(vmax - vmin, 6);
+    var a0 = Math.floor(vmin / stA) * stA, a1 = Math.ceil(vmax / stA) * stA; a0 = Math.min(a0, vmin - 22 * (a1 - a0) / hA);
+    function yA(v){ return yA0 + hA * (a1 - v) / (a1 - a0); }
+    var bmin = Math.min(E.bmin, 0), bmax = Math.max(E.bmax, 0); if (bmax - bmin < 1) bmax = bmin + 1;
+    var stB = VZ.nice(bmax - bmin, 4), b0 = Math.floor(bmin / stB) * stB, b1 = Math.ceil(bmax / stB) * stB; b0 = Math.min(b0, bmin - 38 * (b1 - b0) / hB);
+    function yB(v){ return yB0 + hB * (b1 - v) / (b1 - b0); }
+    function f1(x){ return x.toFixed(1); }
+    /* etichette dirette: poche, e mai una sopra l'altra */
+    var boxes = [], pti = [];
+    function lab(x, y, t, cls, anc, forza, evita){
+      var w = t.length * (cls === 'vz-dlm' ? 7 : 5.8), x1 = anc === 'middle' ? x - w / 2 : anc === 'end' ? x - w : x;
+      if (anc === 'middle'){ if (x1 < padL) x1 = padL; if (x1 + w > W - 2) x1 = W - 2 - w; x = x1 + w / 2; }
+      var b = {x1: x1, x2: x1 + w, y1: y - 11, y2: y + 3};
+      if (!forza && boxes.some(function(q){ return b.x1 < q.x2 && b.x2 > q.x1 && b.y1 < q.y2 && b.y2 > q.y1; })) return '';
+      if (!forza && evita && pti.some(function(q){ return q[0] > b.x1 - 2 && q[0] < b.x2 + 2 && q[1] > b.y1 - 2 && q[1] < b.y2 + 2; })) return '';
+      boxes.push(b);
+      return '<text x="' + f1(x) + '" y="' + f1(y) + '"' + (anc === 'middle' ? ' text-anchor="middle"' : anc === 'end' ? ' text-anchor="end"' : '') + ' class="' + cls + '">' + esc(t) + '</text>';
+    }
+    function riga(y, zero, v){
+      return '<line x1="' + (padL - 4) + '" x2="' + f1(W - padR + 8) + '" y1="' + f1(y) + '" y2="' + f1(y) + '" stroke="var(' + (zero ? '--vz-axis' : '--vz-grid') + ')" stroke-width="1" shape-rendering="crispEdges"/>'
+        + '<text x="' + (padL - 8) + '" y="' + f1(y + 3.5) + '" text-anchor="end" class="vz-tick">' + (zero ? '0' : esc(VZ.eurC(v))) + '</text>';
+    }
+    var s = '<svg class="vz-flow vz-cs-svg" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" role="group" aria-label="'
+      + esc(X.o.aria + ': colonne degli incassi sopra lo zero e delle uscite sotto, poi il progressivo. Frecce sinistra e destra per scorrere i mesi, Invio per aprire la colonna in tabella.') + '">';
+    /* griglie e tick dei due pannelli */
+    s += '<text x="0" y="12" class="vz-ptl">Entrate e uscite del mese</text><text x="0" y="' + (yB0 - 14) + '" class="vz-ptl">Progressivo</text>';
+    for (i = Math.ceil(a0 / stA - 1e-9); i * stA <= a1 + stA * 1e-6; i++) s += riga(yA(i * stA), i === 0, i * stA);
+    for (i = Math.ceil(b0 / stB - 1e-9); i * stB <= b1 + stB * 1e-6; i++) s += riga(yB(i * stB), i === 0, i * stB);
+    if (slot) s += '<line x1="' + f1(padL + slotW + gap / 2) + '" x2="' + f1(padL + slotW + gap / 2) + '" y1="' + yA0 + '" y2="' + (yA0 + hA) + '" stroke="var(--vz-grid)" stroke-width="1"/>';
+    /* zone di aggancio: tutta la colonna, su entrambi i pannelli; stanno sotto i segni, che non prendono il puntatore */
+    function righeMese(j){
+      var r = [];
+      r.push(Math.round(D.ent[j]) ? [VZ.eurC(D.ent[j]), 'incassi da contratto', '--vz-in-3', 'r'] : ['—', 'nessun incasso da contratto', '', '']);
+      if (j === 0 && arrIn && Math.round(D.arrTot)) r.push([VZ.eurC(D.arrTot), 'incassi arretrati sommati qui', '--vz-in-1', 'r']);
+      if (Math.round(D.doc[j])) r.push([VZ.eurC(-D.doc[j]), 'documenti (fatture, DDT, ordini)', '--vz-out-3', 'r']);
+      if (Math.round(D.term[j])) r.push([VZ.eurC(-D.term[j]), 'termini da confermare', '--vz-out-2', 'r']);
+      if (conSt && Math.round(D.stima[j])) r.push([VZ.eurC(-D.stima[j]), 'stima dal budget', '--vz-out-1', 'r']);
+      r.push([VZ.eurC(main.saldo[j]), 'saldo del mese', '', '']);
+      r.push([VZ.eurC(main.prog[j]), 'progressivo · ' + nomeM, '--vz-line', 'l']);
+      r.push([VZ.eurC(alt.prog[j]), 'progressivo · ' + nomeA, '--vz-cs-dash', 'l']);
+      return r;
+    }
+    function righeArr(){
+      var r = [];
+      if (Math.round(D.arrTot)) r.push([VZ.eurC(D.arrTot), 'incassi con data passata, da verificare', '--vz-in-1', 'r']);
+      if (Math.round(D.pDoc)) r.push([VZ.eurC(-D.pDoc), 'fatture, DDT e ordini con data passata', '--vz-out-3', 'r']);
+      if (Math.round(D.pTerm)) r.push([VZ.eurC(-D.pTerm), 'documenti con termini da confermare', '--vz-out-2', 'r']);
+      if (Math.round(D.pInc)) r.push([VZ.eurC(D.pInc), 'già incassati prima di ' + ymLabel(keys[0]) + ' (fuori dal grafico)', '', '']);
+      return r;
+    }
+    var slots = []; if (slot) slots.push(-1); for (i = 0; i < n; i++) slots.push(i);
+    slots.forEach(function(j){
+      var tit = j < 0 ? 'Arretrati · data passata' : csgLungo(keys[j]), r = j < 0 ? righeArr() : righeMese(j);
+      var nota = j < 0 ? (arrIn ? 'gli incassi arretrati sono sommati a ' + ymLabel(keys[0]) + ' nel progressivo, le uscite arretrate no' : 'esclusi dal progressivo')
+        : 'clic: apre la colonna nella tabella';
+      s += '<rect class="vz-hit" x="' + f1(sL(j)) + '" y="' + (yA0 - 4) + '" width="' + f1(slotW) + '" height="' + (yB0 + hB - yA0 + 8) + '" tabindex="' + (j === 0 ? 0 : -1) + '" role="img"'
+        + ' aria-label="' + esc(tit + ': ' + r.map(function(x){ return x[1] + ' ' + x[0]; }).join(', ')) + '" data-csg-col="' + j + '"' + VZ.tip(tit, r.concat([['', nota, '', '']])) + '/>';
+    });
+    s += '<g pointer-events="none">';
+    /* colonne: incassi su; uscite giu, dalla piu' certa (vicino allo zero) alla meno certa, 2 px di stacco */
+    var kA = hA / (a1 - a0);
+    /* tratteggio disegnato a righe (niente <pattern> ne' clipPath: nella stampa la copia in #printarea ha gli stessi id
+       e il foglio di stampa toglie ogni clip-path) */
+    function trat(x0, y0, w, h, col){
+      var o = '', c, t0, t1;
+      for (c = -h; c < w; c += 7){ t0 = Math.max(0, -c); t1 = Math.min(h, w - c); if (t1 - t0 < 0.5) continue; o += 'M' + f1(x0 + c + t0) + ',' + f1(y0 + h - t0) + 'L' + f1(x0 + c + t1) + ',' + f1(y0 + h - t1); }
+      return o ? '<path d="' + o + '" stroke="' + col + '" stroke-width="2" fill="none"/>' : '';
+    }
+    function tinta(x, y, h, end, f){
+      var d = VZ.barPath(x - bw / 2, y, bw, h, end);
+      return typeof f === 'string' ? '<path d="' + d + '" fill="' + f + '"/>' : '<path d="' + d + '" fill="' + f.bg + '"/>' + trat(x - bw / 2, y + (end === 'su' ? 1 : 0), bw, h - 1, f.ln);
+    }
+    function su(x, v, fill){ if (!(v > 0)) return ''; var y = yA(v), h = yA(0) - y - 1; return h > 0.5 ? tinta(x, y, h, 'su', fill) : ''; }
+    function giu(x, parti){
+      var y = yA(0) + 1, out = '', last = -1;
+      parti.forEach(function(p, j){ if (p[0] * kA > 0.5) last = j; });
+      parti.forEach(function(p, j){
+        var h = p[0] * kA; if (!(h > 0.5)) return;
+        out += tinta(x, y, Math.max(0.5, h - (j < last ? 2 : 0)), j === last ? 'giu' : '', p[1]); y += h;
+      });
+      return out;
+    }
+    if (slot){
+      s += '<g' + (arrIn ? '' : ' opacity=".55"') + '>' + su(cx(-1), D.arrTot, {bg: 'var(--vz-in-1)', ln: 'var(--vz-in-3)'}) + '</g>';
+      s += giu(cx(-1), [[D.pDoc, 'var(--vz-out-3)'], [D.pTerm, {bg: 'var(--vz-out-1)', ln: 'var(--vz-out-2)'}]]);
+    }
+    for (i = 0; i < n; i++){
+      s += su(cx(i), D.ent[i], 'var(--vz-in-3)');
+      s += giu(cx(i), [[D.doc[i], 'var(--vz-out-3)'], [D.term[i], 'var(--vz-out-2)'], [conSt ? D.stima[i] : 0, 'var(--vz-out-1)']]);
+    }
+    /* etichette dei mesi, comuni ai due pannelli */
+    var yl = yA0 + hA + 16;
+    if (slot){
+      s += '<text x="' + f1(cx(-1)) + '" y="' + yl + '" text-anchor="middle" class="vz-tick yr">' + (slotW < 62 ? 'arr.' : 'arretrati') + '</text>';
+      if (slotW + gap >= 84) s += '<text x="' + f1(cx(-1)) + '" y="' + (yl + 13) + '" text-anchor="middle" class="vz-tick">da verificare</text>';
+    }
+    for (i = 0; i < n; i++){
+      var m = +keys[i].slice(5, 7), mb = MESI_BREVI[m - 1];
+      s += '<text x="' + f1(cx(i)) + '" y="' + yl + '" text-anchor="middle" class="vz-tick">' + (slotW < 24 ? mb.charAt(0) : mb) + '</text>';
+      if (i === 0 || m === 1) s += '<text x="' + f1(cx(i)) + '" y="' + (yl + 13) + '" text-anchor="middle" class="vz-tick yr">' + (slotW < 34 ? '’' + keys[i].slice(2, 4) : keys[i].slice(0, 4)) + '</text>';
+    }
+    /* etichette dirette del primo pannello: arretrati, entrata piu' alta, uscita piu' alta */
+    var ancA = tel ? 'start' : 'middle', xA = tel ? cx(-1) - bw / 2 : cx(-1);
+    if (slot && Math.round(D.arrTot / 1000)) s += lab(xA, yA(D.arrTot) - 6, VZ.eurC(D.arrTot), 'vz-dlm', ancA, true);
+    if (slot && Math.round((D.pDoc + D.pTerm) / 1000)) s += lab(xA, yA(-(D.pDoc + D.pTerm)) + 15, VZ.eurC(-(D.pDoc + D.pTerm)), 'vz-dlm', ancA, true);
+    var pe = 0, pu = 0; function uu(j){ return D.doc[j] + D.term[j] + (conSt ? D.stima[j] : 0); }
+    for (i = 1; i < n; i++){ if (D.ent[i] > D.ent[pe]) pe = i; if (uu(i) > uu(pu)) pu = i; }
+    if (Math.round(D.ent[pe] / 1000)) s += lab(cx(pe), yA(D.ent[pe]) - 6, VZ.eurC(D.ent[pe]), 'vz-dlm', 'middle');
+    if (!tel && Math.round(uu(pu) / 1000)) s += lab(cx(pu), yA(-uu(pu)) + 15, VZ.eurC(-uu(pu)), 'vz-dlm', 'middle');
+    /* oggi */
+    var t = today(), gm = new Date(t.getFullYear(), t.getMonth() + 1, 0).getDate(), xo = sL(0) + slotW * t.getDate() / gm;
+    s += '<line x1="' + f1(xo) + '" x2="' + f1(xo) + '" y1="' + (yA0 - 2) + '" y2="' + (yB0 + hB) + '" stroke="var(--vz-ink2)" stroke-width="1" opacity=".55"/>';
+    if (!tel && keys[0] === ymKey(t)) s += lab(xo + 4, yA0 + 8, 'oggi', 'vz-dl2', 'start');
+    /* progressivo: area sotto zero della linea piena, linea tratteggiata dell'altro scenario, linea piena */
+    function pts(a){ var p = ''; for (var j = 0; j < n; j++) p += (j ? 'L' : 'M') + f1(cx(j)) + ',' + f1(yB(a[j])); return p; }
+    /* area rossa solo dove la linea piena e' sotto zero: poligono tagliato a mano sullo zero */
+    var wa = 'M' + f1(cx(0)) + ',' + f1(yB(0));
+    for (i = 0; i < n; i++){
+      var v0 = main.prog[i]; wa += 'L' + f1(cx(i)) + ',' + f1(yB(Math.min(v0, 0)));
+      if (i < n - 1 && (v0 < 0) !== (main.prog[i + 1] < 0)) wa += 'L' + f1(cx(i) + (cx(i + 1) - cx(i)) * v0 / (v0 - main.prog[i + 1])) + ',' + f1(yB(0));
+    }
+    s += '<path d="' + wa + 'L' + f1(cx(n - 1)) + ',' + f1(yB(0)) + 'Z" fill="var(--vz-cs-wash)"/>';
+    s += '<path d="' + pts(alt.prog) + '" fill="none" stroke="var(--vz-ink2)" stroke-width="2" stroke-dasharray="6 4" stroke-linejoin="round" stroke-linecap="round" opacity=".9"/>';
+    s += '<path d="' + pts(main.prog) + '" fill="none" stroke="var(--vz-line)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
+    var mi = csgMin(main.prog, n), ai = csgMin(alt.prog, n);
+    function dot(j, a, col){ return '<circle cx="' + f1(cx(j)) + '" cy="' + f1(yB(a[j])) + '" r="4" fill="var(' + col + ')" stroke="var(--vz-surface)" stroke-width="2"/>'; }
+    s += (main.prog[mi] < 0 ? dot(mi, main.prog, '--vz-line') : '') + dot(n - 1, main.prog, '--vz-line') + (alt.prog[ai] < 0 ? dot(ai, alt.prog, '--vz-ink2') : '') + dot(n - 1, alt.prog, '--vz-ink2');
+    /* le due linee, campionate ogni 4 px: le etichette dei minimi non ci vanno sopra */
+    [main.prog, alt.prog].forEach(function(a){
+      for (var j = 0; j < n; j++){
+        var x0 = cx(j), y0 = yB(a[j]); pti.push([x0, y0]); if (j === n - 1) continue;
+        var x1 = cx(j + 1), y1 = yB(a[j + 1]), st = Math.max(1, Math.ceil(Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0)) / 4));
+        for (var q = 1; q < st; q++) pti.push([x0 + (x1 - x0) * q / st, y0 + (y1 - y0) * q / st]);
+      }
+    });
+    /* fine linea: valore (e nome, se le due linee sono lontane) */
+    var xe = cx(n - 1) + 10, yM = yB(main.prog[n - 1]), yN = yB(alt.prog[n - 1]), due = Math.abs(yM - yN) > 28;
+    function fine(a, y, nome, isMin){
+      var o = lab(xe, y + (tel ? 4 : 0), (isMin && a[n - 1] < 0 ? '▼ ' : '') + VZ.eurC(a[n - 1]), 'vz-dlm', 'start', true);
+      if (!tel) o += lab(xe, y + 13, nome, 'vz-dl2', 'start', true);
+      return o;
+    }
+    s += fine(main.prog, yM, due ? nomeM : 'progressivo', mi === n - 1);
+    if (due) s += fine(alt.prog, yN, nomeA, ai === n - 1);
+    /* minimi sotto zero: sotto il punto, oppure accanto se li' passa una linea; se i due minimi cadono nello stesso mese
+       e vicini, una sola etichetta a due righe sotto il piu' basso */
+    function minimo(j, a){
+      var x = cx(j), y = yB(a[j]), t = '▼ ' + VZ.eurC(a[j]) + ' · ' + ymLabel(keys[j]), pos = [['middle', x, y + 17], ['start', x + 9, y + 4], ['end', x - 9, y + 4], ['middle', x, y - 10]];
+      for (var q = 0; q < pos.length; q++){ var o = lab(pos[q][1], pos[q][2], t, 'vz-dlm', pos[q][0], false, true); if (o) return o; }
+      return lab(x, y + 17, t, 'vz-dlm', 'middle', true);
+    }
+    var yMm = yB(main.prog[mi]), yAm = yB(alt.prog[ai]);
+    if (main.prog[mi] < 0 && alt.prog[ai] < 0 && ai === mi && mi !== n - 1 && Math.abs(yMm - yAm) < 36){
+      var y2 = Math.max(yMm, yAm) + 17;
+      s += lab(cx(mi), y2, '▼ ' + VZ.eurC(main.prog[mi]) + ' · ' + ymLabel(keys[mi]), 'vz-dlm', 'middle', true)
+        + lab(cx(mi), y2 + 13, VZ.eurC(alt.prog[ai]) + ' ' + nomeA, 'vz-dl2', 'middle', true);
+    } else {
+      if (main.prog[mi] < 0 && mi !== n - 1) s += minimo(mi, main.prog);
+      if (alt.prog[ai] < 0 && ai !== n - 1) s += minimo(ai, alt.prog);
+    }
+    return s + '</g></svg>';
+  }
+  function csgSeg(k, lab, opts, cur){
+    return '<span class="vz-cs-g"><span class="vz-lab">' + esc(lab) + '</span><span class="vz-cs-seg" role="group" aria-label="' + esc(lab) + '">'
+      + opts.map(function(x){ return '<button type="button" data-csg-set="' + k + '" data-v="' + x[0] + '" aria-pressed="' + (cur === x[0]) + '">' + esc(x[1]) + '</button>'; }).join('') + '</span>'
+      + '<span class="vz-cs-scelta">' + esc(opts.filter(function(x){ return x[0] === cur; })[0][1]) + '</span></span>';
+  }
+  function csgHtml(X, W, E){
+    var D = X.D, n = X.n, o = X.o, keys = D.keys, arrIn = CSG_ARR === 'in', conSt = CSG_ST === 'si', i, h = '';
+    if (D.vuoto) return '<p class="ogempty">Il grafico di cassa si popola con le rate dei contratti, gli ordini e il budget: per ora non c\'è niente da mettere sui mesi.</p>';
+    var main = X.main, alt = X.alt, mi = csgMin(main.prog, n), ai = csgMin(alt.prog, n), sM = 0, sA = 0, neg = 0;
+    for (i = 0; i < n; i++){ if (main.prog[i] < 0) sM++; if (alt.prog[i] < 0) sA++; if (main.saldo[i] < 0) neg++; }
+    function mesi(x){ return x + (x === 1 ? ' mese' : ' mesi'); }
+    if (o.ctl) h += '<div class="vz-cs-ctl">' + (X.arrSlot ? csgSeg('arr', 'Incassi arretrati' + (o.ctlTot && Math.round(D.arrTot / 1000) ? ' ' + VZ.eurC(D.arrTot) : ''), [['in', 'nel progressivo'], ['out', 'esclusi']], CSG_ARR) : '')
+      + csgSeg('st', 'Uscite', [['si', 'con stima dal budget'], ['no', 'solo documenti']], CSG_ST) + '</div>';
+    var nomeAlt = arrIn ? 'Senza gli incassi arretrati' : 'Con gli incassi arretrati';
+    if (!o.compatto){
+      var fig = function(lab, a, j, quanti, pre){
+        return '<div class="vz-cs-fig">' + VZ.stat({lab: lab, val: VZ.eurC(a[j]), delta: a[j] < 0 ? -1 : 0, suGiu: 'bene',
+          deltaTxt: a[j] < 0 ? ymLabel(keys[j]) + ' · ' + pre + 'sotto zero in ' + quanti + ' su ' + n : null,
+          sub: a[j] < 0 ? null : 'minimo ' + csgA(keys[j]) + ' · mai sotto zero'}) + '</div>';
+      };
+      h += '<div class="vz-cs-figs">' + fig('Punto più basso', main.prog, mi, mesi(sM), 'progressivo ') + fig(nomeAlt, alt.prog, ai, mesi(sA), '')
+        + '<div class="vz-cs-fig">' + VZ.stat({lab: 'Mesi con saldo negativo', val: neg + ' su ' + n, sub: 'uscite maggiori degli incassi nel mese'}) + '</div></div>';
+    } else {
+      var val = function(a, j){ return '<b' + (a[j] < 0 ? ' class="vz-cs-neg"><i aria-hidden="true">▼</i> ' : '>') + esc(VZ.eurC(a[j])) + '</b> ' + csgA(keys[j]); };
+      h += '<p class="vz-cs-sum">Punto più basso ' + val(main.prog, mi) + ' · ' + nomeAlt.toLowerCase() + ' ' + val(alt.prog, ai)
+        + ' · saldo del mese negativo in <b>' + neg + '</b> ' + (n === 1 ? 'mese' : 'mesi') + ' su ' + n + '</p>';
+    }
+    /* legenda: entrate e uscite per fonte, dal dato piu' certo al meno certo */
+    /* colori per classe (non in linea): cosi' restano anche nel PDF, che imbianca ogni sfondo */
+    function sw(cls, t){ return '<span><i class="' + cls + '"></i>' + t + '</span>'; }
+    h += '<div class="vz-leg vz-cs-leg"><span class="vz-cs-lg"><b>Entrate</b>' + sw('rc vz-cs-in3', 'incassi da contratto') + (X.arrSlot ? sw('rc vz-cs-hin', 'arretrati, da verificare') : '') + '</span>'
+      + '<span class="vz-cs-lg"><b>Uscite</b>' + sw('rc vz-cs-out3', 'documenti (fatture, DDT, ordini)') + sw('rc vz-cs-out2', 'termini da confermare')
+      + (conSt ? sw('rc vz-cs-out1', 'stima dal budget') : '') + (X.arrSlot ? sw('rc vz-cs-hout', 'arretrate') : '') + '</span>'
+      + '<span class="vz-cs-lg"><b>Progressivo</b>' + sw('ln vz-cs-lin', arrIn ? 'con arretrati (come in tabella)' : 'senza arretrati') + sw('ln vz-cs-dl', arrIn ? 'senza arretrati' : 'con arretrati (come in tabella)') + '</span></div>';
+    h += '<div class="vz-cs-chart">' + csgSvg(X, W, E) + '</div>';
+    /* note: mesi dopo l'orizzonte, date di spedizione, voci fuori dal progressivo, stima in parti uguali */
+    var nt = [], L = keys.length;
+    if (L > n){
+      var dE = 0, dU = 0; for (i = n; i < L; i++){ dE += D.ent[i] + (arrIn ? D.arr[i] : 0); dU += D.doc[i] + D.term[i] + (conSt ? D.stima[i] : 0); }
+      var torna = '';
+      if (arrIn && alt.prog[ai] < 0){
+        var pp = -1; for (i = ai + 1; i < L; i++) if (alt.prog[i] >= 0){ pp = i; break; }
+        torna = pp >= 0 ? ' Senza gli arretrati torna sopra zero solo ' + csgA(keys[pp]) + '.' : ' Senza gli arretrati resta sotto zero fino ' + csgA(keys[L - 1]) + '.';
+      }
+      nt.push('<b>Dopo ' + ymLabel(keys[n - 1]) + '</b> (' + ymLabel(keys[n]) + ' → ' + ymLabel(keys[L - 1]) + '): entrate ' + esc(VZ.eurC(dE)) + ', uscite ' + esc(VZ.eurC(dU))
+        + ', progressivo ' + esc(VZ.eurC(main.prog[L - 1])) + ' ' + csgA(keys[L - 1]) + '.' + torna);
+    }
+    if (o.sped && o.sped.n && o.nCm > 1){
+      var pk = 0; for (i = 1; i < L; i++) if (D.ent[i] > D.ent[pk]) pk = i;
+      nt.push('<span class="w" aria-hidden="true">⚠</span> ' + (o.sped.n === o.sped.tot ? 'Nessuna commessa ha' : o.sped.n + ' commesse su ' + o.sped.tot + ' non hanno')
+        + ' le spedizioni mese per mese (scheda della commessa, «Cash flow · date chiave e incassi»): gli incassi alla spedizione cadono alla data del contratto, quindi il picco '
+        + 'di ' + ymLabel(keys[pk]) + ' (' + esc(VZ.eurC(D.ent[pk])) + ') è in parte un effetto del modello.');
+    }
+    var fuori = [];
+    if (Math.round((D.pDoc + D.pTerm) / 1000)) fuori.push(esc(VZ.eurC(D.pDoc + D.pTerm)) + ' di documenti fornitori con data prima di ' + ymLabel(keys[0]) + (Math.round(D.pTerm / 1000) ? ' (' + esc(VZ.eurC(D.pTerm)) + ' con termini da confermare)' : ''));
+    if (Math.round(D.sOrd / 1000)) fuori.push(esc(VZ.eurC(D.sOrd)) + ' di ordini senza data');
+    if (Math.round((D.sUsc - D.sOrd) / 1000)) fuori.push(esc(VZ.eurC(D.sUsc - D.sOrd)) + ' di altre uscite senza data');
+    if (fuori.length) nt.push('<span class="w" aria-hidden="true">⚠</span> Fuori dal progressivo: ' + fuori.join(', ').replace(/, ([^,]*)$/, ' e $1') + '. Se sono ancora da pagare, abbassano tutta la linea.'
+      + (Math.round(D.sEnt / 1000) ? ' Restano fuori anche ' + esc(VZ.eurC(D.sEnt)) + ' di incassi senza data.' : ''));
+    else if (Math.round(D.sEnt / 1000)) nt.push('<span class="w" aria-hidden="true">⚠</span> Fuori dal progressivo: ' + esc(VZ.eurC(D.sEnt)) + ' di incassi senza data.');
+    if (conSt && o.stimaParti) nt.push((o.nCm > 1 ? 'Per ' + o.stimaParti + (o.stimaParti === 1 ? ' commessa' : ' commesse') + ' la stima dal budget non ha' : 'La stima dal budget non ha')
+      + ' un piano mensile (Budget › Piano mensile della spesa): è divisa in parti uguali fino al mese di spedizione, da qui i cali regolari del progressivo.');
+    h += nt.map(function(x){ return '<p class="vz-cs-nota">' + x + '</p>'; }).join('');
+    return h;
+  }
+  /* disegna tutti i grafici di cassa presenti; quelli dello stesso gruppo hanno la stessa scala per potersi confrontare */
+  function csgDisegna(){
+    var hosts = document.querySelectorAll('.vz-cs[data-csg]'); if (!hosts.length) return;
+    csgWire();
+    var G = {}, L = [];
+    Array.prototype.forEach.call(hosts, function(el){
+      var X = CSG[el.getAttribute('data-csg')], W = el.clientWidth; if (!X || !W) return;
+      var g = X.o.gruppo || X.uid; G[g] = G[g] || {slot: false, e: {vmax: 0, vmin: 0, bmax: 0, bmin: 0}};
+      if (X.slot0) G[g].slot = true; L.push([el, X, W, g]);
+    });
+    L.forEach(function(x){
+      var X = x[1], g = G[x[3]]; X.arrSlot = g.slot; var e = csgEstremi(X);
+      g.e.vmax = Math.max(g.e.vmax, e.vmax); g.e.bmax = Math.max(g.e.bmax, e.bmax); g.e.vmin = Math.min(g.e.vmin, e.vmin); g.e.bmin = Math.min(g.e.bmin, e.bmin);
+    });
+    L.forEach(function(x){ x[0].innerHTML = csgHtml(x[1], x[2], G[x[3]].e); x[0].setAttribute('data-w', x[2]); });
+  }
+  /* il clic su un mese apre la tabella gemella e ne evidenzia la colonna */
+  function csgApri(el){
+    var host = el.closest('[data-csg]'), X = host && CSG[host.getAttribute('data-csg')], sec = el.closest('section.og'); if (!X || !sec) return;
+    var tab = sec.querySelector('.otab table'); if (!tab) return;
+    var det = tab.closest('details'); if (det) det.open = true;
+    var j = +el.getAttribute('data-csg-col'), ths = tab.querySelectorAll('thead th'), col = -1, k;
+    function trova(re){ for (k = 0; k < ths.length; k++) if (re(ths[k].textContent.trim())){ col = k; return; } }
+    if (j < 0) trova(function(t){ return /^Prima di/.test(t); });
+    if (col < 0){ var lb = ymLabel(X.D.keys[Math.max(0, j)]); trova(function(t){ return t === lb; }); }
+    Array.prototype.forEach.call(tab.querySelectorAll('.vz-cs-hl'), function(c){ c.classList.remove('vz-cs-hl'); });
+    if (col < 0) return;
+    Array.prototype.forEach.call(tab.rows, function(r){ if (r.cells[col]) r.cells[col].classList.add('vz-cs-hl'); });
+    try { ths[col].scrollIntoView({block: 'nearest', inline: 'center'}); } catch (e) {}
+  }
+  /* Denaro: la tabella dei 12 mesi va in Excel come numeri */
+  function csgCopia(b){
+    var sec = b.closest('section.og'), tab = sec && sec.querySelector('.otab table'); if (!tab) return;
+    var rows = Array.prototype.map.call(tab.rows, function(r){ return Array.prototype.map.call(r.cells, function(c){
+      var t = c.textContent.trim(); return /^[−-]?[\d.]+ €$/.test(t) ? t.replace(/[.\s€]/g, '').replace('−', '-') : t; }); });
+    if (rows.length && rows[0].length) rows[0][0] = 'Cassa nei prossimi 12 mesi (€)';
+    var txt = tsv(rows), p = null; try { p = navigator.clipboard.writeText(txt); } catch (e) {}
+    if (p) p.then(function(){ b.textContent = 'copiato · incolla in Excel'; setTimeout(function(){ b.textContent = 'Copia per Excel'; }, 3000); },
+                  function(){ window.prompt('Copia queste righe e incollale in Excel:', txt); });
+    else window.prompt('Copia queste righe e incollale in Excel:', txt);
+  }
+  function csgWire(){
+    if (CSG_WIRED) return; CSG_WIRED = true;
+    var tocco = {tipo: '', prima: null};
+    document.addEventListener('pointerdown', function(e){ tocco.tipo = e.pointerType; tocco.prima = document.activeElement; }, true);
+    document.addEventListener('click', function(e){
+      var t = e.target, b = t.closest && t.closest('[data-csg-set]');
+      if (b){
+        var k = b.getAttribute('data-csg-set'), v = b.getAttribute('data-v'), host = b.closest('[data-csg]'), id = host && host.getAttribute('data-csg');
+        if (k === 'arr') CSG_ARR = v; else CSG_ST = v;
+        csgDisegna();
+        var nh = id && document.querySelector('.vz-cs[data-csg="' + id + '"]'), nb = nh && nh.querySelector('[data-csg-set="' + k + '"][data-v="' + v + '"]'); if (nb) nb.focus();
+        return;
+      }
+      /* al telefono il primo tocco mostra il mese (fuoco = tooltip), il secondo apre la tabella */
+      var c = t.closest && t.closest('[data-csg-col]'); if (c){ if (tocco.tipo === 'touch' && tocco.prima !== c){ c.focus(); return; } csgApri(c); return; }
+      var cp = t.closest && t.closest('[data-csg-copia]'); if (cp) csgCopia(cp);
+    });
+    document.addEventListener('keydown', function(e){
+      if (e.key !== 'Enter') return; var c = e.target.closest && e.target.closest('[data-csg-col]'); if (c){ e.preventDefault(); csgApri(c); }
+    });
+    var rt = null;
+    window.addEventListener('resize', function(){ clearTimeout(rt); rt = setTimeout(function(){
+      var cambia = false; Array.prototype.forEach.call(document.querySelectorAll('.vz-cs[data-csg]'), function(el){ if (String(el.clientWidth) !== el.getAttribute('data-w')) cambia = true; });
+      if (cambia) csgDisegna();
+    }, 150); });
+  }
+
   /* ---------- R23: CASSA 12 MESI (Denaro) ---------- */
   function cassaHtml(cm){
     /* R31 (25/09): stesso modello del Cash flow delle commesse (incassi per evento, uscite per fonte, stima dal budget) */
     var list = cm.filter(function(c){ return !c.ev && !c.sp && !cmAltro(c); });
-    var A = cfAggrega(list.map(cfModello)), k0 = A.k0, keys = ymRange(k0, ymAdd(k0, 11));
+    var Ms = list.map(cfModello), A = cfAggrega(Ms), k0 = A.k0, keys = ymRange(k0, ymAdd(k0, 11));
     function v(r, k){ return A.R[r][k] || 0; }
     function entrate(k){ return v('inc', k) + v('incSp', k) + v('incEv', k) + v('incScad', k); }
     function uscite(k){ return v('fat', k) + v('ddt', k) + v('ord', k) + v('fornDa', k) + v('stima', k); }
     var neg = 0, prog = 0;
     keys.forEach(function(k){ if (entrate(k) - uscite(k) < 0) neg++; });
     function riga(lab, f, cls, meno){ return '<tr' + (cls ? ' class="' + cls + '"' : '') + '><td>' + lab + '</td>' + keys.map(function(k){ var x = f(k); return '<td class="num mono">' + (Math.round(x) ? (meno ? '\u2212' : '') + eur(Math.round(x)) : '') + '</td>'; }).join('') + '</tr>'; }
-    var h = '<section class="og"><h3 class="cfh"><i class="dt cy"></i>Cassa nei prossimi 12 mesi<em class="oghint">incassi dei contratti meno pagamenti ai fornitori e stima del budget non ancora ordinato, su tutte le commesse in corso</em></h3>';
-    h += '<div class="otab cf"><table><thead><tr><th>' + (neg ? '<span class="late">' + neg + (neg === 1 ? ' mese in negativo' : ' mesi in negativo') + '</span>' : 'nessun mese in negativo') + '</th>'
+    /* R35: sopra il grafico (stesso modello, stessi numeri); la tabella resta sotto, chiusa, per Excel */
+    CSG = {};
+    var h = '<section class="og"><h3 class="cfh"><i class="dt cy"></i>Cassa nei prossimi 12 mesi<em class="oghint">incassi dei contratti meno pagamenti ai fornitori e stima del budget non ancora ordinato, su ' + list.length + ' commesse in corso</em></h3>';
+    h += '<div class="vz-cs-body">' + csgBlocco(A, Ms, {n: 12, ctl: true, ctlTot: true, aria: 'Cassa nei prossimi 12 mesi'})
+      + '<details class="vz-cs-tab"><summary>Tabella dei 12 mesi · per «Copia per Excel»</summary><div class="vz-cs-tabbar"><button class="chip" data-csg-copia="1">Copia per Excel</button></div>';
+    h += '<div class="otab cf cf2"><table><thead><tr><th>' + (neg ? '<span class="late">' + neg + (neg === 1 ? ' mese in negativo' : ' mesi in negativo') + '</span>' : 'nessun mese in negativo') + '</th>'
       + keys.map(function(k){ return '<th class="num">' + ymLabel(k) + '</th>'; }).join('') + '</tr></thead><tbody>';
     h += riga('Incassi previsti', function(k){ return entrate(k) - v('incScad', k); }, 'cfin');
     h += riga('Incassi scaduti e non registrati (da verificare)', function(k){ return v('incScad', k); }, 'bad');
@@ -5328,7 +5673,9 @@ var VZ = (function(){
     h += riga('Fornitori · stima dal budget', function(k){ return v('stima', k); }, 'cfst', true);
     h += '<tr class="tot"><td>Saldo del mese</td>' + keys.map(function(k){ var x = entrate(k) - uscite(k); return '<td class="num mono' + (x < 0 ? ' late' : '') + '">' + cfNum(x) + '</td>'; }).join('') + '</tr>';
     h += '<tr class="tot"><td>Progressivo</td>' + keys.map(function(k){ prog += entrate(k) - uscite(k); return '<td class="num mono' + (prog < 0 ? ' late' : '') + '">' + cfNum(prog) + '</td>'; }).join('') + '</tr>';
-    h += '</tbody></table></div><p class="srcline">Il dettaglio per commessa, le date chiave e il file per il consulente sono in Commesse \u2192 Cash flow.</p></section>';
+    prog = 0;
+    h += '<tr><td>Progressivo senza gli incassi da verificare</td>' + keys.map(function(k){ prog += entrate(k) - v('incScad', k) - uscite(k); return '<td class="num mono' + (prog < 0 ? ' late' : '') + '">' + cfNum(prog) + '</td>'; }).join('') + '</tr>';
+    h += '</tbody></table></div></details><p class="srcline">Il dettaglio per commessa, le date chiave e il file per il consulente sono in Commesse \u2192 Cash flow.</p></div></section>';
     return h;
   }
 
@@ -8380,6 +8727,22 @@ var VZ = (function(){
             var cs=doc.defaultView.getComputedStyle(doc.documentElement);
             Array.prototype.forEach.call(a.querySelectorAll('svg [fill^="var("], svg [stroke^="var("]'), function(el){
               ['fill','stroke'].forEach(function(at){ var v=el.getAttribute(at), m=v&&v.match(/^var\((--[\w-]+)\)$/); if(m){ var c=cs.getPropertyValue(m[1]).trim(); if(c) el.setAttribute(at,c); } });
+            });
+            /* R35 (cassa): sugli SVG html2canvas copia in linea tutto lo stile calcolato della pagina a schermo (jarvis, con le
+               variabili --vz-* e larghezza e altezza in px), che vince sugli attributi appena sostituiti: colori scuri e
+               testi chiari nel PDF bianco. Rimetto lo stile dell'autore e ricopio solo le proprieta' di disegno, calcolate
+               nel clone, che ora e' nel tema chiaro. */
+            var PR=['fill','fill-opacity','stroke','stroke-width','stroke-dasharray','stroke-linecap','stroke-linejoin','stroke-opacity','opacity','paint-order',
+              'font-family','font-size','font-weight','font-style','letter-spacing','text-transform','font-variant-numeric','visibility','display','color'];
+            var oR=document.querySelectorAll('#printarea svg'), usati=0;
+            Array.prototype.forEach.call(a.querySelectorAll('svg'), function(sv){
+              /* l'originale con la stessa forma, nello stesso ordine (nel clone mancano le icone dei pulsanti) */
+              var cd=sv.querySelectorAll('*'), firma=(sv.getAttribute('viewBox')||'')+'|'+cd.length, j, od=null, x;
+              for(j=usati;j<oR.length;j++){ x=oR[j].querySelectorAll('*'); if((oR[j].getAttribute('viewBox')||'')+'|'+x.length===firma){ od=x; usati=j+1; break; } }
+              if(!od) return;
+              var cl=[sv].concat(Array.prototype.slice.call(cd)), orig=[oR[usati-1]].concat(Array.prototype.slice.call(od));
+              cl.forEach(function(el,q){ var s0=orig[q].getAttribute('style'); if(s0) el.setAttribute('style',s0); else el.removeAttribute('style'); });
+              cl.forEach(function(el){ var st=doc.defaultView.getComputedStyle(el); PR.forEach(function(pn){ var v=st.getPropertyValue(pn); if(v) el.style.setProperty(pn,v); }); });
             });
           }catch(e){}
           /* R35 calendario: sugli elementi SVG html2canvas copia in linea lo stile calcolato sulla pagina, cioe' i colori

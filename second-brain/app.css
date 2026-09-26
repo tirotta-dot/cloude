@@ -2380,3 +2380,78 @@ html[data-sb-theme="jarvis"]{
   .vz-stat.vz-hero .vz-val{font-size:40px}
 }
 @media (forced-colors:active){ .vz-flow path,.vz-heat rect{forced-color-adjust:none} }
+
+/* ===== R35 (26/09/2026): grafico di cassa (Denaro › Flusso di cassa, Commesse › Cash flow) ===== */
+:root{
+  --vz-cs-wash:rgba(198,59,36,.11); --vz-cs-halo:#FFFFFF;
+  /* chiave tratteggiata (tooltip e legenda) per la linea «senza arretrati» */
+  --vz-cs-dash:repeating-linear-gradient(90deg,var(--vz-ink2) 0 4px,transparent 4px 7px);
+}
+html[data-sb-theme="jarvis"]{ --vz-cs-wash:rgba(251,113,133,.15); --vz-cs-halo:#0C1826; }
+.vz-cs-body{padding:14px 16px 12px;min-width:0}
+.vz-cs{min-width:0}
+.vz-cs-ctl{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;margin:0 0 12px}
+.vz-cs-g{display:inline-flex;flex-wrap:wrap;align-items:center;gap:6px 8px}
+.vz-cs-seg{display:inline-flex;border:1px solid var(--line-2);border-radius:3px;overflow:hidden}
+.vz-cs-seg button{padding:5px 11px;border:0;background:transparent;cursor:pointer;font:400 12px "IBM Plex Sans",sans-serif;color:var(--ink-2)}
+.vz-cs-seg button+button{border-left:1px solid var(--line-2)}
+.vz-cs-seg button[aria-pressed="true"]{background:var(--vz-ink);color:var(--vz-surface);font-weight:600}
+.vz-cs-seg button:focus-visible{outline:2px solid var(--vz-1);outline-offset:-2px}
+.vz-cs-figs{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin:0 0 14px}
+.vz-cs-fig{border:1px solid var(--line);border-radius:6px;padding:9px 12px;background:var(--panel-2);min-width:0}
+html[data-sb-theme="jarvis"] .vz-cs-fig{background:rgba(255,255,255,.03)}
+.vz-cs-fig .vz-val{font-size:24px;margin:3px 0 1px}
+.vz-cs-sum{margin:0 0 10px;font-size:12.5px;line-height:1.5;color:var(--vz-ink2)}
+.vz-cs-sum b{font:600 12.5px "IBM Plex Mono",monospace;color:var(--vz-ink);white-space:nowrap}
+.vz-cs-sum b.vz-cs-neg{color:var(--late)}
+.vz-cs-sum b i{font-style:normal;font-size:10px}
+.vz-cs-leg{gap:6px 18px}
+.vz-cs-lg{display:inline-flex;flex-wrap:wrap;gap:4px 12px;align-items:center}
+.vz-cs-lg>b{font:600 11px "Barlow Condensed",sans-serif;letter-spacing:.14em;text-transform:uppercase;color:var(--vz-tick)}
+/* chiavi della legenda: !important perche' nel PDF (#printarea *) ogni sfondo diventa bianco */
+.vz-leg i.vz-cs-in3,#printarea .vz-leg i.vz-cs-in3{background:var(--vz-in-3)!important}
+.vz-leg i.vz-cs-out3,#printarea .vz-leg i.vz-cs-out3{background:var(--vz-out-3)!important}
+.vz-leg i.vz-cs-out2,#printarea .vz-leg i.vz-cs-out2{background:var(--vz-out-2)!important}
+.vz-leg i.vz-cs-out1,#printarea .vz-leg i.vz-cs-out1{background:var(--vz-out-1)!important}
+.vz-leg i.vz-cs-lin,#printarea .vz-leg i.vz-cs-lin{background:var(--vz-line)!important}
+.vz-leg i.vz-cs-hin,#printarea .vz-leg i.vz-cs-hin{background:repeating-linear-gradient(135deg,var(--vz-in-3) 0 2px,var(--vz-in-1) 2px 5px)!important}
+.vz-leg i.vz-cs-hout,#printarea .vz-leg i.vz-cs-hout{background:repeating-linear-gradient(135deg,var(--vz-out-2) 0 2px,var(--vz-out-1) 2px 5px)!important}
+.vz-leg i.vz-cs-dl,#printarea .vz-leg i.vz-cs-dl{background:var(--vz-cs-dash)!important}
+/* html2canvas non disegna i gradienti ripetuti: nel PDF il tratteggio diventa tinta tenue con bordo, e la linea un bordo tratteggiato */
+#printarea .vz-leg i.vz-cs-hin{background:var(--vz-in-1)!important;border:2px solid var(--vz-in-3)!important}
+#printarea .vz-leg i.vz-cs-hout{background:var(--vz-out-1)!important;border:2px solid var(--vz-out-2)!important}
+#printarea .vz-leg i.vz-cs-dl{background:none!important;height:0!important;border-top:2px dashed var(--vz-ink2)!important}
+/* nel PDF i pulsanti spariscono: resta scritta la scelta */
+.vz-cs-scelta{display:none}
+#printarea .vz-cs-seg{display:none!important}
+#printarea .vz-cs-scelta{display:inline;font-size:12px}
+/* stampa del browser (ripiego senza PDF): la pagina resta in jarvis, il grafico va su carta bianca con i colori chiari */
+@media print{
+  html[data-sb-theme="jarvis"] #printarea .vz-cs{
+    --vz-surface:#FFFFFF; --vz-1:#0B7FAE; --vz-in-1:#7FBCDE; --vz-in-2:#4F9FC9; --vz-in-3:#0B7FAE;
+    --vz-out-1:#EBA27E; --vz-out-2:#DC8051; --vz-out-3:#CE5C10;
+    --vz-grid:#E4EBF1; --vz-axis:#9FB2C2; --vz-tick:#586F81; --vz-ink:#0F2233; --vz-ink2:#3B5568; --vz-line:#3B5568;
+    --vz-cs-wash:rgba(198,59,36,.11); --vz-cs-halo:#FFFFFF;
+  }
+}
+.vz-cs-chart{position:relative;width:100%;margin-top:4px}
+.vz-cs-svg{height:auto}
+.vz-cs-svg .vz-hit{cursor:pointer}
+.vz-cs-svg .vz-ptl{font:600 11px "Barlow Condensed",sans-serif;letter-spacing:.14em;text-transform:uppercase;fill:var(--vz-ink2)}
+.vz-cs-svg .vz-dlm{font:600 11.5px "IBM Plex Mono",monospace;fill:var(--vz-ink);font-variant-numeric:tabular-nums}
+.vz-cs-svg .vz-dlm,.vz-cs-svg .vz-dl2{paint-order:stroke;stroke:var(--vz-cs-halo);stroke-width:4px;stroke-linejoin:round}
+.vz-cs-nota{margin:8px 0 0;font-size:11.5px;line-height:1.5;color:var(--vz-ink2)}
+.vz-cs-nota b{color:var(--vz-ink);font-weight:600}
+.vz-cs-nota .w{color:var(--warn)}
+details.vz-cs-tab{margin-top:12px;border-top:1px solid var(--line);padding-top:9px}
+.vz-cs-body > details.vz-cs-tab:first-child{margin-top:0;border-top:0;padding-top:0}
+.vz-cs-body > .srcline{margin:10px 0 0}
+details.vz-cs-tab>summary{cursor:pointer;font:600 12px "Barlow Condensed",sans-serif;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-2)}
+details.vz-cs-tab .otab{margin-top:8px}
+.vz-cs-tabbar{display:flex;justify-content:flex-end;margin:8px 0 0}
+.otab td.vz-cs-hl,.otab th.vz-cs-hl{background:color-mix(in srgb,var(--vz-1) 16%,transparent)!important}
+@media (max-width:640px){
+  .vz-cs-body{padding:12px 12px 10px}
+  .vz-cs-fig .vz-val{font-size:22px}
+  .vz-cs-leg{gap:6px 12px}
+}
