@@ -8341,6 +8341,7 @@ var VZ = (function(){
     function fmt(n){
       return (group ? new Intl.NumberFormat('it-IT').format(n) : String(n)) + suf;
     }
+    el.setAttribute('data-fin', fmt(target));   /* R35: il PDF stampa sempre il numero finale, anche a animazione in corso */
     function tick(ts){
       if (!t0) t0 = ts;
       var p = Math.min((ts - t0) / dur, 1);
@@ -9519,6 +9520,7 @@ var VZ = (function(){
           var a=doc.getElementById('printarea'); if(!a) return;
           doc.documentElement.removeAttribute('data-sb-theme');
           doc.body.classList.add('pdfmode');
+          Array.prototype.forEach.call(a.querySelectorAll('[data-fin]'), function(el){ el.textContent=el.getAttribute('data-fin'); });
           /* R35: html2canvas non risolve var(--vz-…) negli attributi SVG: li sostituisco con i colori chiari del PDF */
           try{
             var cs=doc.defaultView.getComputedStyle(doc.documentElement);
