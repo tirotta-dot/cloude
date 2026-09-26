@@ -1358,36 +1358,9 @@ var VZ = (function(){
     if (!list.length)
       return h + '<p class="empty">Nessuna commessa da programmare con questo filtro.</p>';
 
-    /* Con nessuna commessa scelta non ha senso disegnare 36 diagrammi: meglio
-       l'elenco ordinato per consegna, con un bottone per entrare a programmare. */
-    if (list.length > 6){
-      var righe = list.slice().sort(function(a, b){
-        var x = a.de || a.dc, y = b.de || b.dc;
-        if (x && y) return d0(x) - d0(y);
-        return x ? -1 : y ? 1 : 0;
-      }).map(function(c){
-        var v = pgVoci(c.code), ap = v.filter(function(x){ return !x.ev; });
-        var rit = ap.filter(function(x){ return x.dp && d0(x.dp) < oggi; });
-        var nd = {}; v.forEach(function(x){ nd[x.nd || '(senza nodo)'] = 1; });
-        var fine = c.de || c.dc, gg = fine ? days(new Date(), fine) : null;
-        return '<tr><td class="c">' + esc(c.code) + '</td><td>' + esc(c.cliente) + '</td>'
-          + '<td class="n' + (gg !== null && gg < 0 ? ' bad' : '') + '">'
-          + (fine ? esc(itFull(fine)) + (gg === null ? '' : gg < 0
-              ? ' · ' + Math.abs(gg) + ' gg oltre' : ' · tra ' + gg + ' gg')
-             : '—') + '</td>'
-          + '<td class="n">' + Object.keys(nd).length + '</td>'
-          + '<td class="n">' + ap.length + '</td>'
-          + '<td class="n' + (rit.length ? ' bad' : '') + '">' + (rit.length || '—') + '</td>'
-          + '<td><button data-pgapri="' + esc(c.code) + '">programma →</button></td></tr>';
-      }).join('');
-      return h + '<div class="pgvuoto"><h4>Scegli la commessa da programmare</h4>'
-        + '<p>Il diagramma si legge una commessa alla volta: ognuna ha la sua scala dei tempi, '
-        + 'i suoi nodi e i suoi ordini. Clicca <b>programma</b>, oppure scegli una o più commesse '
-        + 'dai riquadri qui sopra.</p>'
-        + '<table class="pgel"><thead><tr><th>Commessa</th><th>Cliente</th><th>Consegna</th>'
-        + '<th>Nodi</th><th>Ordini aperti</th><th>In ritardo</th><th></th></tr></thead><tbody>'
-        + righe + '</tbody></table></div>';
-    }
+    /* R35 (26/09): con nessuna commessa scelta (o più di 6) non si disegnano 36 diagrammi ma il
+       Gantt di portafoglio: tutte sulla stessa linea del tempo, e sotto la tabella con «programma →». */
+    if (list.length > 6) return h + gpHtml(list, oggi);
 
     list.slice().sort(function(a, b){
       var x = a.de || a.dc, y = b.de || b.dc;
@@ -1396,6 +1369,293 @@ var VZ = (function(){
     }).forEach(function(c, i){ h += pgCommessa(c, i); });
     return h;
   }
+
+  /* ---------- R35 (26/09/2026): GANTT DI PORTAFOGLIO ----------
+     Tutte le commesse in vista su un'unica linea del tempo, una riga ciascuna, in ordine di consegna:
+     barra dal contratto alla consegna da contratto (dc), rombo pieno = dc, rombo vuoto = consegna
+     effettiva o rinviata (de), triangolo = installazione (ic). Il tratto «oltre la consegna» va dalla
+     data su cui stato() misura il ritardo (de se c'è, altrimenti dc) fino a oggi, sempre con ⚠ e i giorni.
+     Sopra: valore a contratto per mese di consegna e la fascia dell'ingorgo. Si disegna alla larghezza
+     vera del riquadro (gpDisegna, anche al resize). Clic su una riga = «programma →» (data-pgapri). */
+  var GP = null, gpCtx = null;
+  function gpTw(t, font){
+    try { gpCtx = gpCtx || document.createElement('canvas').getContext('2d'); gpCtx.font = font; return gpCtx.measureText(t).width; }
+    catch (e) { return String(t).length * 6.5; }
+  }
+  function gpFit(t, font, max){
+    t = String(t == null ? '' : t);
+    if (max < 12) return '';
+    if (gpTw(t, font) <= max) return t;
+    while (t.length > 1 && gpTw(t + '…', font) > max) t = t.slice(0, -1);
+    return t.replace(/\s+$/, '') + '…';
+  }
+  function gpRiga(c, oggi){
+    var v = pgVoci(c.code), ap = v.filter(function(x){ return !x.ev; });
+    var rit = ap.filter(function(x){ return x.dp && d0(x.dp) < oggi; });
+    var nd = {}; v.forEach(function(x){ nd[x.nd || '(senza nodo)'] = 1; });
+    /* inizio della barra: la data più vecchia tra firma del contratto, prima fase registrata e prime ore */
+    var cand = [], ctr = isoIn(c.ctr && c.ctr.data), of = String((c.ore && c.ore.first) || '');
+    if (ctr) cand.push([ctr, 'data del contratto']);
+    FASI.forEach(function(f){ var x = c.fasi && c.fasi[f[0]]; if (x && isoOk(x.d)) cand.push([x.d, 'prima fase registrata']); });
+    if (/^\d{4}-\d{2}$/.test(of)) cand.push([of + '-01', 'prime ore registrate']);
+    cand.sort(function(a, b){ return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0; });
+    return {code: c.code, ds: c.desc || c.nint || '', cli: c.cliente || '', ev: !!c.ev, evd: c.evd || null,
+      dc: isoOk(c.dc) ? c.dc : null, de: isoOk(c.de) ? c.de : null, ic: isoOk(c.ic) ? c.ic : null,
+      s: cand.length ? cand[0][0] : null, ss: cand.length ? cand[0][1] : '', v: (c.eco && c.eco.valore) || null,
+      p: prog(c), f: faseCorrente(c), st: stato(c), oa: ap.length, or: rit.length, nodi: Object.keys(nd).length};
+  }
+  function gpFine(r){ return r.de || r.dc; }
+  function gpHtml(list, oggi){
+    var R = list.map(function(c){ return gpRiga(c, oggi); }), OG = isoDi(oggi);
+    R.sort(function(a, b){
+      var x = gpFine(a), y = gpFine(b);
+      if (x !== y){ if (!x) return 1; if (!y) return -1; return x < y ? -1 : 1; }
+      return a.code < b.code ? -1 : a.code > b.code ? 1 : 0;
+    });
+    var conD = R.filter(gpFine), senza = R.filter(function(r){ return !gpFine(r); });
+    /* colonne: valore a contratto per mese della consegna da contratto */
+    var mesi = {};
+    conD.forEach(function(r){
+      if (!r.dc) return;
+      var m = r.dc.slice(0, 7), o = mesi[m] = mesi[m] || {n: 0, v: 0, sv: [], r: []};
+      o.n++; o.r.push(r); if (r.v) o.v += r.v; else o.sv.push(r.code);
+    });
+    /* ingorgo: da questo mese in avanti, la finestra di 7 mesi con più consegne da contratto */
+    var k0 = ymKey(oggi), km = Object.keys(mesi).sort(), band = null;
+    km.forEach(function(a){
+      if (a < k0) return;
+      var b = ymAdd(a, 6), o = {a: a, b: a, n: 0, v: 0};
+      km.forEach(function(m){ if (m >= a && m <= b){ o.n += mesi[m].n; o.v += mesi[m].v; if (m > o.b) o.b = m; } });
+      if (!band || o.n > band.n || (o.n === band.n && o.v > band.v)) band = o;
+    });
+    if (band && (band.n < 5 || band.n < conD.length * 0.3)) band = null;
+    var ks = [k0];
+    conD.forEach(function(r){ [r.dc, r.de, r.ic].forEach(function(x){ if (x) ks.push(x.slice(0, 7)); }); });
+    ks.sort();
+    GP = {R: R, conD: conD, senza: senza, mesi: mesi, band: band, kA: ymAdd(ks[0], -1), kB: ymAdd(ks[ks.length - 1], 1), oggi: OG};
+
+    var nsel = selected().length, molte = senza.length > 12;
+    var chi = nsel ? R.length + ' commesse selezionate'
+      : R.length + ' commesse ' + (cview === 'evase' ? 'evase' : cview === 'sospese' ? 'sospese' : 'in corso');
+    var h = '<section class="vz-gp" aria-label="Gantt di portafoglio"><div class="vz-gp-hd">'
+      + '<h4>Gantt di portafoglio · ' + esc(chi) + '</h4>'
+      + '<p>Una riga per commessa, in ordine di consegna. Clicca una riga per aprire il Gantt della sola commessa, '
+      + 'con nodi e ordini; oppure scegli fino a 6 commesse dai riquadri qui sopra.</p></div>'
+      + '<div class="vz-leg vz-gp-leg">'
+      + '<span><i class="rc" style="--k:var(--vz-1);background:var(--k)"></i>dal contratto alla consegna da contratto</span>'
+      + '<span><i class="vz-gp-dm"></i>consegna da contratto</span>'
+      + '<span><i class="vz-gp-dmo"></i>consegna effettiva o rinviata</span>'
+      + '<span><i class="vz-gp-tr"></i>installazione</span>'
+      + '<span><i class="rc" style="--k:var(--late);background:var(--k)"></i><b class="vz-gp-st">⚠ oltre la consegna</b> fino a oggi</span>'
+      + (km.length ? '<span><i class="rc" style="--k:var(--vz-1);background:var(--k)"></i>in alto: valore a contratto per mese di consegna, sopra il numero di commesse</span>' : '')
+      + '</div><div class="vz-gp-box" data-gpbox></div>';
+
+    var nota = [];
+    if (cview === 'attive'){
+      var sosp = CM().filter(function(c){ return !c.ev && c.sp; });
+      if (sosp.length) nota.push('Le sospese restano fuori dal grafico: ' + sosp.map(function(c){
+        return c.code + (isoOk(c.dc) ? ' (consegna da contratto ' + itFull(c.dc) + ')' : isoOk(c.de) ? ' (consegna rinviata al ' + itFull(c.de) + ')' : '');
+      }).join(', ') + '.');
+    }
+    var nov = conD.filter(function(r){ return r.dc && !r.v; }).map(function(r){ return r.code; });
+    if (nov.length) nota.push((nov.length === 1 ? nov[0] + ' non ha' : nov.join(', ') + ' non hanno') + ' valore a contratto: '
+      + (nov.length === 1 ? 'conta' : 'contano') + ' nel numero sopra le colonne, non nella loro altezza.');
+    if (molte) nota.push(senza.length + ' commesse senza data di consegna sono solo nella tabella qui sotto.');
+    nota.push('Il ritardo si misura sulla consegna effettiva o rinviata, se c’è, altrimenti su quella da contratto.');
+    h += '<p class="vz-gp-nota">' + esc(nota.join(' ')) + '</p>';
+
+    h += '<details class="vz-gp-tab"' + (molte ? ' open' : '') + '><summary>Tabella dei dati · ' + R.length + ' commesse</summary>'
+      + '<div class="vz-gp-tw"><table class="pgel"><thead><tr><th>Commessa</th><th>Cliente</th><th>Consegna da contratto</th>'
+      + '<th>Consegna effettiva</th><th>Installazione</th><th>Stato</th><th>Avanz.</th><th>Valore a contratto</th>'
+      + '<th>Nodi</th><th>Ordini aperti</th><th>In ritardo</th><th></th></tr></thead><tbody>'
+      + R.map(function(r){
+          var t = gpFine(r), late = !r.ev && t && t < OG;
+          return '<tr><td class="c">' + esc(r.code) + '</td><td>' + esc(r.cli) + '</td>'
+            + '<td class="n">' + esc(itFull(r.dc)) + '</td><td class="n">' + esc(itFull(r.de)) + '</td><td class="n">' + esc(itFull(r.ic)) + '</td>'
+            + '<td class="n' + (late ? ' bad' : '') + '">' + (r.ev ? 'evasa' + (r.evd ? ' il ' + esc(itFull(r.evd)) : '') : (late ? '⚠ ' : '') + esc(r.st.txt)) + '</td>'
+            + '<td class="n">' + r.p + '%</td><td class="n">' + (r.v ? esc(VZ.eur(r.v)) : '—') + '</td>'
+            + '<td class="n">' + r.nodi + '</td><td class="n">' + r.oa + '</td>'
+            + '<td class="n' + (r.or ? ' bad' : '') + '">' + (r.or ? '⚠ ' + r.or : '—') + '</td>'
+            + '<td><button data-pgapri="' + esc(r.code) + '">programma →</button></td></tr>';
+        }).join('')
+      + '</tbody></table></div></details></section>';
+    return h;
+  }
+  /* disegno SVG alla larghezza vera del riquadro: si rifà al resize, senza ricalcolare i dati */
+  function gpDisegna(){
+    var box = stage.querySelector('[data-gpbox]');
+    if (!box || !GP || !box.clientWidth || (box.firstChild && box.getAttribute('data-w') === String(box.clientWidth))) return;
+    var G = GP, W = box.clientWidth, stretto = W < 640, OG = G.oggi;
+    box.setAttribute('data-w', W);
+    var fM = '600 ' + (stretto ? '11px' : '11.5px') + ' "IBM Plex Mono",monospace', fS = '400 11px "IBM Plex Sans",sans-serif',
+      fB = '600 11px "IBM Plex Sans",sans-serif', fW = '500 10.5px "IBM Plex Sans",sans-serif', fL = '600 12px "IBM Plex Sans",sans-serif';
+    var LW = stretto ? 78 : 214, RW = stretto ? 58 : 176, x0 = LW, x1 = W - RW - (stretto ? 8 : 12);
+    var T0 = d0(G.kA + '-01'), T1 = d0(G.kB + '-01'), span = Math.max(T1 - T0, DAY);
+    function X(s){ return x0 + (d0(s) - T0) / span * (x1 - x0); }
+    var nM = Math.max(ymRange(G.kA, G.kB).length - 1, 1), monthW = (x1 - x0) / nM, RH = 22, oggiX = X(OG);
+    var km = Object.keys(G.mesi).sort(), vmax = 0;
+    km.forEach(function(m){ vmax = Math.max(vmax, G.mesi[m].v); });
+    var BR = G.band ? 34 : 8, PT = BR + 28, PH = km.length ? (stretto ? 64 : 100) : 0, AXY = PT + PH;
+    var stp = vmax ? VZ.nice(vmax, stretto ? 2 : 3) : 1, ymax = vmax ? Math.ceil(vmax / stp) * stp : 1;
+    function YV(v){ return AXY - v / ymax * PH; }
+    var RY0 = AXY + (stretto ? 46 : 48), nS = G.senza.length, molte = nS > 12;
+    var sy = RY0 + G.conD.length * RH, endY = sy + (nS ? 26 + (molte ? 1 : nS) * RH : 0);
+    var H = endY + 34, s = '';
+
+    /* fascia dell'ingorgo, dietro a tutto */
+    if (G.band){
+      var bx0 = X(G.band.a + '-01'), bx1 = X(ymAdd(G.band.b, 1) + '-01'), bm = ymRange(G.band.a, G.band.b).length;
+      var pa = G.band.a.split('-'), pb = G.band.b.split('-');
+      var per = MESI_BREVI[+pa[1] - 1] + (pa[0] !== pb[0] ? ' ' + pa[0] : '') + '–' + MESI_BREVI[+pb[1] - 1] + ' ' + pb[0];
+      var l1 = (stretto ? '' : 'ingorgo ') + per + ': ' + G.band.n + ' consegne', l2 = VZ.eurC(G.band.v) + ' a contratto in ' + bm + ' mesi';
+      var lw = Math.max(gpTw(l1, fL), gpTw(l2, fS)), lx = Math.max(lw / 2 + 4, Math.min(W - lw / 2 - 4, (bx0 + bx1) / 2));
+      s += '<rect x="' + bx0.toFixed(1) + '" y="' + (BR + 8) + '" width="' + (bx1 - bx0).toFixed(1) + '" height="' + (endY - BR - 8) + '" fill="var(--vz-ink)" fill-opacity=".05"/>'
+        + '<path d="M' + bx0.toFixed(1) + ',' + (BR + 6) + 'V' + BR + 'H' + bx1.toFixed(1) + 'V' + (BR + 6) + '" fill="none" stroke="var(--vz-ink2)"/>'
+        + '<text class="vz-dl" x="' + lx.toFixed(1) + '" y="' + (BR - 19) + '" text-anchor="middle">' + esc(l1) + '</text>'
+        + '<text class="vz-dl2" x="' + lx.toFixed(1) + '" y="' + (BR - 6) + '" text-anchor="middle">' + esc(l2) + '</text>';
+    }
+    /* inizio di ogni anno */
+    ymRange(G.kA, G.kB).forEach(function(k){ if (k.slice(5) === '01' && k !== G.kA) s += '<line x1="' + X(k + '-01').toFixed(1) + '" x2="' + X(k + '-01').toFixed(1) + '" y1="' + PT + '" y2="' + endY + '" stroke="var(--vz-grid)"/>'; });
+    /* la riga di oggi: nel pannello alto sta dietro alle colonne (non copre i numeri), sulle righe sta sopra alle barre */
+    s += '<line x1="' + oggiX.toFixed(1) + '" x2="' + oggiX.toFixed(1) + '" y1="' + (PT - 6) + '" y2="' + (RY0 - 14) + '" stroke="var(--vz-ink)" stroke-width="1.5" pointer-events="none"/>';
+    /* pannello alto: valore a contratto per mese di consegna */
+    if (km.length){
+      for (var t = 0; t <= ymax + 1; t += stp){
+        s += '<line x1="' + x0 + '" x2="' + x1 + '" y1="' + YV(t).toFixed(1) + '" y2="' + YV(t).toFixed(1) + '" stroke="var(' + (t ? '--vz-grid' : '--vz-axis') + ')" shape-rendering="crispEdges"/>'
+          + '<text class="vz-tick" x="' + (x0 - 8) + '" y="' + (YV(t) + 3.5).toFixed(1) + '" text-anchor="end">' + esc(t ? VZ.eurC(t) : '0') + '</text>';
+      }
+      if (!stretto) s += '<text class="vz-dl2" x="8" y="' + (PT + 4) + '">valore a contratto</text><text class="vz-dl2" x="8" y="' + (PT + 18) + '">per mese di consegna</text>';
+      var cw = Math.max(3, Math.min(16, monthW * 0.66));
+      var top3 = km.filter(function(m){ return G.mesi[m].v > 0; }).sort(function(a, b){ return G.mesi[b].v - G.mesi[a].v; }).slice(0, 3);
+      km.forEach(function(m, i){
+        var o = G.mesi[m], cx = X(m + '-15'), top = o.v ? YV(o.v) : AXY - 2, p = m.split('-');
+        s += o.v ? '<path d="' + VZ.barPath(cx - cw / 2, top, cw, AXY - top, 'su') + '" fill="var(--vz-1)"/>'
+          : '<rect x="' + (cx - cw / 2).toFixed(1) + '" y="' + (AXY - 2) + '" width="' + cw.toFixed(1) + '" height="2" fill="var(--vz-rest-ink)"/>';
+        if (monthW >= 12 || o.n >= 3) s += '<text class="vz-dl" x="' + cx.toFixed(1) + '" y="' + (top - 5).toFixed(1) + '" text-anchor="middle">' + o.n + '</text>';
+        if (!stretto && top3.indexOf(m) >= 0) s += '<text class="vz-dl2" x="' + (cx - cw / 2 - 4).toFixed(1) + '" y="' + (top + 10).toFixed(1) + '" text-anchor="end">' + esc(VZ.eurC(o.v)) + '</text>';
+        var tit = MESI[+p[1] - 1] + ' ' + p[0] + ' · ' + o.n + (o.n === 1 ? ' consegna' : ' consegne') + ' · ' + VZ.eurC(o.v);
+        var rows = o.r.map(function(r){ return [r.v ? VZ.eurC(r.v) : 'n.d.', r.code + ' · ' + r.ds, r.v ? '1' : '', r.v ? 'r' : '']; });
+        if (o.sv.length) rows.push(['', o.sv.length === 1 ? '1 commessa senza valore a contratto: la colonna è più bassa del vero' : o.sv.length + ' commesse senza valore a contratto: la colonna è più bassa del vero', '', '']);
+        s += '<rect class="vz-hit vz-gp-col" x="' + (cx - monthW / 2).toFixed(1) + '" y="' + PT + '" width="' + monthW.toFixed(1) + '" height="' + (PH + 2) + '" data-ci="' + i + '" tabindex="' + (i ? -1 : 0) + '" role="img"'
+          + ' aria-label="' + esc(tit + ': ' + o.r.map(function(r){ return r.code; }).join(', ')) + '"' + VZ.tip(tit, rows) + '/>';
+      });
+    }
+    /* mesi: sotto il pannello e in fondo */
+    var ogni = nM > 40 ? 12 : (monthW * 3 < 34 ? 6 : 3), primo = true, asse = '';
+    ymRange(G.kA, G.kB).forEach(function(k){
+      var m = +k.slice(5) - 1, x = X(k + '-01');
+      if (m % ogni || k === G.kB) return;
+      var lab = ogni === 12 ? k.slice(0, 4) : MESI_BREVI[m];
+      s += '<line x1="' + x.toFixed(1) + '" x2="' + x.toFixed(1) + '" y1="' + AXY + '" y2="' + (AXY + 4) + '" stroke="var(--vz-axis)"/>'
+        + '<text class="vz-tick" x="' + (x + 2).toFixed(1) + '" y="' + (AXY + 15) + '">' + lab + '</text>';
+      if (ogni !== 12 && (m === 0 || primo)) s += '<text class="vz-tick yr" x="' + (x + 2).toFixed(1) + '" y="' + (AXY + 27) + '">' + k.slice(0, 4) + '</text>';
+      asse += '<text class="vz-tick" x="' + (x + 2).toFixed(1) + '" y="' + (endY + 16) + '">' + lab + '</text>'
+        + (ogni !== 12 && (m === 0 || primo) ? '<text class="vz-tick yr" x="' + (x + 2).toFixed(1) + '" y="' + (endY + 28) + '">' + k.slice(0, 4) + '</text>' : '');
+      primo = false;
+    });
+    s += '<text class="vz-tick" x="8" y="' + (RY0 - 8) + '">' + (stretto ? 'commessa' : 'commessa · in ordine di consegna') + '</text>'
+      + (stretto ? '' : '<text class="vz-tick" x="' + (W - RW + 36) + '" y="' + (RY0 - 8) + '" text-anchor="end">avanz.</text>')
+      + '<text class="vz-tick" x="' + (W - 8) + '" y="' + (RY0 - 8) + '" text-anchor="end">' + (stretto ? 'ord. rit.' : 'ordini in ritardo') + '</text>';
+
+    function dm(x, y, r){ return 'M' + x.toFixed(1) + ',' + (y - r) + 'L' + (x + r).toFixed(1) + ',' + y + 'L' + x.toFixed(1) + ',' + (y + r) + 'L' + (x - r).toFixed(1) + ',' + y + 'Z'; }
+    function riga(r, y, i){
+      var cy = y + RH / 2, t = gpFine(r), late = !r.ev && t && t < OG, g = '', rows = [];
+      if (r.dc) rows.push([itFull(r.dc), 'consegna da contratto', 'ink', 'r']);
+      if (r.de) rows.push([itFull(r.de), r.de === r.dc ? 'consegna effettiva, come da contratto' : 'consegna effettiva o rinviata', '', '']);
+      if (r.ic) rows.push([itFull(r.ic), 'installazione da contratto', '', '']);
+      rows.push([r.ev ? 'evasa' + (r.evd ? ' il ' + itFull(r.evd) : '') : r.st.txt, 'stato', late ? '--late' : '', late ? 'r' : '']);
+      if (late && r.dc && r.de && r.de !== r.dc) rows.push([Math.abs(days(OG, r.dc)) + ' gg', 'oltre la data del contratto', '', '']);
+      rows.push([r.p + '%', 'avanzamento · fase: ' + r.f, '', '']);
+      rows.push([r.v ? VZ.eurC(r.v) : 'n.d.', 'valore a contratto', '', '']);
+      rows.push([r.or + ' su ' + r.oa, 'ordini fornitore in ritardo su quelli aperti', '', '']);
+      if (r.s) rows.push([itFull(r.s), 'inizio barra: ' + r.ss, '1', 'l']);
+      rows.push(['clic', 'apre il Gantt della commessa', '', '']);
+      g += '<g class="vz-gp-row" data-pgapri="' + esc(r.code) + '" data-ri="' + i + '" tabindex="' + (i ? -1 : 0) + '" role="listitem"'
+        + ' aria-label="' + esc(r.code + ' ' + r.ds + ': ' + (r.ev ? 'evasa' : r.st.txt) + ', ' + r.p + '%, ordini in ritardo ' + r.or + ' su ' + r.oa) + '"'
+        + VZ.tip(r.code + (r.ds ? ' · ' + r.ds : ''), rows) + '>'
+        + '<rect class="vz-gp-bg" x="0" y="' + y + '" width="' + W + '" height="' + RH + '"/>'
+        + '<line x1="0" x2="' + W + '" y1="' + (y + RH - 0.5) + '" y2="' + (y + RH - 0.5) + '" stroke="var(--vz-grid)"/>';
+      var cwd = gpTw(r.code, fM);
+      g += '<text class="vz-gp-code" x="8" y="' + (cy + 4) + '">' + esc(r.code) + '</text>';
+      if (!stretto && r.ds) g += '<text class="vz-gp-desc" x="' + (14 + cwd).toFixed(1) + '" y="' + (cy + 4) + '">' + esc(gpFit(r.ds, fS, LW - 22 - cwd)) + '</text>';
+      var avail = function(x){ return (W - RW + (stretto ? -2 : 4)) - x; }, tx = null, tt = null, tc = '';
+      if (t){
+        var ex = X(r.dc || r.de), lastX = ex;
+        if (r.s && r.s < (r.dc || r.de)){
+          var sx = Math.max(x0, X(r.s));
+          if (ex - sx > 1) g += '<path d="' + VZ.barPath(sx, cy - 4, ex - sx, 8, 'dx') + '" fill="var(--vz-1)"/>';
+          if (X(r.s) < x0 && ex - x0 > 8) g += '<path d="M' + (x0 + 6) + ',' + (cy - 3) + 'L' + (x0 + 2) + ',' + cy + 'L' + (x0 + 6) + ',' + (cy + 3) + '" fill="none" stroke="var(--vz-surface)" stroke-width="1.5"/>';
+        }
+        if (r.dc && r.de && r.de !== r.dc){ g += '<line x1="' + ex.toFixed(1) + '" x2="' + X(r.de).toFixed(1) + '" y1="' + cy + '" y2="' + cy + '" stroke="var(--vz-ink2)" stroke-width="1.5"/>'; lastX = X(r.de); }
+        if (r.ic && r.ic > t){ g += '<line x1="' + lastX.toFixed(1) + '" x2="' + X(r.ic).toFixed(1) + '" y1="' + cy + '" y2="' + cy + '" stroke="var(--vz-axis)"/>'
+          + '<path d="M' + X(r.ic).toFixed(1) + ',' + (cy - 5) + 'l5,8.5h-10z" fill="var(--vz-ink2)"/>'; }
+        if (late){
+          var ox = X(t), n = Math.abs(days(OG, t)), rinv = r.dc && r.de && r.de !== r.dc, nc = rinv ? Math.abs(days(OG, r.dc)) : 0;
+          g += '<rect x="' + ox.toFixed(1) + '" y="' + (cy - 4) + '" width="' + Math.max(1, oggiX - ox).toFixed(1) + '" height="8" fill="var(--late)"/>';
+          tx = Math.max(oggiX, r.ic ? X(r.ic) + 5 : 0) + 7; tc = 'vz-gp-late';
+          tt = [(rinv ? '⚠ ' + n + ' gg oltre la consegna rinviata · ' + nc + ' dal contratto' : '⚠ ' + n + ' gg oltre la consegna'),
+            '⚠ ' + n + ' gg oltre' + (rinv ? ' · ' + nc + ' dal contratto' : ''), '⚠ ' + n + ' gg oltre', '⚠ ' + n + ' gg'];
+        } else if (r.ev){
+          tx = Math.max(lastX, r.ic ? X(r.ic) : 0) + 9; tc = 'vz-gp-desc';
+          tt = ['evasa' + (r.evd ? ' il ' + itFull(r.evd) : ''), 'evasa'];
+        } else if (r.st.k === 'warn'){
+          tx = Math.max(lastX, r.ic ? X(r.ic) : 0) + 9; tc = 'vz-gp-warn';
+          tt = ['⚠ tra ' + r.st.gg + ' gg · ' + r.p + '%', '⚠ ' + r.st.gg + ' gg'];
+        }
+        if (r.dc) g += '<path d="' + dm(X(r.dc), cy, 5.5) + '" fill="var(--vz-ink)" stroke="var(--vz-surface)" stroke-width="1.5"/>';
+        if (r.de && r.de !== r.dc) g += '<path d="' + dm(X(r.de), cy, 5) + '" fill="var(--vz-surface)" stroke="var(--vz-ink)" stroke-width="1.5"/>';
+      } else {
+        tx = oggiX + 7; tc = 'vz-gp-desc'; tt = ['data di consegna non indicata', 'senza data'];
+      }
+      if (tt){
+        var font = tc === 'vz-gp-late' ? fB : tc === 'vz-gp-warn' ? fW : fS, pick = null;
+        for (var k = 0; k < tt.length && !pick; k++) if (gpTw(tt[k], font) <= avail(tx)) pick = tt[k];
+        if (pick) g += '<text class="' + tc + '" x="' + tx.toFixed(1) + '" y="' + (cy + 4) + '"' + (t ? '' : ' font-style="italic"') + '>' + esc(pick) + '</text>';
+      }
+      if (!stretto) g += '<text class="vz-tick" x="' + (W - RW + 36) + '" y="' + (cy + 4) + '" text-anchor="end">' + r.p + '%</text>';
+      if (r.or) g += '<text x="' + (W - 8) + '" y="' + (cy + 4) + '" text-anchor="end"><tspan class="vz-gp-late">⚠' + (stretto ? '' : ' ') + r.or + '</tspan><tspan class="vz-tick">' + (stretto ? '/' : ' su ') + r.oa + '</tspan></text>';
+      else g += '<text class="vz-tick" x="' + (W - 8) + '" y="' + (cy + 4) + '" text-anchor="end">' + (r.oa ? (stretto ? '0/' : '0 su ') + r.oa : '—') + '</text>';
+      return g + '</g>';
+    }
+    s += '<g role="list" aria-label="Commesse in ordine di consegna">';
+    G.conD.forEach(function(r, i){ s += riga(r, RY0 + i * RH, i); });
+    if (nS){
+      s += '<text class="vz-tick" x="8" y="' + (sy + 18) + '">senza data di consegna · ' + nS + '</text>';
+      if (molte) s += '<text class="vz-gp-desc" x="8" y="' + (sy + 26 + RH / 2 + 4) + '" font-style="italic">' + nS + ' commesse: le trovi nella tabella dei dati qui sotto</text>';
+      else G.senza.forEach(function(r, i){ s += riga(r, sy + 26 + i * RH, G.conD.length + i); });
+    }
+    s += '</g>';
+    s += '<line x1="' + oggiX.toFixed(1) + '" x2="' + oggiX.toFixed(1) + '" y1="' + (RY0 - 14) + '" y2="' + endY + '" stroke="var(--vz-ink)" stroke-width="1.5" pointer-events="none"/>'
+      + '<text class="vz-dl" x="' + (oggiX - 5).toFixed(1) + '" y="' + (PT - 10) + '" text-anchor="end">oggi ' + OG.slice(8, 10) + '/' + OG.slice(5, 7) + '</text>' + asse;
+    box.innerHTML = '<svg class="vz-gp-svg" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" role="group" aria-label="Gantt di portafoglio: '
+      + esc(G.R.length + ' commesse, ' + G.conD.length + ' con data di consegna') + '">' + s + '</svg>';
+  }
+  /* tastiera: un solo punto di tabulazione per le righe (↑↓) e uno per le colonne dei mesi (←→); Invio = clic */
+  document.addEventListener('keydown', function(e){
+    var el = e.target, lst, i, n, pass;
+    if (!el || !el.closest) return;
+    var riga = el.closest('.vz-gp-row'), col = riga ? null : el.closest('.vz-gp-col'), fase = riga || col ? null : el.closest('.vz-cm-step li');
+    if (!riga && !col && !fase) return;
+    if (riga && (e.key === 'Enter' || e.key === ' ')){ e.preventDefault(); riga.dispatchEvent(new MouseEvent('click', {bubbles: true})); return; }
+    var sel2 = riga ? '.vz-gp-row' : col ? '.vz-gp-col' : 'li';
+    lst = Array.prototype.slice.call((riga ? riga.parentNode : col ? col.ownerSVGElement : fase.parentNode).querySelectorAll(sel2));
+    i = lst.indexOf(riga || col || fase);
+    pass = riga ? {ArrowDown: 1, ArrowUp: -1} : {ArrowRight: 1, ArrowLeft: -1};
+    if (e.key === 'Home') n = 0; else if (e.key === 'End') n = lst.length - 1; else if (pass[e.key] != null) n = i + pass[e.key]; else return;
+    if (n < 0 || n >= lst.length || n === i) return;
+    e.preventDefault();
+    lst[i].setAttribute('tabindex', '-1'); lst[n].setAttribute('tabindex', '0'); lst[n].focus();
+  });
+  var gpRs = null;
+  window.addEventListener('resize', function(){
+    clearTimeout(gpRs);
+    gpRs = setTimeout(function(){ if (view === 'dash'){ if (cmode === 'gantt') gpDisegna(); cmxTop(); } }, 150);
+  });
+  /* i troncamenti misurano il testo: se i caratteri arrivano dopo il primo disegno, si ridisegna */
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function(){
+    var bx = stage.querySelector('[data-gpbox]');
+    if (bx && view === 'dash' && cmode === 'gantt'){ bx.removeAttribute('data-w'); gpDisegna(); }
+  });
 
   /* ---------- ORDINI FORNITORE (dal gestionale) ----------
      S.ordf = {agg:'AAAA-MM-GG', file:'nome del file', voci:[
@@ -2048,6 +2308,7 @@ var VZ = (function(){
     else if (cmode === 'scad') h += scadHtml(nsel ? selected() : list);
     else h += nsel ? cmCards(selected()) : cmTable(list);
     stage.innerHTML = h;
+    cmxDopo();   /* R35: Gantt di portafoglio alla larghezza vera, indice delle schede sotto la barra */
     if (cmode === 'cash') wireCash();
     if (cmode === 'bdg'){ wireBdg(); wirePiano(); }
     if (cmode === 'scad') wireScad();
@@ -2265,10 +2526,9 @@ var VZ = (function(){
         + '<div class="hd">'
         + (c.ev ? '<span class="pill ok">evasa' + (c.evd ? ' il ' + esc(itFull(c.evd)) : '') + '</span>'
            : c.sp ? '<span class="pill warn">sospesa' + (c.spd ? ' dal ' + esc(itFull(c.spd)) : '') + '</span>'
-           : '<span class="pill ' + st.k + '">' + esc(st.txt) + '</span>')
-        + '<span class="pill mute">' + p + '% avanzamento</span>'
+           : '<span class="pill ' + st.k + '">' + esc(cmxConsegnaTxt(st)) + '</span>')
         + '<span class="pill mute">' + esc(faseCorrente(c)) + '</span>'
-        + (pa ? '<span class="pill late">' + pa + ' incass' + (pa === 1 ? 'o' : 'i') + ' da chiarire</span>' : '')
+        + (pa ? '<span class="pill late">⚠ ' + pa + ' incass' + (pa === 1 ? 'o' : 'i') + ' da chiarire</span>' : '')
         + (c.mail ? '<span class="pill mute">' + c.mail + ' thread email</span>' : '')
         + '<span class="evbtns">'
         + '<button class="evbtn" data-sp="' + esc(c.code) + '" data-on="' + (c.sp ? '0' : '1') + '">'
@@ -2276,6 +2536,7 @@ var VZ = (function(){
         + '<button class="evbtn" data-ev="' + esc(c.code) + '" data-on="' + (c.ev ? '0' : '1') + '">'
         + (c.ev ? 'Riporta tra le in corso' : 'Segna come evasa') + '</button></span>'
         + '</div></header>';
+      h += cmxHtml(c);   /* R35: indice interno, cruscotto e fasi in orizzontale (o consuntivo se evasa) */
 
       h += '<div class="cmb"><h4>Anagrafica e date</h4><div class="facts">'
         + cmFact('Nome per il cliente', c.ncli) + cmFact('Nome interno', c.nint || c.desc) + cmFact('Capo commessa', c.capo) + cmFact('Commerciale', c.comm)
@@ -2286,19 +2547,6 @@ var VZ = (function(){
         + cmDate('Installazione effettiva', c.ie, c.ic)
         + cmFact('Ultima email', c.last ? itFull(c.last) + ' (' + days(c.last, new Date()) + ' gg fa)' : null)
         + '</div></div>';
-
-      h += '<div class="cmb"><h4>Avanzamento gestionale</h4><div class="steps">';
-      FASI.forEach(function(f){
-        var s = (c.fasi && c.fasi[f[0]]) || {s:'sconosciuto'};
-        var k = s.s === 'completato' ? 'f' : s.s === 'in_corso' ? 'h' : 'n';
-        h += '<div class="step ' + k + '"><div class="mk"><i></i></div><div class="lb">'
-          + '<b>' + esc(f[1]) + '</b>'
-          + (s.d ? '<time>' + esc(itFull(s.d)) + '</time>' : '')
-          + (s.n ? '<small>' + esc(s.n) + '</small>'
-                 : (s.s === 'sconosciuto' ? '<small>nessun riscontro nelle email</small>' : ''))
-          + '</div></div>';
-      });
-      h += '</div></div>';
 
       var O = ore(c);
       h += '<div class="cmb"><h4>Ore consuntivate</h4>';
@@ -2476,8 +2724,262 @@ var VZ = (function(){
     return h + '</div>';
   }
 
+  /* ---------- R35 (26/09/2026): SCHEDA COMMESSA, CRUSCOTTO IN TESTA ----------
+     Sotto l'intestazione della scheda: indice interno (incollato sotto la barra dove la barra lo è),
+     tre tessere (consegna, incassi sul valore a contratto, costi impegnati contro budget) e le 9 fasi
+     in orizzontale; per un'evasa il consuntivo al posto delle fasi. Le sezioni sotto restano quelle di
+     prima; le fasi una per una, con le note delle email, restano a richiesta sotto lo stepper.
+     Solo lettura: usa prog, stato, pagStato, bdgModello e ore, e non scrive niente nello stato. */
+  function cmxConsegnaTxt(st){
+    if (st.gg == null) return 'consegna da fissare';
+    if (st.gg < 0) return '⚠ consegna scaduta da ' + Math.abs(st.gg) + ' gg';
+    if (st.k === 'warn') return '⚠ consegna tra ' + String(st.txt).replace(/^tra /, '');
+    return '✓ consegna tra ' + st.gg + ' gg';
+  }
+  var CMX_SEZ = {ana: /^Anagrafica/i, eco: /^Economics/i, pag: /^Pagamenti/i, cf: /^Cash flow/i, cri: /^Criticit/i, task: /^Task/i};
+  function cmxIdx(c){
+    var pa = pagAlert(c), cr = (c.crit || []).length;
+    var tg = (c.tg || []).some(function(code){ return (S.groups || []).some(function(g){ return g.code === code; }); });
+    var v = [['cru', 'Cruscotto'], ['ana', 'Anagrafica'], ['eco', 'Economics'], ['pag', 'Pagamenti', pa]];
+    if (!c.ev && !cmAltro(c)) v.push(['cf', 'Cash flow']);
+    if (cr) v.push(['cri', 'Criticità', cr]);
+    if (tg) v.push(['task', 'Task']);
+    return '<nav class="vz-cm-idx" aria-label="' + esc('Indice della scheda ' + c.code) + '">' + v.map(function(x, i){
+      return '<button type="button" data-cmx="' + x[0] + '"' + (i ? '' : ' class="on" aria-current="true"') + '>' + x[1]
+        + (x[2] ? '<small aria-label="' + x[2] + (x[0] === 'pag' ? ' da chiarire' : ' aperte') + '">⚠ ' + x[2] + '</small>' : '') + '</button>';
+    }).join('') + '</nav>';
+  }
+  function cmxVai(b){
+    var card = b.closest('.cmc'), k = b.getAttribute('data-cmx'), dest = null;
+    if (!card) return;
+    if (k === 'cru') dest = card.querySelector('.vz-cm');
+    else card.querySelectorAll('.cmb > h4').forEach(function(h4){ if (!dest && CMX_SEZ[k] && CMX_SEZ[k].test(h4.textContent.trim())) dest = h4.parentNode; });
+    if (!dest) return;
+    card.querySelectorAll('.vz-cm-idx button').forEach(function(x){
+      x.classList.toggle('on', x === b);
+      if (x === b) x.setAttribute('aria-current', 'true'); else x.removeAttribute('aria-current');
+    });
+    var nav = card.querySelector('.vz-cm-idx'), bar = document.querySelector('.bar'), off = 8, lento = true;
+    if (cmxIncolla()){
+      if (bar && getComputedStyle(bar).position === 'sticky') off += bar.offsetHeight;
+      if (nav) off += nav.offsetHeight;
+    }
+    try { lento = !window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) {}
+    window.scrollTo({top: Math.max(0, dest.getBoundingClientRect().top + window.pageYOffset - off), behavior: lento ? 'smooth' : 'instant'});
+  }
+  /* position:sticky funziona solo se il body non è un contenitore che scorre: sotto i 1180 px il body ha
+     overflow-x:hidden (rete di sicurezza contro lo scorrimento laterale) e lì l'indice scorre con la scheda */
+  function cmxIncolla(){ var o = getComputedStyle(document.body).overflowX; return o === 'visible' || o === 'clip'; }
+  /* l'indice resta sotto la barra quando la barra è incollata in alto (al telefono non lo è) */
+  function cmxTop(){
+    var bar = document.querySelector('.bar'), top = bar && cmxIncolla() && getComputedStyle(bar).position === 'sticky' ? bar.offsetHeight : 0;
+    stage.querySelectorAll('.vz-cm-idx').forEach(function(n){ n.style.top = top + 'px'; });
+  }
+  function cmxDopo(){ if (cmode === 'gantt') gpDisegna(); else if (cmode === 'schede') cmxTop(); }
+  /* mini linea del tempo: oggi → consegna (rinviata) → installazione, con le etichette su due file se vicine */
+  function cmxLinea(c, OG){
+    var pts = [{d: OG, k: 'oggi', l: 'oggi'}];
+    if (isoOk(c.dc)) pts.push({d: c.dc, k: 'dc', l: 'consegna'});
+    if (isoOk(c.de) && c.de !== c.dc) pts.push({d: c.de, k: 'de', l: isoOk(c.dc) ? 'rinviata' : 'consegna'});
+    if (isoOk(c.ic)) pts.push({d: c.ic, k: 'ic', l: 'install.'});
+    if (pts.length < 2) return '';
+    pts.sort(function(a, b){ return a.d < b.d ? -1 : a.d > b.d ? 1 : (a.k === 'oggi' ? -1 : 1); });
+    var t0 = d0(pts[0].d), span = (d0(pts[pts.length - 1].d) - t0) || 1;
+    function P(d){ return 3 + (d0(d) - t0) / span * 94; }
+    var tgt = isoOk(c.de) ? c.de : c.dc, late = tgt < OG, xa = P(late ? tgt : OG), xb = P(late ? OG : tgt);
+    var s = '<svg class="vz-cm-tl" width="100%" height="46" role="img" aria-label="' + esc(pts.map(function(p){ return p.l + ' ' + itFull(p.d); }).join(', ')) + '">'
+      + '<line x1="3%" x2="97%" y1="12" y2="12" stroke="var(--vz-axis)"/>'
+      + '<line x1="' + xa.toFixed(1) + '%" x2="' + xb.toFixed(1) + '%" y1="12" y2="12" stroke="var(' + (late ? '--late' : '--vz-1') + ')" stroke-width="' + (late ? 3 : 2) + '"/>';
+    var fine = [-99, -99];
+    pts.forEach(function(p, i){
+      var x = P(p.d), w = p.l.length * 2.9, anc = i === 0 && x < 20 ? 'start' : i === pts.length - 1 && x > 80 ? 'end' : 'middle';
+      var a = anc === 'start' ? x - 1 : anc === 'end' ? x - w + 1 : x - w / 2, fila = a > fine[0] + 2 ? 0 : 1;
+      fine[fila] = a + w;
+      s += '<svg x="' + x.toFixed(1) + '%" y="12" overflow="visible">'
+        + (p.k === 'oggi' ? '<circle r="4" fill="var(--vz-ink)" stroke="var(--vz-surface)" stroke-width="2"/>'
+          : p.k === 'dc' ? '<path d="M0,-6L6,0L0,6L-6,0Z" fill="var(--vz-ink)" stroke="var(--vz-surface)" stroke-width="1.5"/>'
+          : p.k === 'de' ? '<path d="M0,-5L5,0L0,5L-5,0Z" fill="var(--vz-surface)" stroke="var(--vz-ink)" stroke-width="1.5"/>'
+          : '<path d="M0,-5L5,4L-5,4Z" fill="var(--vz-ink2)"/>') + '</svg>'
+        + '<text x="' + (anc === 'start' ? x - 1 : anc === 'end' ? x + 1 : x).toFixed(1) + '%" y="' + (fila ? 43 : 31) + '" text-anchor="' + anc + '"'
+        + (p.k === 'dc' || p.k === 'de' ? ' class="k"' : '') + '>' + esc(p.l) + '</text>';
+    });
+    return s + '</svg>';
+  }
+  function cmxTile(lab, corpo){ return '<div class="vz-cm-tile"><span class="vz-cm-lab">' + lab + '</span>' + corpo + '</div>'; }
+  function cmxConsegna(c, OG){
+    var tgt = isoOk(c.de) ? c.de : isoOk(c.dc) ? c.dc : null, rinv = isoOk(c.de) && isoOk(c.dc) && c.de !== c.dc;
+    if (c.ev) return cmxTile('Consegna', '<b class="vz-cm-val">evasa</b><span class="vz-cm-sub">' + (c.evd ? 'il ' + esc(itFull(c.evd)) : 'data non indicata')
+      + (isoOk(c.dc) ? ' · da contratto ' + esc(itFull(c.dc)) : '') + '</span>');
+    if (!tgt) return cmxTile('Consegna da contratto', '<b class="vz-cm-val">da fissare</b><span class="vz-cm-sub">data di consegna non indicata'
+      + (isoOk(c.ic) ? ' · installazione ' + esc(itFull(c.ic)) : '') + '</span>');
+    var gg = days(OG, tgt), st = stato(c), p = prog(c);
+    return cmxTile(rinv ? 'Consegna rinviata' : isoOk(c.dc) ? 'Consegna da contratto' : 'Consegna prevista',
+      '<b class="vz-cm-val">' + (gg >= 0 ? 'tra ' + gg + ' gg' : Math.abs(gg) + ' gg oltre') + '</b>'
+      + '<span class="vz-cm-sub">' + esc(itFull(tgt)) + (rinv ? ' · da contratto ' + esc(itFull(c.dc)) : '') + (isoOk(c.ic) ? ' · installazione ' + esc(itFull(c.ic)) : '') + '</span>'
+      + (gg < 0 ? '<span class="vz-cm-st late">⚠ consegna superata' + (rinv ? ', ' + Math.abs(days(OG, c.dc)) + ' gg dal contratto' : '') + '</span>'
+        : st.k === 'warn' ? '<span class="vz-cm-st warn">⚠ ' + (p < 60 && gg <= 120 ? 'vicina, con le fasi al ' + p + '%' : 'mancano meno di 45 giorni') + '</span>' : '')
+      + '<div class="vz-cm-mini">' + cmxLinea(c, OG) + '</div>');
+  }
+  function cmxIncassi(c, OG){
+    var voci = (c.pag && c.pag.voci) || [], val = (c.eco && c.eco.valore) || 0, I = 0, P = 0, F = 0, nP = 0, senzaImp = 0, segs = [];
+    voci.forEach(function(v, i){
+      var imp = Math.max(0, Number(v.imp) || 0), ps = pagStato(v);
+      var k = ps.k === 'ok' ? 'inc' : (ps.k === 'late' || (isoOk(v.att) && v.att < OG)) ? 'pas' : 'fut';
+      if (!imp){ senzaImp++; return; }
+      if (k === 'inc') I += imp; else if (k === 'pas'){ P += imp; nP++; } else F += imp;
+      segs.push({k: k, imp: imp, v: v, i: i, ps: ps});
+    });
+    var T = I + P + F, TOK = {inc: '--vz-in-3', pas: '--vz-in-1', fut: '--vz-in-2'}, LAB = {inc: 'incassata', pas: 'data passata, non registrata', fut: 'da incassare'};
+    if (!T) return cmxTile('Incassi sul valore a contratto', '<b class="vz-cm-val">—</b><span class="vz-cm-sub">'
+      + (voci.length ? voci.length + (voci.length === 1 ? ' rata' : ' rate') + ' nello scadenzario, senza importo' : 'scadenzario non ancora impostato')
+      + (val ? ' · valore a contratto ' + esc(VZ.eurC(val)) : '') + '</span>');
+    var bar = segs.map(function(sg){
+      var v = sg.v, rows = [[VZ.eur(sg.imp), LAB[sg.k], TOK[sg.k], 'r'], [sg.ps.txt, 'stato nello scadenzario', '', '']];
+      if (v.inc) rows.push([itFull(v.inc), 'incassata il', '', '']);
+      if (v.c) rows.push(['', String(v.c).replace(/\s+/g, ' ').slice(0, 90), '', '']);
+      return '<i style="flex:' + (sg.imp / T * 1000).toFixed(1) + ' 1 0;--k:var(' + TOK[sg.k] + ');background:var(--k)"'
+        + VZ.tip('Rata ' + (sg.i + 1) + ' di ' + voci.length + (isoOk(v.att) ? ' · ' + itFull(v.att) : ''), rows) + '></i>';
+    }).join('');
+    return cmxTile('Incassi sul valore a contratto',
+      '<b class="vz-cm-val">' + esc(I ? VZ.eurC(I) : '0 €') + '<small>incassati su ' + esc(VZ.eurC(T)) + '</small></b>'
+      + (P ? '<span class="vz-cm-st warn">⚠ ' + esc(VZ.eurC(P)) + ' con data passata, non registrati' + (nP > 1 ? ' (' + nP + ' rate)' : '') + '</span>'
+        : '<span class="vz-cm-sub">nessuna rata con data passata da chiarire</span>')
+      + '<div class="vz-cm-mini"><div class="vz-cm-inc" tabindex="0" role="img" aria-label="' + esc('Incassato ' + VZ.eur(I) + ', data passata non registrato ' + VZ.eur(P) + ', da incassare ' + VZ.eur(F)) + '">' + bar + '</div>'
+      + '<div class="vz-cm-sc"><span>0</span><span>' + esc(VZ.eurC(T)) + '</span></div>'
+      + '<div class="vz-leg"><span><i class="rc" style="--k:var(--vz-in-3);background:var(--k)"></i>incassato <b>' + esc(I ? VZ.eurC(I) : '0 €') + '</b></span>'
+      + '<span><i class="rc" style="--k:var(--vz-in-1);background:var(--k)"></i>data passata, non registrato <b>' + esc(P ? VZ.eurC(P) : '0 €') + '</b></span>'
+      + '<span><i class="rc" style="--k:var(--vz-in-2);background:var(--k)"></i>da incassare <b>' + esc(F ? VZ.eurC(F) : '0 €') + '</b></span></div>'
+      + (senzaImp ? '<p class="vz-cm-nt">' + senzaImp + (senzaImp === 1 ? ' rata senza importo, fuori dalla barra' : ' rate senza importo, fuori dalla barra') + '</p>' : '')
+      + (val && Math.abs(val - T) > Math.max(1000, val * 0.01) ? '<p class="vz-cm-nt">Le rate sommano ' + esc(VZ.eurC(T)) + ' su ' + esc(VZ.eurC(val)) + ' di valore a contratto.</p>' : '')
+      + '</div>');
+  }
+  function cmxCosti(c, M){
+    var o = ore(c), oreTxt = o.noto && o.tot > 0
+      ? 'Ore: ' + o.tot.toLocaleString('it-IT', {maximumFractionDigits: 1}) + ' h (uff. ' + o.uff.toLocaleString('it-IT') + ' · off. ' + o.off.toLocaleString('it-IT') + ' · est. ' + o.est.toLocaleString('it-IT') + '), nei costi per ' + VZ.eurC(o.eur)
+      : 'Ore: nessuna registrata nel gestionale' + (S.oreG && S.oreG.agg ? ' (ore fino al ' + itFull(S.oreG.agg) + ')' : '');
+    if (!M) return cmxTile('Costi impegnati contro budget', '<b class="vz-cm-val">—</b><span class="vz-cm-sub">costi non disponibili</span><p class="vz-cm-nt">' + esc(oreTxt) + '</p>');
+    var T = M.tot, b = M.budgetTot || 0, imp = M.costoOggi || 0, pct = b > 0 ? imp / b : null, prop = M.proposta;
+    var parts = [['fatture e ore', Math.max(0, (T.fat || 0) + (T.alt || 0)) + (M.ore.cEur || 0), '--vz-out-3'],
+      ['consegnato (DDT)', Math.max(0, (T.con || 0) + (T.ddt || 0)), '--vz-out-2'], ['ordinato', Math.max(0, T.ord || 0), '--vz-out-1']].filter(function(x){ return x[1] >= 0.5; });
+    var h = '<b class="vz-cm-val">' + esc(imp ? VZ.eurC(imp) : '0 €') + '<small>' + (b > 0 ? 'su ' + esc(VZ.eurC(b)) + (pct <= 1 ? ' · ' + Math.round(pct * 100) + '%' : '') : 'impegnati') + '</small></b>';
+    if (b > 0){
+      h += '<span class="vz-cm-sub">' + (prop ? 'budget <b>proposto</b> dai simili, non ancora confermato' : M.conf ? 'budget confermato' : 'budget salvato, da confermare') + '</span>';
+      if (pct > 1) h += '<span class="vz-cm-st late">▲ ' + Math.round(pct * 100) + '% del budget · oltre di ' + esc(VZ.eurC(imp - b)) + '</span>';
+      var cap = imp > 1.5 * b ? 1.5 * b : Math.max(b, imp) * 1.02, rest = cap;
+      var fill = parts.map(function(x){
+        var w = Math.min(x[1], rest) / cap * 100; rest -= Math.min(x[1], rest);
+        return w > 0 ? '<i style="width:calc(' + w.toFixed(2) + '% - 2px);--k:var(' + x[2] + ');background:var(--k)"' + VZ.tip(x[0], [[VZ.eur(x[1]), x[0], x[2], 'r'], [VZ.eur(imp), 'impegnato in tutto', '', '']]) + '></i>' : '';
+      }).join('');
+      h += '<div class="vz-cm-mini"><div class="vz-cm-bul" role="img" aria-label="' + esc('Impegnato ' + VZ.eur(imp) + ' su budget ' + (prop ? 'proposto ' : '') + VZ.eur(b) + ', ' + Math.round(pct * 100) + '%') + '">'
+        + '<div class="trk' + (prop ? ' prop' : '') + '" style="width:' + (b / cap * 100).toFixed(2) + '%"></div><div class="fill">' + fill + '</div>'
+        + '<div class="tac" style="left:calc(' + (b / cap * 100).toFixed(2) + '% - 1px)"' + VZ.tip('Budget' + (prop ? ' proposto' : ''), [[VZ.eur(b), prop ? 'proposto dai simili, da confermare' : M.conf ? 'confermato' : 'salvato, da confermare', '', '']]) + '></div>'
+        + (imp > 1.5 * b ? '<span class="brk" aria-hidden="true">»</span>' : '') + '</div>';
+    } else {
+      h += (c.ev ? '<span class="vz-cm-sub">nessun budget: per un’evasa conta il consuntivo qui sotto</span>'
+        : '<span class="vz-cm-st warn">⚠ budget da inserire in Commesse › Budget</span>') + '<div class="vz-cm-mini">';
+    }
+    h += '<div class="vz-leg">' + parts.map(function(x){ return '<span><i class="rc" style="--k:var(' + x[2] + ');background:var(--k)"></i>' + x[0] + ' <b>' + esc(VZ.eurC(x[1])) + '</b></span>'; }).join('')
+      + (b > 0 ? '<span><i class="da"></i>budget' + (prop ? ' proposto' : '') + ' <b>' + esc(VZ.eurC(b)) + '</b></span>' : '') + '</div>'
+      + '<p class="vz-cm-nt">' + esc(oreTxt) + '</p></div>';
+    return cmxTile('Costi impegnati contro budget', h);
+  }
+  /* le 9 fasi com'erano (verticali, con data e nota dalle email): restano a richiesta sotto lo stepper */
+  function cmxFasiLista(c){
+    var h = '<div class="steps">';
+    FASI.forEach(function(f){
+      var s = (c.fasi && c.fasi[f[0]]) || {s:'sconosciuto'};
+      var k = s.s === 'completato' ? 'f' : s.s === 'in_corso' ? 'h' : 'n';
+      h += '<div class="step ' + k + '"><div class="mk"><i></i></div><div class="lb">'
+        + '<b>' + esc(f[1]) + '</b>'
+        + (s.d ? '<time>' + esc(itFull(s.d)) + '</time>' : '')
+        + (s.n ? '<small>' + esc(s.n) + '</small>'
+               : (s.s === 'sconosciuto' ? '<small>nessun riscontro nelle email</small>' : ''))
+        + '</div></div>';
+    });
+    return h + '</div>';
+  }
+  function cmxFasiDet(c, aperto){
+    var nn = FASI.filter(function(f){ var x = c.fasi && c.fasi[f[0]]; return x && x.n; }).length;
+    return '<details class="vz-cm-det"' + (aperto ? ' open' : '') + '><summary>Le fasi una per una' + (nn ? ' · ' + nn + (nn === 1 ? ' nota' : ' note') + ' dalle email' : '') + '</summary>' + cmxFasiLista(c) + '</details>';
+  }
+  function cmxStepper(c){
+    var CL = {completato: 'ok', in_corso: 'cur', non_iniziato: 'non', sconosciuto: 'unk'};
+    var ST = {completato: 'completata', in_corso: 'in corso', non_iniziato: 'non iniziata', sconosciuto: 'senza riscontro nelle email'};
+    var F = FASI.map(function(f){ var x = (c.fasi && c.fasi[f[0]]) || {}; return {l: f[1], s: CL[x.s] ? x.s : 'sconosciuto', d: isoOk(x.d) ? x.d : null, n: x.n || ''}; });
+    var n = {completato: 0, in_corso: 0, non_iniziato: 0, sconosciuto: 0}, p = prog(c);
+    F.forEach(function(f){ n[f.s]++; });
+    var h = '<div class="cmb vz-cm-fasi"><h4>Avanzamento gestionale · ' + p + '%</h4><ol class="vz-cm-step" aria-label="' + esc('Avanzamento ' + p + '%: ' + n.completato + ' fasi completate, ' + n.in_corso + ' in corso, ' + n.non_iniziato + ' non iniziate, ' + n.sconosciuto + ' senza riscontro nelle email') + '">';
+    F.forEach(function(f, i){
+      var k = CL[f.s], rows = [[ST[f.s], 'stato', '', '']];
+      if (f.d) rows.push([itFull(f.d), f.s === 'in_corso' ? 'in corso dal' : 'data', '', '']);
+      if (f.n) rows.push(['', f.n, '', '']);
+      h += '<li class="' + k + '" tabindex="' + (i ? -1 : 0) + '" aria-label="' + esc(f.l + ': ' + ST[f.s] + (f.d ? ', ' + itFull(f.d) : '')) + '"' + VZ.tip((i + 1) + '/9 · ' + f.l, rows) + '>'
+        + '<span class="mk" aria-hidden="true">' + (k === 'ok' ? '✓' : k === 'unk' ? '?' : '') + '</span>'
+        + '<b>' + esc(f.l) + '</b>' + (f.d && (k === 'ok' || k === 'cur') ? '<time>' + esc(itFull(f.d)) + '</time>' : '') + '</li>';
+    });
+    h += '</ol><div class="vz-cm-sleg"><span><i class="ok"></i>completata</span><span><i class="cur"></i>in corso</span><span><i></i>non iniziata</span><span><i class="unk">?</i>senza riscontro nelle email</span></div>';
+    /* riepilogo per stato: al posto delle etichette quando la scheda è stretta */
+    var G = {completato: [], in_corso: [], non_iniziato: [], sconosciuto: []};
+    F.forEach(function(f){ G[f.s].push(f); });
+    h += '<ul class="vz-cm-snow">';
+    if (G.completato.length) h += '<li><i>✓</i>completate: ' + G.completato.map(function(f){ return esc(f.l) + (f.d ? ' <time>' + esc(itFull(f.d)) + '</time>' : ''); }).join(', ') + '</li>';
+    if (G.in_corso.length) h += '<li><i>◉</i>in corso: ' + G.in_corso.map(function(f){ return '<b>' + esc(f.l) + '</b>' + (f.d ? ' <time>dal ' + esc(itFull(f.d)) + '</time>' : ''); }).join(', ') + '</li>';
+    if (G.non_iniziato.length) h += '<li class="non"><i>○</i>non iniziate: ' + (G.non_iniziato.length > 3 ? (G.non_iniziato.length === 9 ? 'tutte' : 'le altre ' + G.non_iniziato.length)
+      + ' (da ' + esc(G.non_iniziato[0].l) + ' a ' + esc(G.non_iniziato[G.non_iniziato.length - 1].l) + ')' : G.non_iniziato.map(function(f){ return esc(f.l); }).join(', ')) + '</li>';
+    if (G.sconosciuto.length) h += '<li class="unk"><i>?</i>senza riscontro nelle email: ' + G.sconosciuto.map(function(f){ return esc(f.l); }).join(', ') + '</li>';
+    h += '</ul>';
+    if (n.sconosciuto && n.sconosciuto < 9) h += '<p class="vz-cm-nt">Il ' + p + '% conta ' + n.completato + (n.completato === 1 ? ' fase completata' : ' fasi completate') + ' e ' + n.in_corso + ' in corso (a metà). '
+      + (n.sconosciuto === 1 ? 'La fase senza riscontro nelle email vale zero, ma non vuol dire che non sia stata fatta.'
+        : 'Le ' + n.sconosciuto + ' fasi senza riscontro nelle email valgono zero, ma non vuol dire che non siano state fatte.') + '</p>';
+    return h + cmxFasiDet(c, false) + '</div>';
+  }
+  /* evasa: prezzo contro costi, utile e ore al posto dello stepper */
+  function cmxConsuntivo(c, M){
+    var o = ore(c), h = '<div class="cmb vz-cm-cons"><h4>Consuntivo</h4>';
+    var prz = M ? M.prezzo : null, cost = M ? M.costoOggi : 0, est = M ? M.tot.imp : 0, oreE = M ? M.ore.cEur : 0;
+    if (prz == null && !cost) h += '<p class="note-txt">Né prezzo né costi nel gestionale per questa commessa.</p>';
+    else {
+      var mx = Math.max(prz || 0, cost) * 1.04 || 1, daConf = M.prezzoDaConfermare || M.prezzoDubbio;
+      var fonte = M.prezzoFonte ? (/^fatture/.test(M.prezzoFonte) ? 'dalle ' : /^ordine/.test(M.prezzoFonte) ? 'dall’' : 'dal ') + M.prezzoFonte : '';
+      h += '<div class="vz-cm-cgrid">'
+        + '<span class="k">Prezzo</span><div class="b">' + (prz ? '<i class="prz' + (daConf ? ' da' : '') + '" style="width:' + (prz / mx * 100).toFixed(1) + '%"'
+          + VZ.tip('Prezzo di vendita', [[VZ.eur(prz), fonte ? 'preso ' + fonte : 'prezzo', daConf ? '--vz-in-1' : '--vz-in-3', 'r']].concat(daConf ? [['⚠', 'da confermare', '', '']] : [])) + '></i>' : '') + '</div>'
+        + '<span class="v">' + (prz ? esc(VZ.eurC(prz)) : '—') + '</span>'
+        + '<span class="k">Costi</span><div class="b"' + VZ.tip('Costi a consuntivo', [[VZ.eur(est), 'costi esterni (fatture, consegne, ordini)', '--vz-out-3', 'r'], [VZ.eur(oreE), 'ore alle tariffe di quest’anno', '--vz-out-2', 'r'], [VZ.eur(cost), 'totale', '', '']]) + '>'
+        + (est > 0 ? '<i style="width:calc(' + (est / mx * 100).toFixed(1) + '% - 2px);--k:var(--vz-out-3);background:var(--k)"></i>' : '')
+        + (oreE > 0 ? '<i style="width:' + (oreE / mx * 100).toFixed(1) + '%;--k:var(--vz-out-2);background:var(--k)"></i>' : '') + '</div>'
+        + '<span class="v">' + esc(VZ.eurC(cost)) + '</span>'
+        + '<span></span><div class="lb"><span style="width:' + (Math.max(est, 0) / mx * 100).toFixed(1) + '%">esterni ' + esc(VZ.eurC(est)) + '</span><span>ore ' + esc(VZ.eurC(oreE)) + '</span></div><span></span></div>';
+      if (M.utile != null){
+        var pc = Math.round(M.marg * 100);
+        h += '<p class="vz-cm-ut"><b class="' + (M.utile < 0 ? 'late' : 'ok') + '">' + (M.utile < 0 ? '▼ ' : '▲ ') + esc(VZ.eurC(M.utile)) + '</b> utile · <b class="' + (M.utile < 0 ? 'late' : 'ok') + ' pc">' + (pc < 0 ? '−' : '') + Math.abs(pc) + '%</b>'
+          + (M.prezzoDaConfermare ? ' <span class="vz-cm-st warn">⚠ prezzo da confermare</span>' : '') + '</p>'
+          + (M.prezzoFonte && M.prezzoFonte !== 'contratto' ? '<p class="vz-cm-nt">Il prezzo viene ' + esc(fonte) + (M.prezzoDaConfermare ? ': finché non è confermato il ' + (pc < 0 ? '−' : '') + Math.abs(pc) + '% è provvisorio.' : '.') + '</p>' : '');
+      } else if (M.prezzoDubbio) h += '<p class="vz-cm-st warn">⚠ Utile non calcolato: il prezzo nel gestionale (' + esc(VZ.eurC(prz)) + ') è meno della metà dei costi. Scrivilo in Commesse › Budget.</p>';
+      else h += '<p class="vz-cm-nt">Prezzo non noto: senza prezzo l’utile non si calcola.</p>';
+    }
+    if (o.noto && o.tot > 0){
+      var om = Math.max(o.est, o.off, o.uff) || 1;
+      h += '<h4 style="margin-top:14px">Ore · ' + esc(o.tot.toLocaleString('it-IT', {maximumFractionDigits: 0})) + ' h</h4><div class="vz-cm-ore">'
+        + [['Ditte esterne', o.est], ['Officina', o.off], ['Ufficio e tecnico', o.uff]].map(function(x){
+            return '<span class="k">' + x[0] + '</span><span class="t"><i style="width:' + Math.max(x[1] ? 0.6 : 0, x[1] / om * 100).toFixed(1) + '%"></i></span><span class="v">' + esc(Math.round(x[1]).toLocaleString('it-IT')) + ' h</span>';
+          }).join('') + '</div>';
+    } else h += '<p class="vz-cm-nt">Ore: nessuna registrata nel gestionale.</p>';
+    if (FASI.some(function(f){ var x = c.fasi && c.fasi[f[0]]; return x && (x.n || (x.s && x.s !== 'sconosciuto')); })) h += cmxFasiDet(c, false);
+    return h + '</div>';
+  }
+  function cmxHtml(c){
+    var OG = isoDi(today()), M = null;
+    try { M = bdgModello(c); } catch (e) { M = null; }
+    return cmxIdx(c) + '<div class="vz-cm"><div class="cmb vz-cm-cru"><h4>Cruscotto</h4><div class="vz-cm-tiles">'
+      + cmxConsegna(c, OG) + cmxIncassi(c, OG) + cmxCosti(c, M) + '</div></div>'
+      + (c.ev ? cmxConsuntivo(c, M) : cmxStepper(c)) + '</div>';
+  }
+
   function dashClick(e){
     if (e.target.classList.contains('evbox') || e.target.classList.contains('spbox')) return true;
+    var cx = e.target.closest('[data-cmx]');
+    if (cx){ cmxVai(cx); return true; }
     var eb = e.target.closest('.evbtn');
     if (eb){
       if (eb.hasAttribute('data-sp')) toggleSp(eb.getAttribute('data-sp'), eb.getAttribute('data-on') === '1');
