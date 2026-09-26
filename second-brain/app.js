@@ -388,7 +388,7 @@ var VZ = (function(){
     + '<dt>Delegare</dt><dd>su ogni task, il menu <em>Delega\u2026</em>: alla sincronizzazione successiva parte l\'email a nome tuo; quando rispondono <em>FATTO</em>, il task si chiude da solo.</dd>'
     + '<dt>Priorit\u00e0</dt><dd>clicca il badge (critica / alta / priorit\u00e0) per cambiarla: i critici salgono in cima.</dd>'
     + '<dt>Commesse</dt><dd>clicca una o pi\u00f9 commesse per confrontarle; spunte <em>Sosp.</em> ed <em>Evasa</em> per parcheggiarle o archiviarle, mai cancellate.</dd>'
-    + '<dt>Denaro</dt><dd>margini con ore a 55/56 \u20ac/h e alert sotto il 15%; tariffe modificabili l\u00ec.</dd>'
+    + '<dt>Denaro</dt><dd>margini con gli stessi costi di Commesse \u203a Budget (documenti e ordini del gestionale, ore a 55/56 \u20ac/h) e alert sotto il 15%; tariffe modificabili l\u00ec.</dd>'
     + '<dt>Note</dt><dd>ogni riga ha \u201cscrivi una nota per Claude\u201d: le leggo a ogni sincronizzazione (alle 8 e alle 13, riepilogo il venerd\u00ec alle 13). Fra un giro e l\'altro decidi tu: il tasto <em>Aggiorna</em> in Oggi.</dd>'
     + '<dt>Ricerca</dt><dd>premi <em>/</em> ovunque e cerchi in tutto: task, commesse, viaggi, incassi, fornitori.</dd>'
     + '</dl><button class="btn" id="hclose">Ho capito</button></div></div>'
@@ -2536,23 +2536,45 @@ var VZ = (function(){
     return {uff:uff, off:off, est:est, tot:uff+off+est, noto:noto,
             eur: uff * cfg().tUff + off * cfg().tOff + (o.estEur || 0) + (o.estSU || 0) * cfg().tUff + (o.estSO || 0) * cfg().tOff};
   }
-  function margine(c){
-    var val = (c.eco && c.eco.valore) || null;
+  /* R35 (26/09/2026): un solo margine. I costi sono gli stessi di Commesse › Budget (bdgModello → costoOggi):
+     documenti del gestionale (fatture, contabilizzato, DDT, altro), ordini aperti e ore alle tariffe, comprese
+     le ore esterne senza valorizzazione (estSU/estSO). c.costi (preventivi o ordini scritti nella scheda) vale
+     SOLO se il gestionale non ha niente della commessa: altrimenti gli stessi ordini conterebbero due volte.
+     Ogni commessa si calcola una volta per giro di disegno (MARG_MEMO si svuota al giro dopo); M facoltativo
+     è il modello di Budget già calcolato. */
+  var MARG_MEMO = null;
+  function margine(c, M){
+    if (!MARG_MEMO){ MARG_MEMO = {}; setTimeout(function(){ MARG_MEMO = null; }, 0); }
+    if (!M && MARG_MEMO[c.code]) return MARG_MEMO[c.code];
+    if (!M){ try { M = bdgModello(c); } catch (e) { M = null; } }
+    var val = bdgNum(c.eco && c.eco.valore);
     var k = c.costi || {};
     var o = ore(c);
-    var imp = (k.imp || 0) + o.eur;
+    var gest = !!(M && consCm(c.code)), man = !gest && k.imp != null;
+    var sost = gest ? M.tot.sost : 0, ord = gest ? M.tot.ord : (man ? Number(k.imp) || 0 : 0);
+    var oreEur = M ? M.ore.cEur : o.eur;
+    var imp = gest ? M.costoOggi : ord + oreEur;
     /* R5 (08/09/2026): "noto" vuol dire che so quanto vale E quanto costa. Prima bastava
        il valore di contratto: una commessa senza costi caricati usciva con margine 100%
        e la pillola "in linea". Adesso, se i costi non ci sono, non calcolo il margine. */
-    var costiNoti = (k.imp != null) || o.noto;
-    var parziale = costiNoti && !(k.imp != null && o.noto);
-    if (!val || !costiNoti)
-      return {val:val || null, imp:imp, res:null, pct:null, pctEs:null,
-              noto:false, costiNoti:costiNoti, parziale:parziale, stima:!!k.stima};
-    var res = val - imp, pctEs = res * 100 / val;
-    /* R7: pctEs e' il valore esatto e serve al confronto con la soglia; pct e' solo da mostrare. */
-    return {val:val, imp:imp, res:res, pct:Math.round(pctEs), pctEs:pctEs,
-            noto:true, costiNoti:costiNoti, parziale:parziale, stima:!!k.stima};
+    var costiNoti = gest || man || o.noto;
+    var parziale = costiNoti && !gest;
+    var bdg = (M && M.haBudget && M.budgetTot > 0) ? M.budgetTot : null;
+    var prezzo = M ? M.prezzo : val, base = val || prezzo || null, rif = bdg || val;
+    var out = {val:val || null, imp:imp, res:null, pct:null, pctEs:null, noto:false, costiNoti:costiNoti,
+      parziale:parziale, stima:man && !!k.stima, gest:gest, man:man, sost:sost, ord:ord, oreEur:oreEur,
+      bdg:bdg, conf:!!(M && M.conf), prezzo:prezzo, fonte:M ? M.prezzoFonte : (val ? 'contratto' : null), base:base,
+      pImp:base ? imp * 100 / base : null, over:bdg != null && imp > bdg,
+      /* «costi appena iniziati»: impegnato sotto il 10% del budget (o del valore, se il budget non c'è) */
+      avvio:costiNoti && rif ? imp < 0.1 * rif : false,
+      /* margine a budget prudente: dove l'impegnato supera già il budget conta l'impegnato */
+      utB:(val && bdg != null) ? val - Math.max(bdg, imp) : null, M:M};
+    if (val && costiNoti){
+      out.res = val - imp; out.pctEs = out.res * 100 / val;
+      /* R7: pctEs e' il valore esatto e serve al confronto con la soglia; pct e' solo da mostrare. */
+      out.pct = Math.round(out.pctEs); out.noto = true;
+    }
+    return (MARG_MEMO[c.code] = out);
   }
   function margAlert(c){
     var m = margine(c);
@@ -2564,6 +2586,141 @@ var VZ = (function(){
     if (c.ev) return false;
     var t = c.de || c.dc; if (!t) return false;
     return days(new Date(), t) < 0;
+  }
+
+  /* ================= R35: COSTI IMPEGNATI SUL VALORE A CONTRATTO ================= */
+  /* Denaro › Margini e riepilogo di Commesse › Budget: una barra per commessa su una scala 0-120% del valore,
+     impilata per speso (fatture, contabilizzato, DDT), ore e ordini aperti; tacca del budget (tratteggiata finché
+     non è confermato); linee al margine obiettivo (bcfg().marg) e alla soglia (cfg().soglia). Righe in HTML e non
+     in SVG: seguono da sole la larghezza e nel PDF escono pulite. Lo stato è solo testo con icona (▲ oltre il
+     budget). Righe: [{c, m: margine(c)}]. Ordinamento e «altre sotto il 5%» vivono solo in memoria. */
+  var IMP = {ord: 'pct', piccole: {}, righe: {}, wired: false}, IMP_MAX = 120;
+  function impPct(x){ return (x || 0).toLocaleString('it-IT', {minimumFractionDigits: 1, maximumFractionDigits: 1}) + '%'; }
+  function impX(p){ return (Math.max(0, Math.min(p, IMP_MAX)) * 100 / IMP_MAX).toFixed(3) + '%'; }
+  /* in corso con valore a contratto · senza valore · sospese */
+  function impGruppi(righe){
+    return [righe.filter(function(r){ return !r.c.sp && r.m.val; }), righe.filter(function(r){ return !r.c.sp && !r.m.val; }),
+      righe.filter(function(r){ return !!r.c.sp; })];
+  }
+  function impOrdina(a){
+    return a.slice().sort(IMP.ord === 'sc'
+      ? function(x, y){ var sx = x.m.bdg != null ? x.m.imp - x.m.bdg : -Infinity, sy = y.m.bdg != null ? y.m.imp - y.m.bdg : -Infinity;
+          return (sy - sx) || (y.m.imp - x.m.imp); }
+      : function(x, y){ var px = x.m.pImp == null ? -1 : x.m.pImp, py = y.m.pImp == null ? -1 : y.m.pImp; return (py - px) || (y.m.imp - x.m.imp); });
+  }
+  function impRiga(r, primo){
+    var m = r.m, c = r.c, b = m.base, grigio = !m.val, p = m.pImp, desc = c.desc || c.cliente || '', bar = '', fuori = false;
+    if (b){
+      var parti = grigio ? [[m.imp, '--vz-rest-ink']] : [[m.sost, '--vz-in-3'], [m.oreEur, '--vz-in-2'], [m.ord, '--vz-in-1']], ult = -1, acc = 0;
+      parti.forEach(function(q, j){ if (q[0] > 0) ult = j; });
+      parti.forEach(function(q, j){
+        if (!(q[0] > 0)) return;
+        var a = acc * 100 / b; acc += q[0];
+        if (a >= IMP_MAX) return;
+        var w = (Math.min(acc * 100 / b, IMP_MAX) - a) * 100 / IMP_MAX;
+        bar += '<i class="im-s' + (j === ult ? ' ult' : '') + '" style="left:' + impX(a) + ';width:' + (j < ult ? 'calc(' + w.toFixed(3) + '% - 2px)' : w.toFixed(3) + '%') + ';background:var(' + q[1] + ')"></i>';
+      });
+      if (p > IMP_MAX) fuori = true;
+      if (m.bdg != null){ var bp = m.bdg * 100 / b; if (bp > IMP_MAX) fuori = true; bar += '<i class="im-t' + (m.conf ? ' conf' : '') + '" style="left:' + impX(bp) + '"></i>'; }
+      if (fuori) bar += '<i class="im-chev"></i>';
+    }
+    var bp100 = (m.bdg != null && b) ? Math.round(m.bdg * 100 / b) : null, vb, vs, vcl = '';
+    if (b){
+      vb = impPct(p);
+      if (m.over){ vs = '<span aria-hidden="true">▲</span> +' + esc(VZ.eurC(m.imp - m.bdg)) + '<span class="im-lg"> sul budget</span>'; vcl = 'late'; }
+      else if (m.bdg != null) vs = 'budget ' + bp100 + '%';
+      else { vs = '<span aria-hidden="true">⚠</span> senza budget'; vcl = 'warn'; }
+    } else { vb = esc(VZ.eurC(m.imp)); vs = '<span class="im-lg">impegnati · </span>senza prezzo'; }
+    var tt = [m.val ? [VZ.eur(m.val), 'valore a contratto', '', ''] : m.prezzo != null ? [VZ.eur(m.prezzo), 'ordine cliente nel gestionale (valore da inserire)', '', ''] : ['—', 'nessun prezzo: né contratto né ordine cliente', '', ''],
+      [VZ.eur(m.sost), 'speso: fatture, contabilizzato, DDT', grigio ? '' : 'in-3', 'r'],
+      [VZ.eur(m.oreEur), 'ore', grigio ? '' : 'in-2', 'r'],
+      [VZ.eur(m.ord), m.man ? 'costi scritti nella scheda (il gestionale non ha niente)' : 'ordini aperti', grigio ? '' : 'in-1', 'r'],
+      [VZ.eur(m.imp) + (b ? ' · ' + impPct(p) : ''), 'impegnato', grigio ? 'rest-ink' : '', grigio ? 'r' : ''],
+      [m.bdg != null ? VZ.eur(m.bdg) + (bp100 != null ? ' · ' + bp100 + '%' : '') : '—', m.conf ? 'budget confermato' : 'budget proposto', m.bdg != null ? '--vz-ink' : '', 'l']];
+    if (m.bdg != null) tt.push(m.over ? ['▲ +' + VZ.eur(m.imp - m.bdg), 'oltre il budget', '', ''] : [VZ.eur(m.bdg - m.imp), 'ancora nel budget', '', '']);
+    tt.push(['', (c.sp ? 'commessa sospesa · ' : '') + 'clic: apre la scheda', '', '']);
+    var aria = c.code + ' ' + desc + ': impegnato ' + eurR(m.imp) + (b ? ', ' + impPct(p) + (m.val ? ' del valore a contratto' : ' dell\'ordine cliente') : ', senza prezzo')
+      + (m.bdg != null ? (m.over ? ', oltre il budget di ' + eurR(m.imp - m.bdg) : ', budget ' + (bp100 != null ? bp100 + '%' : eurR(m.bdg))) : '') + '. Invio: apre la scheda';
+    return '<div class="im-row" role="listitem" tabindex="' + (primo ? 0 : -1) + '" data-imcm="' + esc(c.code) + '"' + VZ.tip(c.code + ' · ' + desc, tt) + ' aria-label="' + esc(aria) + '">'
+      + '<span class="im-k"><b>' + esc(c.code) + '</b><small>' + esc(desc) + '</small></span>'
+      + '<span class="im-tr" aria-hidden="true">' + bar + '</span>'
+      + '<span class="im-v"><b>' + vb + '</b><small' + (vcl ? ' class="' + vcl + '"' : '') + '>' + vs + '</small></span></div>';
+  }
+  function impCorpo(ctx){
+    var righe = IMP.righe[ctx] || [], G = impGruppi(righe), mg = Number(bcfg().marg) || 0, sg = Number(cfg().soglia) || 0;
+    var conB = righe.filter(function(r){ return r.m.bdg != null; }), nConf = conB.filter(function(r){ return r.m.conf; }).length;
+    var h = '<div class="im-ctl"><span class="im-lab">Ordina per</span><span class="seg sub" role="group" aria-label="Ordina per">'
+      + [['pct', '% impegnata'], ['sc', 'oltre il budget (€)']].map(function(o){ return '<button type="button" data-imord="' + o[0] + '" aria-pressed="' + (IMP.ord === o[0]) + '">' + o[1] + '</button>'; }).join('')
+      + '</span></div>';
+    var lim = 100 - mg, sog = 100 - sg, gl = [];
+    [lim, sog].forEach(function(v){ if (v > 0 && v < 100 && v !== 50 && gl.indexOf(v) < 0) gl.push(v); });
+    h += '<div class="vz-leg im-leg"><span><i class="rc" style="background:var(--vz-in-3)"></i>speso: fatture, contabilizzato, DDT</span>'
+      + '<span><i class="rc" style="background:var(--vz-in-2)"></i>ore (in €)</span><span><i class="rc" style="background:var(--vz-in-1)"></i>ordini aperti</span>'
+      + '<span><i class="tk"></i>' + (nConf ? 'budget: tratteggiato se solo proposto' : 'budget proposto (nessuno confermato)') + '</span>'
+      + (gl.length ? '<span><i class="gd"></i>' + gl.map(function(v){ return v + '%'; }).join(' e ') + ': '
+        + (lim === sog ? 'margine e soglia ' + mg + '%' : [gl.indexOf(lim) >= 0 ? 'margine ' + mg + '%' : '', gl.indexOf(sog) >= 0 ? 'soglia ' + sg + '%' : ''].filter(Boolean).join(' e ')) + '</span>' : '')
+      + (G[1].length || G[2].some(function(r){ return !r.m.val; }) ? '<span><i class="rc" style="background:var(--vz-rest-ink)"></i>senza valore a contratto: su ordine cliente del gestionale</span>' : '') + '</div>';
+    var tk = [[0, '0', 'im-gax', 'im-z'], [50, '50%', '', 'im-tl']];
+    gl.forEach(function(v){ tk.push([v, v + '%', 'im-gax', v === lim ? '' : 'im-tl']); });
+    tk.push([100, '100%', 'im-gf', 'im-f'], [IMP_MAX, IMP_MAX + '%', '', 'im-tl']);
+    var ov = '', ax = '';
+    tk.forEach(function(t){ ov += '<i class="' + t[2] + '" style="left:' + impX(t[0]) + '"></i>'; ax += '<em class="' + t[3] + '" style="left:' + impX(t[0]) + '">' + t[1] + '</em>'; });
+    h += '<div class="im-plot"><div class="im-ov" aria-hidden="true"><span></span><span>' + ov + '</span><span></span></div>'
+      + '<div class="im-ax" aria-hidden="true"><span class="im-k">sul valore a contratto →</span><span class="im-tr">' + ax + '</span><span></span></div>';
+    var tit = ['Commesse in corso con valore a contratto · ' + G[0].length, 'Senza valore a contratto · ' + G[1].length + ' · % sull’ordine cliente del gestionale', 'Sospese · ' + G[2].length], primo = true;
+    G.forEach(function(g, gi){
+      if (!g.length) return;
+      var A = impOrdina(g), vis = A, fold = [], piccola = function(r){ return !(r.m.pImp >= 5); };
+      if (gi === 0 && IMP.ord === 'pct' && !IMP.piccole[ctx]){ vis = A.filter(function(r){ return !piccola(r); }); fold = A.filter(piccola); }
+      h += '<div class="im-gh">' + esc(tit[gi]) + '</div><div class="im-grp" role="list" aria-label="' + esc(tit[gi]) + '">';
+      vis.forEach(function(r){ h += impRiga(r, primo); primo = false; });
+      h += '</div>';
+      if (fold.length) h += '<button type="button" class="im-more" data-imfold="1" aria-expanded="false"' + VZ.tip('Sotto il 5% impegnato', fold.map(function(r){ return [impPct(r.m.pImp), r.c.code + ' · ' + (r.c.desc || ''), '', '']; }).concat([['', 'clic: mostrale tutte', '', '']])) + '>▸ altre ' + fold.length + (fold.length === 1 ? ' commessa' : ' commesse') + ' sotto il 5% impegnato</button>';
+      else if (gi === 0 && IMP.ord === 'pct' && IMP.piccole[ctx] && A.some(piccola)) h += '<button type="button" class="im-more" data-imfold="0" aria-expanded="true">▾ nascondi quelle sotto il 5%</button>';
+    });
+    h += '</div>';
+    var A0 = G[0], nOver = A0.filter(function(r){ return r.m.over; }).length, bps = A0.filter(function(r){ return r.m.bdg != null; }).map(function(r){ return r.m.bdg * 100 / r.m.val; });
+    h += '<p class="srcline im-note">Impegnato = i «costi a oggi» di Commesse › Budget: fatture, contabilizzato, DDT e altri costi del gestionale + ordini aperti + ore × tariffa ('
+      + esc(cfg().tUff) + ' €/h ufficio, ' + esc(cfg().tOff) + ' €/h officina).'
+      + (A0.length ? ' ' + nOver + (nOver === 1 ? ' commessa' : ' commesse') + ' in corso su ' + A0.length + (nOver === 1 ? ' ha' : ' hanno') + ' già superato il budget' + (nConf ? '' : ' proposto') + '.' : '')
+      + (bps.length ? ' Budget' + (nConf ? '' : ' proposti') + ' tra il ' + Math.round(Math.min.apply(null, bps)) + '% e il ' + Math.round(Math.max.apply(null, bps)) + '% del valore: la tacca va letta con cautela.' : '')
+      + (S.cons && S.cons.agg ? ' Consuntivo del gestionale estratto il ' + esc(itFull(S.cons.agg)) + '.' : ' <b>Consuntivo del gestionale non ancora caricato</b>: contano solo le ore.') + '</p>';
+    return h;
+  }
+  function impegnoHtml(ctx, righe){
+    IMP.righe[ctx] = righe; impWire();
+    var conB = righe.filter(function(r){ return r.m.bdg != null; }), nConf = conB.filter(function(r){ return r.m.conf; }).length;
+    return '<section class="og im-og" data-imctx="' + ctx + '"><h3><i class="dt cy"></i>Costi impegnati sul valore a contratto<em class="oghint">documenti + ordini aperti + ore, commesse non evase · la tacca è il budget'
+      + (conB.length && !nConf ? ', oggi solo proposto su tutte' : nConf < conB.length ? ', tratteggiata finché non è confermato' : '') + ' · clic su una barra: scheda della commessa</em></h3>'
+      + '<div class="im-in">' + impCorpo(ctx) + '</div></section>';
+  }
+  /* ascoltatori delegati, agganciati una volta sola: ordinamento, «altre sotto il 5%», clic e tastiera sulle righe */
+  function impWire(){
+    if (IMP.wired) return; IMP.wired = true;
+    function ridisegna(box, sel){
+      var inn = box.querySelector('.im-in'); if (!inn) return;
+      inn.innerHTML = impCorpo(box.getAttribute('data-imctx'));
+      var f = sel && inn.querySelector(sel); if (f) f.focus();
+    }
+    document.addEventListener('click', function(e){
+      var t = e.target && e.target.closest ? e.target.closest('[data-imord],[data-imfold],[data-imcm]') : null; if (!t) return;
+      var box = t.closest('[data-imctx]'); if (!box) return;
+      if (t.hasAttribute('data-imcm')){
+        cmode = 'schede'; apriRis({cm: t.getAttribute('data-imcm')});
+        var mn = document.querySelector('main'); if (mn) window.scrollTo({top: mn.offsetTop - 60, behavior: 'smooth'});
+        return;
+      }
+      if (t.hasAttribute('data-imord')){ IMP.ord = t.getAttribute('data-imord'); ridisegna(box, '[data-imord="' + IMP.ord + '"]'); return; }
+      IMP.piccole[box.getAttribute('data-imctx')] = t.getAttribute('data-imfold') === '1'; ridisegna(box, '[data-imfold]');
+    });
+    document.addEventListener('keydown', function(e){
+      var r = e.target && e.target.classList && e.target.classList.contains('im-row') ? e.target : null; if (!r) return;
+      if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); r.click(); return; }
+      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+      var box = r.closest('.im-plot'), L = box ? Array.prototype.slice.call(box.querySelectorAll('.im-row')) : [], nx = L[L.indexOf(r) + (e.key === 'ArrowDown' ? 1 : -1)];
+      if (!nx) return;
+      e.preventDefault(); r.setAttribute('tabindex', '-1'); nx.setAttribute('tabindex', '0'); nx.focus();
+    });
   }
 
   /* ================= RACCOLTA EVENTI ================= */
@@ -3394,16 +3551,22 @@ var VZ = (function(){
   }
 
   /* ================= DENARO ================= */
-  var denF = 'quadro';
+  var denF = 'quadro', denTab = false;   /* R35: tabella dei margini aperta o chiusa, solo in memoria */
   function denaro(){
     var cm = (S.commesse || []).filter(function(c){ return !c.ev; });
-    var valTot = 0, impTot = 0, resTot = 0, nVal = 0, nImp = 0, nBoth = 0, valBoth = 0;
+    /* R35: stessi costi di Commesse › Budget (margine() → costoOggi). Base dichiarata: il valore a contratto;
+       Budget somma anche i prezzi presi dal gestionale (ordine cliente) e lascia fuori le sospese. */
+    var valTot = 0, resTot = 0, nVal = 0, nBoth = 0, valBoth = 0, impBoth = 0;
+    var tUB = 0, vUB = 0, nUB = 0, nUBc = 0, tPB = 0, nPBg = 0, nSpV = 0;
     cm.forEach(function(c){
       var m = margine(c);
       if (m.val){ valTot += m.val; nVal++; }
-      if (m.imp){ impTot += m.imp; nImp++; }
-      if (m.val && m.imp){ resTot += m.res; valBoth += m.val; nBoth++; }
+      if (m.noto){ resTot += m.res; valBoth += m.val; impBoth += m.imp; nBoth++; }
+      if (m.utB != null){ tUB += m.utB; vUB += m.val; nUB++; if (m.conf) nUBc++; }
+      if (!c.sp && !cmAltro(c) && m.prezzo != null){ tPB += m.prezzo; if (m.fonte !== 'contratto') nPBg++; }
+      if (c.sp && m.val) nSpV++;
     });
+    var pRes = valBoth ? resTot * 100 / valBoth : null, pUB = vUB ? tUB * 100 / vUB : null;
     var inc = [], att = 0, incassato = 0;
     cm.forEach(function(c){ ((c.pag && c.pag.voci) || []).forEach(function(v){
       inc.push({c:c, v:v});
@@ -3412,15 +3575,21 @@ var VZ = (function(){
     var daFatt = (S.billing || []).filter(function(b){ return !b.d; }).length;
 
     var h = '<div class="cm-kpis">'
-      + '<div class="cm-kpi"><b>' + eur(valTot) + '</b><span>valore a contratto</span>'
-      + '<small>su ' + nVal + ' commesse con importo noto, ' + (cm.length - nVal) + ' da caricare</small></div>'
-      + '<div class="cm-kpi"><b>' + eur(impTot) + '</b><span>costi impegnati</span>'
-      + '<small>per ora solo le ore consuntivate su ' + nImp + ' commesse: i costi dei materiali e degli ordini arriveranno dal gestionale</small></div>'
-      + '<div class="cm-kpi' + (nBoth && (resTot * 100 / valBoth) < cfg().soglia ? ' hot' : '')
-      + '"><b>' + (nBoth ? Math.round(resTot * 100 / valBoth) + '%' : '—') + '</b>'
+      + '<div class="cm-kpi' + (pRes != null && pRes < cfg().soglia ? ' hot' : '') + '"><b>' + (pRes != null ? Math.round(pRes) + '%' : '—') + '</b>'
       + '<span>margine residuo</span><small>'
-      + (nBoth ? eur(resTot) + ' su ' + nBoth + ' commesse complete'
+      + (nBoth ? 'valore ' + eurR(valBoth) + ' − costi impegnati ' + eurR(impBoth) + ' = <b>' + eurR(resTot) + '</b> su ' + nBoth
+          + ' commesse · stessi costi di Commesse › Budget'
          : 'serve valore e costi sulla stessa commessa') + '</small></div>'
+      + '<div class="cm-kpi' + (pUB != null && pUB < cfg().soglia ? ' hot' : '') + '"><b>' + (pUB != null ? Math.round(pUB) + '%' : '—') + '</b>'
+      + '<span>margine a budget</span><small>'
+      + (nUB ? (nUBc ? 'su budget in parte proposti dalle commesse simili (' + nUBc + ' confermati su ' + nUB + ')'
+                     : 'su budget proposti dalle commesse simili, non confermati')
+          + ' · utile ' + eurR(tUB) + ' su ' + nUB + ' commesse; dove l\'impegnato supera già il budget conta l\'impegnato'
+         : 'serve il budget: lo proponi o lo scrivi in Commesse › Budget') + '</small></div>'
+      + '<div class="cm-kpi"><b>' + eurR(valTot) + '</b><span>valore a contratto</span>'
+      + '<small>' + nVal + ' commesse, ' + (cm.length - nVal) + ' senza valore: è la base dei margini. Commesse › Budget somma '
+      + eurR(tPB) + ' perché include i prezzi presi dal gestionale' + (nPBg ? ' (ordine cliente di ' + nPBg + (nPBg === 1 ? ' commessa' : ' commesse') + ')' : '')
+      + (nSpV ? ' e non le sospese' : '') + '</small></div>'
       + '<div class="cm-kpi"><b>' + eur(incassato) + '</b><span>incassato</span>'
       + '<small>' + eur(att) + ' ancora attesi</small></div>'
       + '<div class="cm-kpi' + (daFatt ? ' hot' : '') + '"><b>' + daFatt + '</b><span>da fatturare</span>'
@@ -3435,31 +3604,47 @@ var VZ = (function(){
       + cfg().tOff + ' €/h officina</span></div>';
 
     if (denF === 'quadro'){
-      h += '<div class="tw"><table class="cm"><thead><tr><th>Commessa</th><th>Cliente</th>'
-        + '<th>Valore</th><th>Costi impegnati</th><th>Ore</th><th>Margine residuo</th><th>%</th>'
-        + '<th>Stato</th></tr></thead><tbody>';
-      cm.slice().sort(function(a,b){
-        var ma = margine(a), mb = margine(b);
-        return (ma.pct == null ? 999 : ma.pct) - (mb.pct == null ? 999 : mb.pct);
-      }).forEach(function(c){
-        var m = margine(c), o = ore(c);
-        var bad = margAlert(c), rit = ritardoAlert(c);
-        h += '<tr data-cm="' + esc(c.code) + '"><td class="code">' + esc(c.code) + '</td>'
-          + '<td class="cli">' + esc(c.cliente) + '</td>'
-          + '<td class="num">' + (m.val ? esc(eur(m.val)) : '—') + '</td>'
-          + '<td class="num">' + (m.imp ? esc(eur(m.imp)) + (m.stima ? ' *' : '') : '—') + '</td>'
-          + '<td class="num">' + (o.noto ? o.tot + ' h' : '—') + '</td>'
-          + '<td class="num">' + (m.res != null ? esc(eur(m.res)) : '—') + '</td>'
-          + '<td class="num">' + (m.pct != null ? m.pct + '%' : '—') + '</td>'
-          + '<td>' + (bad ? '<span class="pill late">margine sotto ' + cfg().soglia + '%</span>' : '')
-          + (rit ? '<span class="pill late">consegna superata</span>' : '')
-          + (!bad && !rit && m.noto ? '<span class="pill ok">in linea</span>' : '')
-          + (m.noto && m.parziale ? '<span class="pill mute">costi parziali</span>' : '')
-          + (!m.noto ? '<span class="pill mute">dati mancanti</span>' : '') + '</td></tr>';
+      /* R35: sopra il grafico «Costi impegnati sul valore a contratto»; la tabella resta sotto, chiusa in un
+         <details> (si apre da sola se l'avevi aperta), divisa negli stessi tre gruppi del grafico */
+      var rImp = cm.map(function(c){ return {c: c, m: margine(c)}; }), GI = impGruppi(rImp);
+      var nRit = cm.filter(ritardoAlert).length, nBad = cm.filter(margAlert).length, nOver = rImp.filter(function(r){ return r.m.over; }).length;
+      h += impegnoHtml('den', rImp);
+      h += '<details class="im-tab" id="den-tab"' + (denTab ? ' open' : '') + '><summary>Tabella per commessa<small>valore, costi impegnati, ore, margine residuo e stato · '
+        + cm.length + ' commesse' + (nOver ? ' · <b>' + nOver + ' oltre il budget</b>' : '') + (nBad ? ' · <b>' + nBad + ' sotto il ' + cfg().soglia + '%</b>' : '')
+        + (nRit ? ' · <b>' + nRit + ' con consegna superata</b>' : '') + '</small></summary>'
+        + '<div class="tw"><table class="cm"><thead><tr><th>Commessa</th><th>Cliente</th>'
+        + '<th>Valore</th><th>Costi impegnati</th><th>Ore</th><th>Margine residuo</th><th>%</th><th>Budget</th>'
+        + '<th>Stato</th></tr></thead>';
+      [['Commesse in corso con valore a contratto', GI[0]], ['Senza valore a contratto: solo i costi impegnati', GI[1]], ['Sospese', GI[2]]].forEach(function(g){
+        if (!g[1].length) return;
+        h += '<tbody><tr class="im-grp"><td colspan="9">' + esc(g[0]) + ' · ' + g[1].length + '</td></tr>';
+        g[1].slice().sort(function(a, b){
+          return (a.m.pct == null ? 999 : a.m.pct) - (b.m.pct == null ? 999 : b.m.pct) || b.m.imp - a.m.imp;
+        }).forEach(function(r){
+          var c = r.c, m = r.m, o = ore(c);
+          var bad = margAlert(c), rit = ritardoAlert(c);
+          h += '<tr data-cm="' + esc(c.code) + '"><td class="code">' + esc(c.code) + '</td>'
+            + '<td class="cli">' + esc(c.cliente) + '</td>'
+            + '<td class="num">' + (m.val ? esc(eurR(m.val)) : '—') + '</td>'
+            + '<td class="num">' + (m.costiNoti ? esc(eurR(m.imp)) + (m.man ? ' *' : '') : '—') + '</td>'
+            + '<td class="num">' + (o.noto ? o.tot + ' h' : '—') + '</td>'
+            + '<td class="num">' + (m.res != null ? esc(eurR(m.res)) : '—') + '</td>'
+            + '<td class="num">' + (m.pct != null ? m.pct + '%' : '—') + '</td>'
+            + '<td class="num">' + (m.bdg != null ? esc(eurR(m.bdg)) + '<small class="im-bsub">' + (m.conf ? 'confermato' : 'proposto') + (m.base ? ' · ' + Math.round(m.bdg * 100 / m.base) + '%' : '') + '</small>' : '—') + '</td>'
+            + '<td>' + (bad ? '<span class="pill late">⚠ margine sotto ' + cfg().soglia + '%</span>' : '')
+            + (m.over ? '<span class="pill late">▲ oltre il budget</span>' : '')
+            + (rit ? '<span class="pill late">⚠ consegna superata</span>' : '')
+            + (m.noto && !bad && !m.over ? (m.avvio ? '<span class="pill mute">costi appena iniziati</span>' : !rit ? '<span class="pill ok">✓ in linea</span>' : '') : '')
+            + (m.noto && m.parziale ? '<span class="pill mute">costi parziali</span>' : '')
+            + (m.val && !m.noto ? '<span class="pill mute">dati mancanti</span>' : '') + '</td></tr>';
+        });
+        h += '</tbody>';
       });
-      h += '</tbody></table></div>'
-        + '<p class="srcline" style="margin-top:10px">* costo da preventivo, non da ordine confermato. '
-        + 'Le ore compaiono appena carichi il file ore; i valori a contratto appena carichi i contratti.</p>';
+      h += '</table></div>'
+        + '<p class="srcline" style="margin-top:10px">Costi impegnati = i «costi a oggi» di Commesse › Budget: fatture, contabilizzato, DDT e ordini aperti del gestionale'
+        + (S.cons && S.cons.agg ? ' (estrazione del ' + esc(itFull(S.cons.agg)) + ')' : '') + ' più le ore alle tariffe qui sopra. '
+        + 'Margine residuo = valore a contratto − costi impegnati. «Costi appena iniziati»: impegnato sotto il 10% del budget. '
+        + '* costi scritti nella scheda (preventivi o ordini), usati solo dove il gestionale non ha niente.</p></details>';
     }
 
     if (denF === 'incassi'){
@@ -3560,6 +3745,12 @@ var VZ = (function(){
     document.querySelectorAll('#denseg button').forEach(function(b){
       b.addEventListener('click', function(){ denF = b.getAttribute('data-den'); denaro(); });
     });
+    var dtab = document.getElementById('den-tab');
+    if (dtab){
+      dtab.addEventListener('toggle', function(){ denTab = dtab.open; });
+      /* intestazioni e righe di gruppo: il clic non deve arrivare al gestore delle tabelle di Commesse */
+      dtab.addEventListener('click', function(e){ if (e.target.closest('thead, tr.im-grp')) e.stopPropagation(); });
+    }
     var ts = document.getElementById('t-save');
     if (ts) ts.addEventListener('click', function(){
       var g = function(i){ return parseFloat(document.getElementById(i).value) || 0; };
@@ -5570,6 +5761,9 @@ var VZ = (function(){
       + (tuttoChiuso ? '' : '<div class="cm-kpi"><b>' + eurR(tI) + '</b><span>costi a oggi</span><small>esterni impegnati + ore</small></div>')
       + '<div class="cm-kpi' + (tU < 0 ? ' hot' : '') + '"><b>' + (nU ? eurR(tU) : '—') + '</b><span>' + tipoU + '</span><small>' + (nU ? nU + ' commesse con prezzo e ' + (tuttoChiuso ? 'costi' : 'budget') + (tPU ? ' · margine ' + Math.round(tU / tPU * 100) + '% sul loro prezzo' : '') + (nUdc ? ' · di cui ' + nUdc + ' con prezzo da confermare (' + eurR(tUdc) + ')' : '') : 'serve prezzo e budget') + '</small></div>'
       + (nAp ? '<div class="cm-kpi' + (nDc ? ' hot' : '') + '"><b>' + nDc + '</b><span>nodi da confermare</span><small>commesse in corso senza nodi confermati, su ' + nAp + '</small></div>' : '') + '</div>';
+    /* R35: sopra la tabella, quanto è già impegnato di ogni commessa non evasa (stessi modelli, niente ricalcoli) */
+    var rImp = righe.filter(function(M){ return !M.chiusa; }).map(function(M){ return {c: M.c, m: margine(M.c, M)}; });
+    if (rImp.length) h += impegnoHtml('bdg', rImp);
     h += '<section class="og"><h3 class="cfh"><i class="dt cy"></i>Tutte le commesse in vista<em class="oghint">' + righe.length + ' commesse · seleziona una commessa per i nodi</em>'
       + '<span class="cfbtn"><button class="chip" data-bdgcopy="*">Copia per Excel</button><button class="chip" data-bdgcsv="*">Scarica .csv</button>' + (nCh ? '' : '<button class="chip" data-bdgxls="*">Excel su Drive</button>') + '</span></h3>'
       + '<div class="otab cf bdgt"><table><thead><tr><th>Commessa</th><th>Nodi</th><th class="num">Prezzo di vendita</th>' + (colBdg ? '<th class="num">' + (tuttoChiuso ? 'Budget (memoria)' : 'Budget totale') + '</th>' : '') + '<th class="num">' + (tuttoChiuso ? 'Costi consuntivi' : 'Costi a oggi') + '</th>' + (tuttoChiuso ? '<th class="num" title="' + BDG_TIT_IDX + '">Costi a prezzi ' + Yr + '</th><th class="num" title="' + BDG_TIT_IDX + '">Costi a prezzi ' + (Yr + 1) + '</th>' : '') + (colBdg ? '<th class="num">Scost. esterni</th>' : '') + '<th class="num">Utile</th><th class="num">Margine</th></tr></thead><tbody>';
