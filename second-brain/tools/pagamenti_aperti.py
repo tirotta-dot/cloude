@@ -88,7 +88,8 @@ def elenco(S, oggi):
                         'desc': re.sub(r'\s+', ' ', str(v.get('c') or '')).strip()[:180], 'imp': round(imp, 2) if imp else None, 'att': att,
                         'sit': ' · '.join(sit), 'ultima': ultima_txt(pa), 'ord': (0, att or '9999')})
     for b in S.get('billing') or []:
-        if b.get('d') or b.get('st') not in BILL_ST:
+        # 'paga' = l'amministrazione ha detto «pagato»: la voce resta aperta finché la chiude Danilo, ma non si richiede
+        if b.get('d') or b.get('paga') or b.get('st') not in BILL_ST:
             continue
         att = b.get('att') if iso(b.get('att')) else ''
         cm = ''
@@ -273,7 +274,7 @@ def applica(a):
             rep['conflitti'].append({'id': rid, 'a': ultima, 'b': y, 'motivo': 'risposta piu\' vecchia di quella gia\' registrata: non applicata'})
             continue
         # una rata gia' incassata non torna aperta da sola: lo segnalo a Danilo
-        gia = (tipo == 'C' and (o.get('inc') or o.get('st') == 'incassato')) or (tipo == 'F' and o.get('d'))
+        gia = (tipo == 'C' and (o.get('inc') or o.get('st') == 'incassato')) or (tipo == 'F' and (o.get('d') or o.get('paga')))
         if gia and y['r'] != 'pagato':
             rep['conflitti'].append({'id': rid, 'a': {'r': 'pagato', 'inc': o.get('inc') or o.get('dd')}, 'b': y,
                                      'motivo': 'risulta gia\' incassata: non la riapro, decide Danilo'})
@@ -297,20 +298,23 @@ def applica(a):
                 o['st'] = 'scaduto'
             o['n'] = (str(o.get('n') or '') + segno).strip(' ·')
         else:
+            # regola di Danilo del 26/09/2026: le voci e i task li chiude solo lui, anche se vecchi.
+            # «pagato» dall'amministrazione resta una segnalazione in stx: la voce resta aperta.
             if y['r'] == 'pagato':
-                o['d'] = True
-                o['dd'] = y['quando']
+                o['paga'] = y['quando']
             elif y['r'] == 'arrivo':
                 o['att'] = y['d']
             o['stx'] = (str(o.get('stx') or '') + segno).strip(' ·')
         base = 'pgs-' + re.sub(r'[^A-Za-z0-9]+', '', rid)[-14:]
         aperti = [t for t in grp['tasks'] if (t.get('id') == base or str(t.get('id') or '').startswith(base + '-')) and not t.get('d')]
         if y['r'] in ('pagato', 'arrivo'):
-            # il sollecito non serve piu': chiudo il task aperto
+            # il sollecito forse non serve piu', ma il task lo chiude solo Danilo (regola del 26/09/2026):
+            # scrivo la risposta nella storia del task e lo lascio aperto
+            voce = {'d': y['quando'], 'x': 'amministrazione (%s): %s — il sollecito non serve più, chiudilo tu se è così' % (y['chi'], testo)}
             for t in aperti:
-                t['d'] = True
-                t['dd'] = y['quando']
-                t['s'] = (str(t.get('s') or '') + ' · chiuso: %s (%s, %s)' % (testo, y['chi'], gm(y['quando']))).strip(' ·')
+                sh = t.setdefault('sh', [])
+                if not sh or sh[-1].get('x') != voce['x']:
+                    sh.append(voce)
         if y['r'] == 'sollecitare':
             usati = {t.get('id') for t in grp['tasks']}
             tid = base if base not in usati else base + '-' + y['quando'].replace('-', '')[2:]
