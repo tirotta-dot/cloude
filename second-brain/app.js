@@ -1405,31 +1405,318 @@ var VZ = (function(){
     return ordiniAperti().filter(function(v){ return v.dp && d0(v.dp) < t; })
       .sort(function(a, b){ return d0(a.dp) - d0(b.dp); });
   }
-  function ordiniSettimana(){
-    var l = lunediDi(new Date()), f = new Date(l.getTime() + 7 * DAY);
+  function ordiniSettimana(k){
+    /* R35: k = 0 questa settimana, 1 la prossima (lunedì → domenica, per date civili) */
+    var l = lunediDi(new Date()); l = new Date(l.getFullYear(), l.getMonth(), l.getDate() + 7 * (k || 0));
+    var f = new Date(l.getFullYear(), l.getMonth(), l.getDate() + 7);
     return ordiniAperti().filter(function(v){
       if (!v.dp) return false;
       var x = d0(v.dp); return x >= l && x < f;
     }).sort(function(a, b){ return d0(a.dp) - d0(b.dp); });
   }
-  function ordRighe(list, scaduti){
-    var t = today();
-    return list.map(function(v){
-      var gg = v.dp ? days(t, v.dp) : null;
-      return '<tr' + (scaduti ? ' class="bad"' : '') + '>'
-        + '<td class="mono">' + esc(v.n || '—') + (v.src === 'S' ? '<i class="osrc" title="solo nell\'estrazione settimanale del 11/09">solo 11/09</i>' : v.src === 'C' ? '<i class="osrc" title="solo nell\'estrazione completa del 16/09">solo 16/09</i>' : '') + '</td>'
-        + '<td><b>' + esc(v.f || '—') + '</b>' + (v.note ? '<span class="osub">' + esc(v.note) + '</span>' : '') + '</td>'
-        + '<td>' + esc(v.d || '') + '</td>'
-        + '<td class="mono">' + (v.cm ? esc(v.cm) : '—') + (v.nd ? '<span class="osub">' + esc(v.nd) + '</span>' : '') + '</td>'
-        + '<td class="mono">' + (v.dp ? esc(it(v.dp)) : '—') + '</td>'
-        + '<td class="mono' + (scaduti ? ' late' : '') + '">'
-        + (gg === null ? '—' : gg < 0 ? Math.abs(gg) + ' gg di ritardo' : gg === 0 ? 'oggi' : 'tra ' + gg + ' gg')
-        + '</td>'
-        + '<td>' + (v.art ? esc(v.art) + ' · ' : '') + (v.imp ? esc(eur(v.imp)) : 'aperto')
-        + (v.sol ? '<span class="osub">sollecitato il ' + esc(it(v.sol)) + '</span>' : '') + '</td></tr>';
-    }).join('');
+  /* R35 (26/09/2026) ordini-utili + ordini-eta-commessa. La scheda segue la selezione (o la vista In corso /
+     Sospese / Evase), mette prima la settimana e la prossima, poi il grafico degli scaduti per età e per commessa,
+     poi gli Scaduti a pagine da 50 righe raggruppate per commessa. Gli scaduti di commesse evase, sospese, interne
+     (gest.tipo diverso da commessa/variante, es. PRESTON&BARBIERI) o fuori elenco (es. MANCANTE) vanno nel blocco
+     chiuso «da ripulire nel gestionale con Luca». Stato solo in memoria: nessuna chiave nuova nello stato. */
+  var ORD_FL = ['1–15 gg', '16–30 gg', '31–90 gg', 'oltre 90 gg'], ORD_TK = ['--vz-seq-1', '--vz-seq-2', '--vz-seq-3', '--vz-seq-4'];
+  var ordS = '', ordEta = '90', ordMis = 'n', ordCmF = '', ordAltre = false, ordRipOn = false, ordPag = {}, ordB = null, ordSig = '', ordT = null, ordWired = false;
+  var ordNF = new Intl.NumberFormat('it-IT');
+  function ordN(n){ return ordNF.format(n); }
+  function ordRg(n){ return ordN(n) + (n === 1 ? ' riga' : ' righe'); }
+  function ordPc(x){ return (Math.max(0, Math.min(1, x)) * 100).toFixed(2) + '%'; }
+  function ordCat(c){ return !c ? 'fuori' : cmAltro(c) ? 'interna' : c.ev ? 'evasa' : c.sp ? 'sospesa' : ''; }
+  function ordFascia(g){ return g <= 15 ? 0 : g <= 30 ? 1 : g <= 90 ? 2 : 3; }
+  /* una sola finestra per barra per età e tabella: '90' = ultimi 90 giorni (predefinita), 'tutti', oppure una fascia 0-3 */
+  function ordInFin(f){ return ordEta === 'tutti' || (ordEta === '90' ? f < 3 : +ordEta === f); }
+  function ordFinLab(){ return ordEta === '90' ? 'ritardo fino a 90 giorni' : ordEta === 'tutti' ? 'tutti i ritardi' : 'ritardo ' + ORD_FL[+ordEta]; }
+  /* scaduti delle commesse in vista (per l'etichetta della scheda) */
+  function ordScadN(pool){
+    var p = {}, t = today(); pool.forEach(function(c){ p[c.code] = 1; });
+    /* solo un conteggio: niente ordinamento (si calcola a ogni ridisegno di Commesse) */
+    return ordiniAperti().filter(function(v){ return p[v.cm] && v.dp && d0(v.dp) < t; }).length;
   }
-  function ordiniHtml(){
+  function ordBase(pool, nsel){
+    var map = {}, inP = {}, t = today(), B = {sett: [], pross: [], att: [], rip: [], map: map, nsel: nsel};
+    CM().forEach(function(c){ map[c.code] = c; });
+    pool.forEach(function(c){ inP[c.code] = 1; });
+    /* nella vista In corso senza selezione il blocco «da ripulire» raccoglie tutte le commesse non in corso */
+    var tutte = !nsel && cview === 'attive';
+    B.sett = ordiniSettimana(0).filter(function(v){ return inP[v.cm]; });
+    B.pross = ordiniSettimana(1).filter(function(v){ return inP[v.cm]; });
+    ordiniScaduti().forEach(function(v){
+      var k = ordCat(map[v.cm]);
+      if (!inP[v.cm] && !(tutte && k)) return;
+      var g = -days(t, v.dp), r = {v: v, g: g, f: ordFascia(g), k: k, e: +v.imp || 0};
+      (k ? B.rip : B.att).push(r);
+    });
+    return B;
+  }
+  /* ricerca su numero, articolo, fornitore, descrizione e commessa (tutte le parole) + fornitore da Persone */
+  function ordTrova(v){
+    if (ordQ && String(v.f || '').toLowerCase().indexOf(ordQ.toLowerCase()) < 0) return false;
+    if (!ordS) return true;
+    var hay = ((v.n || '') + ' ' + (v.art || '') + ' ' + (v.f || '') + ' ' + (v.d || '') + ' ' + (v.cm || '')).toLowerCase();
+    return ordS.toLowerCase().split(/\s+/).every(function(w){ return !w || hay.indexOf(w) >= 0; });
+  }
+  function ordFiltrato(){
+    var B = ordB, fr = function(r){ return ordTrova(r.v); };
+    return {sett: B.sett.filter(ordTrova), pross: B.pross.filter(ordTrova), att: B.att.filter(fr), rip: B.rip.filter(fr)};
+  }
+  /* il gestionale esporta gli a capo come «_x000D_» */
+  function ordTesto(s){ return String(s || '').replace(/_x000D_/g, ' ').replace(/\s+/g, ' ').trim(); }
+  function ordRiga(v, cmCol, quando){
+    return '<tr><td class="mono o-n">' + esc(v.n || '—')
+      + (v.src === 'S' ? '<i class="osrc" title="solo nell\'estrazione settimanale del 11/09">solo 11/09</i>' : v.src === 'C' ? '<i class="osrc" title="solo nell\'estrazione completa del 16/09">solo 16/09</i>' : '')
+      + (v.nd ? '<span class="osub">' + esc(v.nd) + '</span>' : '') + '</td>'
+      + '<td class="o-f"><b>' + esc(v.f || '—') + '</b>' + (v.note ? '<span class="osub">' + esc(v.note) + '</span>' : '') + '</td>'
+      + '<td class="o-d"><span class="vz-odesc" title="' + esc(ordTesto(v.d)) + '">' + esc(ordTesto(v.d)) + '</span>' + (v.art ? '<span class="osub">' + esc(v.art) + '</span>' : '') + '</td>'
+      + (cmCol ? '<td class="mono o-c">' + (v.cm ? esc(v.cm) : '—') + '</td>' : '')
+      + '<td class="mono o-dp">' + (v.dp ? esc(itFull(v.dp)) : '—') + '</td>'
+      + '<td class="mono o-q">' + quando + (v.sol ? '<span class="osub">sollecitato il ' + esc(itFull(v.sol)) + '</span>' : '') + '</td>'
+      + '<td class="mono vz-oimp o-i">' + (v.imp ? esc(VZ.eur(v.imp)) : '<span class="vz-omiss"><i aria-hidden="true">⚠</i> importo mancante</span>') + '</td></tr>';
+  }
+  function ordAltreBtn(key, resto){
+    return '<button type="button" class="chip vz-omore" data-opag="' + key + '">mostra altre ' + Math.min(50, resto) + ' · ne restano ' + ordN(resto) + '</button>';
+  }
+  /* a) e b): in consegna questa settimana / in arrivo la prossima, per data */
+  function ordSettHtml(list, k){
+    var l = lunediDi(new Date()); l = new Date(l.getFullYear(), l.getMonth(), l.getDate() + 7 * k);
+    var dom = new Date(l.getFullYear(), l.getMonth(), l.getDate() + 6), t = today(), key = k ? 'pross' : 'sett', e = 0, no = 0;
+    list.forEach(function(v){ if (v.imp) e += +v.imp; else no++; });
+    var h = '<h3><i class="dt cy"></i>' + (k ? 'In arrivo la prossima settimana' : 'In consegna questa settimana')
+      + '<em class="oghint">da lunedì ' + itFull(l) + ' a domenica ' + itFull(dom) + ' · ' + ordRg(list.length)
+      + (e ? ' · ' + VZ.eurC(e) : '') + (no ? ' · ' + ordN(no) + ' senza importo' : '') + '</em></h3>';
+    if (!list.length) return h + '<p class="ogempty">' + (ordS || ordQ ? 'Nessun ordine con questa ricerca.' : 'Nessun ordine.') + '</p>';
+    var lim = ordPag[key] || 50;
+    h += '<div class="otab"><table class="vz-otab"><thead><tr><th>Ordine</th><th>Fornitore</th><th>Descrizione</th><th>Commessa</th>'
+      + '<th>Consegna prevista</th><th>Quando</th><th>Importo</th></tr></thead><tbody>';
+    list.slice(0, lim).forEach(function(v){
+      var gg = days(t, v.dp);
+      h += ordRiga(v, true, gg < 0 ? '<span class="vz-olate"><i aria-hidden="true">⚠</i> ' + (-gg) + ' gg di ritardo</span>' : gg === 0 ? 'oggi' : 'tra ' + gg + ' gg');
+    });
+    h += '</tbody></table></div>';
+    return h + (list.length > lim ? ordAltreBtn(key, list.length - lim) : '');
+  }
+  /* righe per €, poi per ritardo; le righe senza importo stanno subito dopo la riga più grossa della loro commessa
+     (non finiscono in fondo). Si prendono le prime N e si raggruppano per commessa. */
+  function ordGruppiHtml(recs, key, conCat){
+    var G = {}, mx = {};
+    recs.forEach(function(r){
+      var c = r.v.cm, g = G[c] || (G[c] = {n: 0, e: 0, no: 0});
+      g.n++; g.e += r.e; if (!r.e) g.no++;
+      if (r.e > (mx[c] || 0)) mx[c] = r.e;
+    });
+    var ord = recs.slice().sort(function(a, b){
+      var ka = a.e || mx[a.v.cm] || 0, kb = b.e || mx[b.v.cm] || 0;
+      return kb - ka || (a.e ? 0 : 1) - (b.e ? 0 : 1) || b.g - a.g || String(a.v.cm).localeCompare(String(b.v.cm));
+    });
+    var lim = ordPag[key] || 50, pag = ord.slice(0, lim), grp = [], pos = {};
+    pag.forEach(function(r){
+      var c = r.v.cm;
+      if (pos[c] == null){ pos[c] = grp.length; grp.push({code: c, k: r.k, r: []}); }
+      grp[pos[c]].r.push(r);
+    });
+    var CAT = {evasa: 'evasa', interna: 'interna', sospesa: 'sospesa', fuori: 'fuori elenco'};
+    var h = '<div class="otab"><table class="vz-otab"><thead><tr><th>Ordine</th><th>Fornitore</th><th>Descrizione</th>'
+      + '<th>Consegna prevista</th><th>Ritardo</th><th>Importo</th></tr></thead><tbody>';
+    grp.forEach(function(x){
+      var c = ordB.map[x.code], g = G[x.code];
+      h += '<tr class="vz-ogrp"><td colspan="6"><b>' + esc(x.code || '—') + '</b>'
+        + (c && c.desc ? '<span>' + esc(c.desc) + '</span>' : '')
+        + (conCat && x.k ? '<i class="pill mute">' + CAT[x.k] + '</i>' : '')
+        + '<em>' + (x.r.length < g.n ? ordN(x.r.length) + ' di ' : '') + ordRg(g.n) + (g.e ? ' · ' + VZ.eurC(g.e) : '')
+        + (g.no ? ' · ' + ordN(g.no) + ' senza importo' : '') + '</em></td></tr>';
+      x.r.forEach(function(r){ h += ordRiga(r.v, false, ordN(r.g) + ' gg'); });
+    });
+    h += '</tbody></table></div>';
+    return h + (ord.length > lim ? ordAltreBtn(key, ord.length - lim) : '');
+  }
+  /* c) grafico «Ordini scaduti»: barra per età (è anche il filtro della tabella), barra grigia da ripulire,
+     barre per commessa impilate per età; misura righe o euro */
+  function ordGrafHtml(F){
+    var att = F.att, rip = F.rip, mis = ordMis, nsel = ordB.nsel;
+    var fa = [0, 1, 2, 3].map(function(){ return {n: 0, e: 0, no: 0}; }), per = {}, totIn = 0, totR = 0, noIn = 0;
+    function mv(n, e){ return mis === 'n' ? n : e; }
+    function fmt(x){ return mis === 'n' ? ordRg(x) : VZ.eurC(x); }
+    att.forEach(function(r){
+      var q = fa[r.f], p = per[r.v.cm] || (per[r.v.cm] = {code: r.v.cm, n: [0, 0, 0, 0], e: [0, 0, 0, 0], no: 0});
+      q.n++; q.e += r.e; p.n[r.f]++; p.e[r.f] += r.e;
+      if (!r.e){ q.no++; p.no++; noIn++; }
+      totIn += mv(1, r.e);
+    });
+    var rk = {evasa: {n: 0, e: 0}, interna: {n: 0, e: 0}, sospesa: {n: 0, e: 0}, fuori: {n: 0, e: 0}};
+    rip.forEach(function(r){ var q = rk[r.k]; q.n++; q.e += r.e; totR += mv(1, r.e); });
+    var chi = nsel ? 'selezionate' : 'in corso', bigMax = Math.max(totIn, totR) || 1, cerca = ordS || ordQ ? ' con questa ricerca' : '';
+    function sb(attr, v, lab, on){ return '<button type="button" ' + attr + '="' + v + '" aria-pressed="' + on + '">' + lab + '</button>'; }
+    var h = '<h3><i class="dt warn"></i>Ordini scaduti<em class="oghint">righe d’ordine con data di consegna passata e non evase · età = giorni dalla data di consegna</em></h3><div class="vz-or">';
+    if (!att.length && !rip.length) return h + '<p class="vz-orvuoto">Nessun ordine scaduto sulle commesse ' + (nsel || cview === 'attive' ? chi : cview === 'evase' ? 'evase' : 'sospese') + cerca + '.</p></div>';
+    h += '<div class="vz-orctl"><span class="vz-orgrp"><span class="vz-lab">Misura</span><span class="vz-seg" role="group" aria-label="Misura">'
+      + sb('data-omis', 'n', 'righe', mis === 'n') + sb('data-omis', 'e', 'euro', mis === 'e') + '</span></span>'
+      + (!att.length ? '' : '<span class="vz-orgrp"><span class="vz-lab">In tabella</span><span class="vz-seg" role="group" aria-label="Scaduti in tabella">'
+      + sb('data-oeta', '90', 'ultimi 90 gg', ordEta === '90') + sb('data-oeta', 'tutti', 'tutti', ordEta === 'tutti') + '</span></span>')
+      + (/^[0-3]$/.test(ordEta) ? '<button type="button" class="chip vz-orx" data-oeta="90">✕ solo ' + ORD_FL[+ordEta] + '</button>' : '')
+      + (ordCmF ? '<button type="button" class="chip vz-orx" data-ocm="">✕ solo ' + esc(ordCmF) + '</button>' : '') + '</div>'
+      + '<div class="vz-leg">' + (!att.length ? '' : '<span class="g"><b>Ritardo</b>' + ORD_FL.map(function(l, i){ return '<span><i class="rc" style="background:var(' + ORD_TK[i] + ')"></i>' + l + '</span>'; }).join('') + '</span>')
+      + (rip.length ? '<span><i class="rc" style="background:var(--vz-rest-ink)"></i>commesse evase, sospese o fuori elenco</span>' : '') + '</div>';
+    if (att.length){
+      var nCm = Object.keys(per).length;
+      h += '<div class="vz-orhd"><span>Commesse ' + chi + '</span><em>' + nCm + (nCm === 1 ? ' commessa' : ' commesse') + '</em></div>'
+        + '<div class="vz-orrow vz-orbig"><span class="vz-ork"><b class="vz-orlg">Ritardo delle righe scadute</b><b class="vz-orsh">' + chi + '</b></span>'
+        + '<span class="vz-ortr"><span class="vz-orbar" style="width:' + ordPc(totIn / bigMax) + '">';
+      fa.forEach(function(q, f){
+        var v = mv(q.n, q.e); if (v <= 0) return;
+        var on = ordEta === String(f);
+        /* fascia fuori dalla tabella: sfondo attenuato, testo pieno */
+        h += '<button type="button" class="vz-orseg vz-ors' + f + (ordInFin(f) ? '' : ' vz-orfuori') + '" data-oeta="' + f + '" aria-pressed="' + on + '" style="flex-grow:' + v + '"'
+          + VZ.tip('Ritardo ' + ORD_FL[f], [[ordRg(q.n), 'scadute sulle commesse ' + chi, ORD_TK[f], 'r'], [VZ.eurC(q.e), 'importo' + (q.no ? ' (' + ordN(q.no) + ' righe senza)' : ''), '', ''], ['', on ? 'clic: torna agli ultimi 90 giorni' : 'clic: in tabella solo questa fascia', '', '']])
+          + ' aria-label="' + esc(ORD_FL[f] + ': ' + ordRg(q.n) + ', ' + VZ.eurC(q.e) + (on ? ', filtro attivo' : '')) + '"><em style="background:var(' + ORD_TK[f] + ')"></em><i></i><b>' + (mis === 'n' ? ordN(q.n) : VZ.eurC(q.e)) + '</b><span>' + ORD_FL[f] + ' ·</span></button>';
+      });
+      h += '</span></span><span class="vz-orv"><b>' + fmt(totIn) + '</b></span></div>';
+    } else h += '<p class="vz-orvuoto">' + (!nsel && cview !== 'attive' ? 'Sulle commesse ' + (cview === 'evase' ? 'evase' : 'sospese') + ' non ci sono ritardi da sollecitare: gli ordini scaduti sono da ripulire nel gestionale.' : 'Nessun ordine scaduto sulle commesse ' + chi + cerca + '.') + '</p>';
+    if (rip.length){
+      var tr = [];
+      [['evasa', 'su commesse evase'], ['interna', 'su commesse interne'], ['sospesa', 'su commesse sospese'], ['fuori', 'su codici fuori elenco']].forEach(function(x){
+        var q = rk[x[0]]; if (q.n) tr.push([ordN(q.n) + ' · ' + VZ.eurC(q.e), x[1], x[0] === 'evasa' ? '--vz-rest-ink' : '', x[0] === 'evasa' ? 'r' : '']);
+      });
+      tr.push(['', 'ordini mai chiusi: non sono ritardi da sollecitare · clic: apri l’elenco', '', '']);
+      h += '<div class="vz-orhd"><span>Da ripulire nel gestionale</span></div>'
+        + '<button type="button" class="vz-orrow vz-orbig vz-orrip" data-orip="1"' + VZ.tip('Da ripulire nel gestionale', tr) + ' aria-label="' + esc('Da ripulire nel gestionale: ' + ordRg(rip.length) + ', apri l’elenco') + '">'
+        + '<span class="vz-ork"><small class="vz-orlg">commesse evase, sospese o fuori elenco</small><small class="vz-orsh">evase e altre</small></span>'
+        + '<span class="vz-ortr"><span class="vz-orbar" style="width:' + ordPc(totR / bigMax) + '"><i style="background:var(--vz-rest-ink)"></i></span></span>'
+        + '<span class="vz-orv"><b>' + fmt(totR) + '</b></span></button>';
+    }
+    var rows = Object.keys(per).map(function(k){ return per[k]; });
+    if (rows.length > 1){
+      var una = /^[0-3]$/.test(ordEta) ? +ordEta : -1;
+      var tutto = function(p){ return mv(p.n[0] + p.n[1] + p.n[2] + p.n[3], p.e[0] + p.e[1] + p.e[2] + p.e[3]); };
+      var peso = function(p){ return una < 0 ? tutto(p) : mv(p.n[una], p.e[una]); };
+      rows.sort(function(a, b){ return peso(b) - peso(a) || tutto(b) - tutto(a) || String(a.code).localeCompare(String(b.code)); });
+      var rmax = Math.max.apply(null, rows.map(tutto)) || 1, top = ordAltre ? rows : rows.slice(0, 12), resto = rows.slice(top.length);
+      h += '<div class="vz-orhd"><span>Per commessa ' + (nsel ? 'selezionata' : 'in corso') + ' · ' + (una >= 0 ? 'ordinate per ' + ORD_FL[una] : mis === 'n' ? 'per righe' : 'per euro')
+        + '</span><em>scala propria · max ' + (mis === 'n' ? ordN(rmax) : VZ.eurC(rmax)) + '</em></div>';
+      top.forEach(function(p){
+        var c = ordB.map[p.code], nT = p.n[0] + p.n[1] + p.n[2] + p.n[3], eT = p.e[0] + p.e[1] + p.e[2] + p.e[3], on = ordCmF === p.code, seg = '', tt = [];
+        for (var f = 0; f < 4; f++){
+          var v = mv(p.n[f], p.e[f]);
+          tt.push([ordN(p.n[f]) + ' · ' + VZ.eurC(p.e[f]), ORD_FL[f], ORD_TK[f], 'r']);
+          if (v > 0) seg += '<i style="flex-grow:' + v + ';background:var(' + ORD_TK[f] + ')' + (ordInFin(f) ? '' : ';opacity:.3') + '"></i>';
+        }
+        tt.push([ordN(nT) + ' · ' + VZ.eurC(eT), 'totale' + (p.no ? ' (' + ordN(p.no) + ' righe senza importo)' : ''), '', '']);
+        tt.push(['', on ? 'clic: togli il filtro' : 'clic: in tabella solo questa commessa', '', '']);
+        h += '<button type="button" class="vz-orrow vz-orcm' + (on ? ' on' : '') + '" data-ocm="' + esc(p.code) + '" aria-pressed="' + on + '"'
+          + VZ.tip(p.code + (c && c.desc ? ' · ' + c.desc : ''), tt) + ' aria-label="' + esc(p.code + ': ' + ordRg(nT) + ', ' + VZ.eurC(eT)) + '">'
+          + '<span class="vz-ork"><b>' + esc(p.code) + '</b><small>' + esc(c && c.desc ? c.desc : '') + '</small></span>'
+          + '<span class="vz-ortr"><span class="vz-orbar" style="width:' + ordPc(tutto(p) / rmax) + '">' + seg + '</span></span>'
+          + '<span class="vz-orv"><b>' + (mis === 'n' ? ordRg(nT) : VZ.eurC(eT)) + '</b><small>' + (mis === 'n' ? VZ.eurC(eT) : ordRg(nT)) + '</small></span></button>';
+      });
+      if (resto.length){
+        var n2 = 0, e2 = 0; resto.forEach(function(p){ for (var f = 0; f < 4; f++){ n2 += p.n[f]; e2 += p.e[f]; } });
+        h += '<button type="button" class="vz-ormore" data-oaltre="1" aria-expanded="false">▸ altre ' + resto.length + ' commesse · ' + ordRg(n2) + ' · ' + VZ.eurC(e2) + '</button>';
+      } else if (ordAltre && rows.length > 12) h += '<button type="button" class="vz-ormore" data-oaltre="0" aria-expanded="true">▾ solo le prime 12</button>';
+    }
+    return h + '<p class="vz-ornote">In tutto ' + ordRg(att.length + rip.length) + ' scadute' + (!att.length ? ', tutte da ripulire. ' : ': ' + ordN(att.length) + ' sulle commesse ' + chi
+      + (rip.length ? ' + ' + ordN(rip.length) + ' da ripulire' : '') + '. ')
+      + (noIn ? ordN(noIn) + (noIn === 1 ? ' riga scaduta delle commesse ' + chi + ' non ha importo' : ' righe scadute delle commesse ' + chi + ' non hanno importo') + ': in «euro» contano zero. ' : '')
+      + (ordS || ordQ ? 'Conti fatti sulle righe trovate dalla ricerca.' : '') + '</p></div>';
+  }
+  /* d) tabella Scaduti: finestra e commessa scelte dal grafico */
+  function ordScadHtml(att){
+    var recs = att.filter(function(r){ return ordInFin(r.f) && (!ordCmF || r.v.cm === ordCmF); });
+    var e = 0, fuori = 0; recs.forEach(function(r){ e += r.e; });
+    if (ordEta === '90') att.forEach(function(r){ if (r.f === 3 && (!ordCmF || r.v.cm === ordCmF)) fuori++; });
+    var h = '<h3><i class="dt late"></i>Scaduti<em class="oghint">' + ordRg(recs.length) + (e ? ' · ' + VZ.eurC(e) : '') + ' · ' + ordFinLab()
+      + (ordCmF ? ' · solo ' + esc(ordCmF) : '') + ' · per €, poi per ritardo · ogni lunedì parte il sollecito ad acquisti</em></h3>';
+    var fil = [];
+    if (ordEta !== '90') fil.push('<button type="button" class="chip vz-orx" data-oeta="90">✕ ' + (ordEta === 'tutti' ? 'tutti i ritardi' : 'solo ' + ORD_FL[+ordEta]) + '</button>');
+    if (ordCmF) fil.push('<button type="button" class="chip vz-orx" data-ocm="">✕ solo ' + esc(ordCmF) + '</button>');
+    if (fuori) fil.push('<span>' + ordRg(fuori) + ' oltre 90 giorni non in tabella</span><button type="button" class="chip vz-orx" data-oeta="tutti">mostra tutti</button>');
+    if (fil.length) h += '<div class="vz-ofil">' + fil.join('') + '</div>';
+    if (!recs.length) return h + '<p class="ogempty">Nessun ordine scaduto' + (ordS || ordQ ? ' con questa ricerca' : '') + '.</p>';
+    return h + ordGruppiHtml(recs, 'scad', false);
+  }
+  function ordRipHtml(rip){
+    var e = 0, rk = {evasa: [], interna: [], sospesa: [], fuori: []};
+    rip.forEach(function(r){ e += r.e; rk[r.k].push(r); });
+    function cod(list){
+      var n = {}; list.forEach(function(r){ var c = r.v.cm || '—'; n[c] = (n[c] || 0) + 1; });
+      var k = Object.keys(n).sort(function(a, b){ return n[b] - n[a]; });
+      return k.slice(0, 3).join(', ') + (k.length > 3 ? '…' : '');
+    }
+    var parti = [];
+    if (rk.evasa.length) parti.push(ordN(rk.evasa.length) + ' su commesse evase');
+    if (rk.interna.length) parti.push(ordN(rk.interna.length) + (rk.interna.length === 1 ? ' interna (' : ' interne (') + esc(cod(rk.interna)) + ')');
+    if (rk.sospesa.length) parti.push(ordN(rk.sospesa.length) + ' su commesse sospese');
+    if (rk.fuori.length) parti.push(ordN(rk.fuori.length) + ' su codici fuori elenco (' + esc(cod(rk.fuori)) + ')');
+    var h = '<h3><i class="dt"></i>Da ripulire nel gestionale con Luca<em class="oghint">ordini aperti con data passata su commesse evase, sospese, interne o su codici fuori elenco: non sono ritardi da sollecitare, vanno chiusi o evasi nel gestionale</em></h3>'
+      + '<div class="vz-orip"><p><b>' + ordRg(rip.length) + '</b>' + (e ? ' · ' + VZ.eurC(e) : '') + (parti.length ? ' — ' + parti.join(' · ') : '') + '</p>'
+      + (rip.length ? '<button type="button" class="chip" data-orip="' + (ordRipOn ? '0' : '1') + '" aria-expanded="' + ordRipOn + '">' + (ordRipOn ? '▾ chiudi l’elenco' : '▸ mostra le righe') + '</button>' : '') + '</div>';
+    if (!rip.length) return h + '<p class="ogempty">Nessuna riga con questa ricerca.</p>';
+    return h + (ordRipOn ? ordGruppiHtml(rip, 'rip', true) : '');
+  }
+  /* ridisegno solo dei riquadri degli ordini (ricerca, filtri, pagine): niente ridisegno di tutta la scheda */
+  function ordAggiorna(){
+    if (!ordB) return;
+    var F = ordFiltrato();
+    function put(id, html, n){ var el = document.getElementById(id); if (!el) return; el.innerHTML = html; if (n != null) el.setAttribute('data-n', n); }
+    put('ord-sett', ordSettHtml(F.sett, 0), F.sett.length);
+    put('ord-pross', ordSettHtml(F.pross, 1), F.pross.length);
+    put('ord-graf', ordGrafHtml(F));
+    put('ord-scad', ordScadHtml(F.att), F.att.filter(function(r){ return ordInFin(r.f) && (!ordCmF || r.v.cm === ordCmF); }).length);
+    put('ord-rip', ordRipHtml(F.rip), F.rip.length);
+    var qn = document.getElementById('ord-qn');
+    if (qn) qn.textContent = ordS ? ordRg(F.sett.length + F.pross.length + F.att.length + F.rip.length) + ' trovate' : '';
+    ordNavN();
+  }
+  /* i numeri dell'indice «In questa pagina» seguono i riquadri ridisegnati */
+  function ordNavN(){
+    var nav = stage.querySelector(':scope > .jump'); if (!nav) return;
+    var bs = nav.querySelectorAll('button'), ss = [];
+    stage.querySelectorAll('section.og').forEach(function(s){ if (s.querySelector(':scope > h3')) ss.push(s); });
+    if (bs.length !== ss.length) return;
+    ss.forEach(function(s, i){
+      if (!s.hasAttribute('data-n')) return;
+      var b = bs[i].querySelector('b'), n = +s.getAttribute('data-n');
+      if (!b && n){ bs[i].appendChild(document.createTextNode(' ')); b = document.createElement('b'); bs[i].appendChild(b); }
+      if (b) b.textContent = n ? String(n) : '';
+    });
+  }
+  function ordClick(e){
+    var el = e.target.closest && e.target.closest('[data-omis],[data-oeta],[data-ocm],[data-opag],[data-oaltre],[data-orip]');
+    if (!el || !stage.contains(el) || !ordB) return;
+    var attr = ['data-omis', 'data-oeta', 'data-ocm', 'data-opag', 'data-oaltre', 'data-orip'].filter(function(a){ return el.hasAttribute(a); })[0];
+    var v = el.getAttribute(attr), vai = null;
+    if (attr === 'data-omis') ordMis = v;
+    else if (attr === 'data-oeta'){ ordEta = el.classList.contains('vz-orseg') && ordEta === v ? '90' : v; ordPag.scad = 50; }
+    else if (attr === 'data-ocm'){ ordCmF = ordCmF === v ? '' : v; ordPag.scad = 50; if (ordCmF) vai = 'ord-scad'; }
+    else if (attr === 'data-opag') ordPag[v] = (ordPag[v] || 50) + 50;
+    else if (attr === 'data-oaltre') ordAltre = v === '1';
+    else if (attr === 'data-orip'){ ordRipOn = v === '1'; ordPag.rip = 50; if (ordRipOn && el.classList.contains('vz-orrip')) vai = 'ord-rip'; }
+    ordAggiorna();
+    if (vai){
+      var s = document.getElementById(vai), bar = document.querySelector('.bar');
+      if (s){
+        var y = s.getBoundingClientRect().top + window.scrollY - (bar ? bar.getBoundingClientRect().height : 0) - 10;
+        var liscio = !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+        try { window.scrollTo({top: Math.max(0, y), behavior: liscio ? 'smooth' : 'auto'}); } catch (er) { window.scrollTo(0, Math.max(0, y)); }
+      }
+    } else if (e.detail === 0 && attr !== 'data-opag'){
+      /* da tastiera il fuoco resta sul controllo appena usato */
+      var n = stage.querySelector('[' + attr + '="' + String(el.getAttribute(attr)).replace(/["\\]/g, '\\$&') + '"]');
+      if (n) n.focus();
+    }
+  }
+  function wireOrdini(){
+    var oc = document.getElementById('ord-clear');
+    if (oc) oc.addEventListener('click', function(){ ordQ = ''; dashboard(); });
+    var q = document.getElementById('ord-q');
+    if (q) q.addEventListener('input', function(){
+      clearTimeout(ordT);
+      ordT = setTimeout(function(){ ordS = q.value.trim(); ordPag = {}; ordAggiorna(); }, 200);
+    });
+    if (!ordWired){ ordWired = true; stage.addEventListener('click', ordClick); }
+  }
+  function ordiniHtml(pool, nsel){
     var o = S.ordf || {}, tot = (o.voci || []).length;
     if (!tot){
       return '<div class="ovuoto"><h3>Ordini fornitore: nessun dato caricato</h3>'
@@ -1442,40 +1729,41 @@ var VZ = (function(){
         + '<b>scaduti</b>, e ogni lunedì mattina parte in automatico il sollecito ad '
         + 'acquisti@prestonbarbieri.com con l’elenco degli scaduti.</p></div>';
     }
-    var sett = ordiniSettimana(), scad = ordiniScaduti();
-    if (ordQ){
-      var fq = ordQ.toLowerCase(), ff = function(v){ return String(v.f || '').toLowerCase().indexOf(fq) >= 0; };
-      sett = sett.filter(ff); scad = scad.filter(ff);
-    }
-    var l = lunediDi(new Date());
+    pool = pool || CMv(); nsel = nsel || 0;
+    var B = ordB = ordBase(pool, nsel);
+    /* cambiano le commesse in vista: si riparte dalla prima pagina */
+    var sig = cview + '|' + nsel + '|' + pool.map(function(c){ return c.code; }).join(',');
+    if (sig !== ordSig){ ordSig = sig; ordPag = {}; ordAltre = false; }
+    if (ordCmF && !B.att.some(function(r){ return r.v.cm === ordCmF; })) ordCmF = '';
+    var l = lunediDi(new Date()), l1 = new Date(l.getFullYear(), l.getMonth(), l.getDate() + 7);
+    var eP = 0; B.pross.forEach(function(v){ eP += +v.imp || 0; });
+    var a90 = B.att.filter(function(r){ return r.g <= 90; }).length;
     var h = '<div class="cm-kpis">'
-      + '<div class="cm-kpi' + (sett.length ? ' hot' : '') + '"><b>' + sett.length + '</b>'
-      + '<span>in consegna questa settimana</span><small>' + itFull(l) + ' → '
-      + itFull(new Date(l.getTime() + 6 * DAY)) + '</small></div>'
-      + '<div class="cm-kpi' + (scad.length ? ' hot' : '') + '"><b>' + scad.length + '</b>'
-      + '<span>ordini scaduti</span><small>consegna prevista già passata</small></div>'
-      + '<div class="cm-kpi"><b>' + ordiniAperti().length + '</b><span>ordini aperti</span>'
-      + '<small>su ' + tot + ' righe del gestionale</small></div>'
+      + '<div class="cm-kpi"><b>' + ordN(B.sett.length) + '</b><span>in consegna questa settimana</span><small>'
+      + itFull(l) + ' → ' + itFull(new Date(l.getFullYear(), l.getMonth(), l.getDate() + 6)) + '</small></div>'
+      + '<div class="cm-kpi"><b>' + ordN(B.pross.length) + '</b><span>in arrivo la prossima settimana</span><small>'
+      + itFull(l1) + ' → ' + itFull(new Date(l1.getFullYear(), l1.getMonth(), l1.getDate() + 6)) + (eP ? ' · ' + VZ.eurC(eP) : '') + '</small></div>'
+      + (!nsel && cview !== 'attive'
+        ? '<div class="cm-kpi"><b>' + ordN(B.rip.length) + '</b><span>scaduti su commesse ' + (cview === 'evase' ? 'evase' : 'sospese') + '</span><small>da ripulire nel gestionale, non da sollecitare</small></div>'
+        : '<div class="cm-kpi' + (B.att.length ? ' hot' : '') + '"><b>' + ordN(B.att.length) + '</b><span>scaduti sulle commesse ' + (nsel ? 'selezionate' : 'in corso') + '</span>'
+          + '<small>' + ordN(a90) + ' negli ultimi 90 giorni' + (B.rip.length ? ' · ' + ordN(B.rip.length) + ' da ripulire' : '') + '</small></div>')
       + '<div class="cm-kpi"><b>' + (o.agg ? esc(itFull(o.agg)) : '—') + '</b><span>dati aggiornati al</span>'
       + '<small>' + esc(o.file || 'estrazione del gestionale') + '</small></div></div>';
-
     if (o.srcnote){
       var nS = 0, nC = 0, nSC = 0;
       (o.voci || []).forEach(function(v){ if (v.src === 'S') nS++; else if (v.src === 'C') nC++; else if (v.src === 'SC') nSC++; });
       h += '<div class="ore-wait" style="margin:0 0 14px"><b>Due estrazioni, due elenchi diversi.</b> ' + esc(o.srcnote)
         + ' Righe: <b>' + nSC + '</b> in entrambe · <b>' + nS + '</b> solo nel settimanale 11/09 · <b>' + nC + '</b> solo nel completo 16/09.</div>';
     }
-    function tabella(tit, sub, list, bad){
-      var t = '<section class="og"><h3><i class="dt ' + (bad ? 'late' : 'cy') + '"></i>' + tit
-        + '<em class="oghint">' + sub + '</em></h3>';
-      if (!list.length) return t + '<p class="ogempty">Nessun ordine.</p></section>';
-      return t + '<div class="otab"><table><thead><tr><th>Ordine</th><th>Fornitore</th>'
-        + '<th>Descrizione</th><th>Commessa</th><th>Consegna prevista</th><th>Quando</th>'
-        + '<th>Stato</th></tr></thead><tbody>' + ordRighe(list, bad) + '</tbody></table></div></section>';
-    }
     if (ordQ) h += '<div class="fbar">Solo il fornitore <b>' + esc(ordQ) + '</b> <button class="chip" id="ord-clear">× tutti i fornitori</button></div>';
-    h += tabella('Scaduti', scad.length + ' ordini oltre la data prevista · sollecito automatico ad acquisti ogni lunedì', scad, true);
-    h += tabella('In consegna questa settimana', 'dal lunedì alla domenica della settimana in corso', sett, false);
+    var F = ordFiltrato(), nScad = F.att.filter(function(r){ return ordInFin(r.f) && (!ordCmF || r.v.cm === ordCmF); }).length;
+    h += '<div class="vz-ofind"><input class="sel" id="ord-q" type="search" value="' + esc(ordS) + '" placeholder="Cerca negli ordini: numero, articolo, fornitore, descrizione, commessa" aria-label="Cerca negli ordini">'
+      + '<span id="ord-qn" aria-live="polite">' + (ordS ? ordRg(F.sett.length + F.pross.length + F.att.length + F.rip.length) + ' trovate' : '') + '</span></div>';
+    h += '<section class="og" id="ord-sett" data-n="' + F.sett.length + '">' + ordSettHtml(F.sett, 0) + '</section>'
+      + '<section class="og" id="ord-pross" data-n="' + F.pross.length + '">' + ordSettHtml(F.pross, 1) + '</section>'
+      + '<section class="og" id="ord-graf">' + ordGrafHtml(F) + '</section>'
+      + '<section class="og" id="ord-scad" data-n="' + nScad + '">' + ordScadHtml(F.att) + '</section>'
+      + (B.rip.length ? '<section class="og" id="ord-rip" data-n="' + F.rip.length + '">' + ordRipHtml(F.rip) + '</section>' : '');
     h += pagellaFornitori();
     return h;
   }
@@ -1650,7 +1938,7 @@ var VZ = (function(){
       + '<div class="seg sub"><button id="cm-schede" aria-pressed="' + (cmode === 'schede') + '">Schede</button>'
       + '<button id="cm-gantt" aria-pressed="' + (cmode === 'gantt') + '">Gantt</button>'
       + '<button id="cm-ord" aria-pressed="' + (cmode === 'ordini') + '">Ordini'
-      + (ordiniScaduti().length ? ' · ' + ordiniScaduti().length + ' scad.' : '') + '</button>'
+      + (function(n){ return n ? ' · ' + n + ' scad.' : ''; })(ordScadN(nsel ? selected() : list)) + '</button>'
       + '<button id="cm-cash" aria-pressed="' + (cmode === 'cash') + '">Cash flow</button>'
       + '<button id="cm-scad" aria-pressed="' + (cmode === 'scad') + '">Scadenze'
       + (scadCount() ? ' · ' + scadCount() : '') + '</button>'
@@ -1692,7 +1980,7 @@ var VZ = (function(){
 
     var pool = nsel ? selected() : list;
     h += kpiBar(pool, nsel);
-    if (cmode === 'ordini') h += ordiniHtml();
+    if (cmode === 'ordini') h += ordiniHtml(nsel ? selected() : list, nsel);
     else if (cmode === 'gantt') h += ganttHtml(nsel ? selected() : list);
     else if (cmode === 'clienti') h += clientiHtml(nsel ? selected() : list);
     else if (cmode === 'ctr') h += contrattiHtml(nsel ? selected() : list);
@@ -1705,7 +1993,7 @@ var VZ = (function(){
     if (cmode === 'bdg'){ wireBdg(); wirePiano(); }
     if (cmode === 'scad') wireScad();
     wireCfz();
-    if (cmode === 'ordini'){ var oc = document.getElementById('ord-clear'); if (oc) oc.addEventListener('click', function(){ ordQ = ''; dashboard(); }); }
+    if (cmode === 'ordini') wireOrdini();
 
     document.querySelectorAll('#pgz button').forEach(function(b){
       b.addEventListener('click', function(){ pgZoom = b.getAttribute('data-pgz'); dashboard(); });
@@ -7445,7 +7733,7 @@ var VZ = (function(){
     for(var i=0;i<l.length;i++){
       var h=l[i].querySelector(':scope > h3'); if(!h) continue;
       var t=titolo(h); if(!t) continue;
-      var n=l[i].querySelectorAll('.ogrow, li, tr, .orow').length;
+      var n=l[i].hasAttribute('data-n')?+l[i].getAttribute('data-n'):l[i].querySelectorAll('.ogrow, li, tr, .orow').length;   /* R35: data-n = righe vere di un riquadro a pagine */
       out.push({el:l[i], t:t, c:colore(h), n:n});
     }
     return out;

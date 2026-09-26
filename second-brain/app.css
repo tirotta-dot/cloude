@@ -920,6 +920,105 @@ h1 em{background:linear-gradient(100deg,#4FC6F0 15%,#5FE0AC 85%);
 .otab td.mono{font-family:"IBM Plex Mono",monospace;font-size:11.5px;white-space:nowrap;color:var(--ink)}
 .otab td.mono.late{color:var(--late);font-weight:600}
 .otab .osub{display:block;font-size:11px;color:var(--muted);margin-top:2px}
+/* R35 (26/09/2026) Commesse › Ordini: ricerca, grafico degli scaduti per età e per commessa, tabelle a pagine */
+.vz-ofind{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;margin:0 0 14px}
+.vz-ofind input{flex:1 1 320px;max-width:560px;min-width:0;box-sizing:border-box;padding:8px 12px;border-radius:3px;border:1px solid var(--line-2);background:#fff;color:var(--ink);font:inherit;font-size:13.5px}
+.vz-ofind input:focus-visible{outline:2px solid var(--cy);outline-offset:2px}
+.vz-ofind span{font:500 12px "IBM Plex Mono",monospace;color:var(--vz-tick)}
+#ord-sett,#ord-pross,#ord-graf,#ord-scad,#ord-rip{margin:0 0 18px}
+#ord-sett .otab,#ord-pross .otab,#ord-scad .otab,#ord-rip .otab{border:0;border-radius:0;background:transparent}
+.vz-or{padding:14px 16px 12px}
+.vz-orctl{display:flex;flex-wrap:wrap;align-items:center;gap:8px 18px;margin:0 0 12px}
+.vz-orgrp{display:inline-flex;align-items:center;gap:8px}
+.vz-seg{display:inline-flex;border:1px solid var(--line-2);border-radius:3px;overflow:hidden}
+.vz-seg button{padding:5px 11px;border:0;background:transparent;cursor:pointer;font:400 12px "IBM Plex Sans",sans-serif;color:var(--ink-2)}
+.vz-seg button+button{border-left:1px solid var(--line-2)}
+.vz-seg button[aria-pressed="true"]{background:var(--vz-ink);color:var(--vz-surface);font-weight:600}
+.vz-seg button:focus-visible,.vz-orseg:focus-visible,.vz-ormore:focus-visible{outline:2px solid var(--cy);outline-offset:2px}
+.chip.vz-orx{padding:4px 11px;font-size:12px}
+.vz-leg .g{display:inline-flex;flex-wrap:wrap;gap:4px 12px;align-items:center}
+.vz-leg .g>b{font:600 11px "Barlow Condensed",sans-serif;letter-spacing:.14em;text-transform:uppercase;color:var(--vz-tick)}
+.vz-orhd{display:flex;justify-content:space-between;align-items:baseline;gap:4px 12px;flex-wrap:wrap;margin:14px 0 4px}
+.vz-orhd span{font:600 11.5px "Barlow Condensed",sans-serif;letter-spacing:.14em;text-transform:uppercase;color:var(--vz-ink2)}
+.vz-orhd em{font:500 10.5px "IBM Plex Mono",monospace;font-style:normal;color:var(--vz-tick);min-width:170px}
+.vz-orrow{display:grid;grid-template-columns:250px minmax(0,1fr) 170px;gap:10px;align-items:center;box-sizing:border-box;width:calc(100% + 8px);
+  min-height:26px;margin:0 -4px;padding:0 4px;border:0;border-radius:5px;background:transparent;font:inherit;color:inherit;text-align:left}
+button.vz-orrow{cursor:pointer}
+button.vz-orrow:hover,button.vz-orrow.vz-on,button.vz-orrow:focus-visible,.vz-orrow.on{background:color-mix(in srgb,var(--vz-ink) 7%,transparent);outline:none}
+.vz-orrow.on{box-shadow:inset 3px 0 0 var(--vz-1)}
+.vz-orbig{min-height:30px}
+.vz-ork{display:grid;grid-template-columns:78px minmax(0,1fr);align-items:baseline;min-width:0;white-space:nowrap;line-height:20px}
+.vz-ork b{font:600 12.5px/20px "IBM Plex Mono",monospace;color:var(--vz-ink);overflow:hidden;text-overflow:ellipsis}
+.vz-ork small{font:400 12px/20px "IBM Plex Sans",sans-serif;color:var(--vz-tick);overflow:hidden;text-overflow:ellipsis}
+.vz-orbig .vz-ork{display:block;overflow:hidden;text-overflow:ellipsis}
+.vz-orsh{display:none!important}
+.vz-ortr{display:block;min-width:0}
+.vz-orbar{display:flex;gap:2px;height:12px;min-width:2px;max-width:100%}
+.vz-orbar>i{display:block;flex:1 1 0;min-width:1px}
+.vz-orbar>:last-child{border-radius:0 4px 4px 0}
+.vz-orbig .vz-orbar{height:24px}
+.vz-orseg{position:relative;display:flex;flex-direction:row-reverse;flex-wrap:wrap;justify-content:flex-end;align-content:flex-start;flex:1 1 0;min-width:1px;
+  height:24px;box-sizing:border-box;padding:0 7px;border:0;overflow:hidden;cursor:pointer;background:transparent;font:600 11.5px/24px "IBM Plex Mono",monospace;color:var(--vz-ink);text-align:left}
+.vz-orseg em{position:absolute;left:0;top:0;right:0;bottom:0;border-radius:inherit}
+.vz-orseg.vz-orfuori em{opacity:.35}
+/* testo dentro i segmenti: prima sparisce l'etichetta, poi il numero (vanno a capo e restano fuori dall'altezza) */
+.vz-orseg i{display:block;width:0;height:24px}
+.vz-orseg b,.vz-orseg span{position:relative;font:inherit;white-space:nowrap}
+.vz-orseg span{margin-right:.5em}
+.vz-orseg.vz-ors2:not(.vz-orfuori),.vz-orseg.vz-ors3:not(.vz-orfuori){color:var(--vz-surface)}
+.vz-orseg[aria-pressed="true"]::after{content:"";position:absolute;left:0;top:0;right:0;bottom:0;border-radius:inherit;box-shadow:inset 0 0 0 2px var(--vz-ink)}
+.vz-orv{display:flex;align-items:baseline;gap:8px;min-width:0;white-space:nowrap;overflow:hidden;line-height:20px}
+.vz-orv b{font:600 12.5px/20px "IBM Plex Mono",monospace;color:var(--vz-ink);font-variant-numeric:tabular-nums}
+.vz-orv small{font:400 11.5px/20px "IBM Plex Sans",sans-serif;color:var(--vz-tick)}
+.vz-orrip .vz-ork small{font-size:12px}
+.vz-ormore{display:block;margin:4px 0 0;padding:7px 4px;border:0;background:transparent;cursor:pointer;font:400 12.5px "IBM Plex Sans",sans-serif;color:var(--vz-ink2);text-align:left}
+.vz-ormore:hover{color:var(--vz-ink);text-decoration:underline}
+.vz-orvuoto{margin:10px 0;color:var(--muted);font-size:13px}
+.vz-ornote{margin:12px 0 0;font-size:11.5px;color:var(--vz-tick);line-height:1.5}
+.vz-ofil{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:10px 16px;border-bottom:1px solid var(--line);font-size:12px;color:var(--ink-2)}
+.vz-otab tr.vz-ogrp td{background:var(--panel-2);color:var(--ink);padding:9px 10px 7px;white-space:normal}
+.vz-ogrp b{font:600 12.5px "IBM Plex Mono",monospace;margin-right:10px}
+.vz-ogrp span{color:var(--ink-2);margin-right:10px}
+.vz-ogrp .pill{margin-right:10px}
+.vz-ogrp em{font:500 11.5px "IBM Plex Mono",monospace;font-style:normal;color:var(--muted);white-space:nowrap}
+.otab td.vz-oimp,#ord-sett th:last-child,#ord-pross th:last-child,#ord-scad th:last-child,#ord-rip th:last-child{text-align:right}
+.vz-odesc{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.vz-omiss{font-family:"IBM Plex Sans",sans-serif;font-size:12px;color:var(--warn);white-space:nowrap}
+.vz-omiss i,.vz-olate i{font-style:normal}
+.vz-olate{color:var(--late);font-weight:600}
+.chip.vz-omore{margin:10px 16px 14px}
+.vz-orip{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;padding:12px 16px}
+.vz-orip p{margin:0;flex:1 1 320px;font-size:13px;color:var(--ink-2);line-height:1.5}
+.vz-orip p b{color:var(--ink);font-family:"IBM Plex Mono",monospace}
+#ord-rip .otab{border-top:1px solid var(--line)}
+@media (max-width:640px){
+  .vz-ofind input{font-size:16px;flex-basis:100%}
+  .vz-or{padding:12px 12px 10px}
+  .vz-orrow{grid-template-columns:88px minmax(0,1fr) 90px;gap:8px}
+  .vz-orseg{padding:0 4px}
+  .vz-ork{display:block;overflow:hidden;text-overflow:ellipsis}
+  .vz-orcm .vz-ork small,.vz-orv small,.vz-orlg{display:none!important}
+  .vz-orsh{display:inline!important}
+  .vz-orhd em{min-width:0}
+  .vz-orip{padding:10px 12px}
+  /* tabelle degli ordini al telefono: una scheda per riga, niente scorrimento di lato */
+  .otab table.vz-otab{min-width:0;display:block}
+  .vz-otab thead{display:none}
+  .vz-otab tbody{display:block}
+  .vz-otab tbody tr{display:flex;flex-wrap:wrap;align-items:baseline;gap:3px 12px;padding:10px 12px;border-bottom:1px solid var(--line)}
+  .vz-otab tbody tr:last-child{border-bottom:0}
+  .otab .vz-otab td{display:block;padding:0;border:0;min-width:0}
+  .vz-otab td.o-f{order:1;flex:1 1 55%}
+  .vz-otab td.o-i{order:2;margin-left:auto}
+  .vz-otab td.o-d{order:3;flex:1 1 100%}
+  .vz-otab td.o-n{order:4} .vz-otab td.o-c{order:5} .vz-otab td.o-dp{order:6} .vz-otab td.o-q{order:7}
+  .vz-otab td.o-n .osub{display:inline;margin-left:6px}
+  .vz-otab td.o-dp::before{content:"consegna ";color:var(--muted)}
+  #ord-scad .vz-otab td.o-q::before,#ord-rip .vz-otab td.o-q::before{content:"ritardo ";color:var(--muted)}
+  .vz-otab tr.vz-ogrp{display:block;padding:9px 12px 7px;background:var(--panel-2)}
+  .vz-otab tr.vz-ogrp td{padding:0}
+  .chip.vz-omore{margin:10px 12px 12px}
+}
 .ovuoto{border:1px dashed var(--line-2);border-radius:12px;padding:22px;background:var(--panel)}
 .ovuoto h3{margin:0 0 10px;font-family:"Barlow Condensed",sans-serif;letter-spacing:.05em;
   text-transform:uppercase;color:var(--ink)}
