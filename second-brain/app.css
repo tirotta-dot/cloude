@@ -108,6 +108,8 @@ button:focus-visible,input:focus-visible,.box:focus-visible,.tl-bar:focus-visibl
   outline:2px solid var(--cy);outline-offset:2px}
 
 /* ============ BOARD ============ */
+/* R36: tre gradini di testo (testi-piccoli): etichette, dati delle righe, titoli di riga */
+:root{--fs-s:12px;--fs-m:13.5px;--fs-l:15px}
 main{padding:26px 0 56px;min-height:60vh;
   background:linear-gradient(180deg,var(--ground-2),var(--ground) 220px)}
 .ro{margin:0 0 18px;padding:12px 16px;border-left:3px solid var(--cy);border-radius:3px;
@@ -118,6 +120,22 @@ main{padding:26px 0 56px;min-height:60vh;
   box-shadow:var(--shadow);animation:rise .5s cubic-bezier(.2,.8,.2,1) backwards}
 @keyframes rise{from{opacity:0;transform:translateY(14px)}}
 .card.all-done{opacity:.55}
+/* R36: le colonne fuori schermo non si impaginano finché non ci arrivi (altezza stimata, poi ricordata) */
+.grid > .card{content-visibility:auto;contain-intrinsic-size:auto 900px}
+/* R36: il conteggio «2 aperti · 21 fatti» va sotto il nome, che cosi' non si spezza su tre righe */
+.card > .chead{display:grid;grid-template-columns:auto minmax(0,1fr) auto;column-gap:10px;row-gap:1px;align-items:center}
+.card > .chead .code{grid-column:1;grid-row:1 / span 2;align-self:center}
+.card > .chead .cname{grid-column:2;grid-row:1}
+.card > .chead .tally{grid-column:2;grid-row:2;margin-left:0}
+.card > .chead .pstampa{grid-column:3;grid-row:1 / span 2;align-self:center}
+.card .cfatti{border-top:1px solid var(--line-2)}
+.card .cfatti>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;padding:10px 16px;
+  font-family:"Barlow Condensed",sans-serif;font-weight:600;font-size:12.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.card .cfatti>summary::-webkit-details-marker{display:none}
+.card .cfatti>summary::before{content:"\25B8";font-size:10px}
+.card .cfatti[open]>summary::before{content:"\25BE"}
+.card .cfatti>summary:hover{color:var(--cy)}
+.card .cfatti>ul{border-top:1px solid var(--line)}
 .chead{display:flex;align-items:center;gap:10px;padding:13px 16px;position:relative;
   border-bottom:1px solid var(--line);background:var(--panel-2)}
 .chead::before{content:"";position:absolute;left:0;right:0;top:0;height:3px;background:var(--c)}
@@ -125,8 +143,8 @@ main{padding:26px 0 56px;min-height:60vh;
   padding:3px 8px;border-radius:2px;white-space:nowrap}
 .cname{font-family:"Barlow Condensed",sans-serif;font-weight:600;font-size:17px;letter-spacing:.05em;
   text-transform:uppercase;line-height:1.12;min-width:0;color:var(--ink)}
-.tally{margin-left:auto;font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--muted);
-  font-variant-numeric:tabular-nums}
+.tally{margin-left:auto;font-family:"IBM Plex Mono",monospace;font-size:var(--fs-s);color:var(--muted);
+  font-variant-numeric:tabular-nums;white-space:nowrap}
 ul{list-style:none;margin:0;padding:0}
 li{display:flex;gap:12px;padding:13px 16px;border-top:1px solid var(--line);transition:background .18s}
 li:first-child{border-top:none}
@@ -142,7 +160,7 @@ li.hide{display:none}
 .txt{display:block;cursor:pointer}
 li.done .txt{color:var(--muted);text-decoration:line-through}
 .meta{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px}
-.tag{font-family:"IBM Plex Mono",monospace;font-size:10.5px;padding:2px 7px;border-radius:2px;
+.tag{font-family:"IBM Plex Mono",monospace;font-size:var(--fs-s);padding:2px 7px;border-radius:2px;
   border:1px solid var(--line-2);color:var(--muted);white-space:nowrap;background:#fff}
 .tag.age-1{color:var(--warn);border-color:#E7CE8E}
 .tag.age-2{color:var(--late);border-color:#E9B3A8}
@@ -151,39 +169,76 @@ li.done .txt{color:var(--muted);text-decoration:line-through}
 .tag.due{color:var(--cy);border-color:#A8D4E7}
 .tag.due.soon{background:var(--warn);border-color:var(--warn);color:#fff}
 .tag.due.late{background:var(--late);border-color:var(--late);color:#fff}
-.src{display:block;font-size:11.5px;color:var(--muted);margin-top:5px}
+.src{display:block;font-size:var(--fs-m);line-height:1.45;color:var(--muted);margin-top:5px}
+/* R36: stato del task = prima frase + ultimo aggiornamento (data in grassetto); la storia si apre a richiesta */
+.src.sagg,.ogmain span.ogs.sagg{color:var(--ink-2);margin-top:3px}
+.sagg b{font-family:"IBM Plex Mono",monospace;font-weight:600;color:var(--ink);margin-right:3px}
+.ogmain span.sagg b{display:inline;font-size:inherit;line-height:inherit}
+.sagg.lunga{display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+#printarea .sagg.lunga{display:block;-webkit-line-clamp:unset;overflow:visible}
+.sst{margin-top:4px}
+/* storia, riassunto della mail e anteprima della bozza chiusi stanno sulla stessa riga; aperti vanno a capo */
+.tbody > details.sst:not([open]),.tbody > details.rif:not([open]),
+.ogmain > details.sst:not([open]),.ogmain > details.rif:not([open]){display:inline-block;vertical-align:top;margin-right:14px;max-width:100%}
+.sst>summary{cursor:pointer;list-style:none;display:inline-flex;align-items:center;gap:6px;
+  font-family:"Barlow Condensed",sans-serif;font-size:12px;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--muted);border-bottom:1px dotted var(--line-2);padding-bottom:1px}
+.sst>summary::-webkit-details-marker{display:none}
+.sst>summary::before{content:"\25B8";font-size:9px;line-height:1}
+.sst[open]>summary::before{content:"\25BE"}
+.sst>summary:hover{color:var(--cy);border-color:var(--cy)}
+.sstl{list-style:none;margin:7px 0 0;padding:6px 0 6px 12px;border-left:2px solid var(--line-2)}
+.sstl li{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 10px;padding:4px 0;border:none;
+  font-size:var(--fs-m);line-height:1.45;color:var(--ink-2)}
+.sstl li:hover{background:none}
+.sstl li b{font-family:"IBM Plex Mono",monospace;font-size:var(--fs-s);font-weight:600;color:var(--ink);white-space:nowrap;padding-top:1px}
+.sstl li span{overflow-wrap:anywhere}
+.sstl li.fuso b{color:var(--warn)}
 .rif{margin-top:6px}
 .rifsolo{margin-top:6px}
 .rif>summary{cursor:pointer;list-style:none;display:inline-flex;align-items:center;gap:6px;
-  font-family:"Barlow Condensed",sans-serif;font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+  font-family:"Barlow Condensed",sans-serif;font-size:12px;letter-spacing:.08em;text-transform:uppercase;
   color:var(--muted);border-bottom:1px dotted var(--line-2);padding-bottom:1px}
 .rif>summary::-webkit-details-marker{display:none}
 .rif>summary::marker{content:""}
 .rif>summary::before{content:"\25B8";font-size:9px;line-height:1}
 .rif[open]>summary::before{content:"\25BE"}
 .rif>summary:hover{color:var(--cy);border-color:var(--cy)}
-.rifn{font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:0;text-transform:none;
+.rifn{font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:0;text-transform:none;
   color:var(--muted);opacity:.75}
 .rifb{margin-top:7px;padding:9px 12px;background:var(--panel-2);border:1px solid var(--line);
   border-left:2px solid var(--line-2);border-radius:4px}
-.rifb ul{margin:0;padding-left:16px}
-.rifb li{font-size:12.5px;line-height:1.5;color:var(--ink-2);margin-bottom:4px}
+.rifb ul{margin:0;padding-left:16px;list-style:disc}
+.rifb li{display:list-item;padding:0;border:none;font-size:var(--fs-m);line-height:1.5;color:var(--ink-2);margin-bottom:4px}
+.rifb li:hover{background:none}
 .rifb li:last-child{margin-bottom:0}
 .rifb .gml{margin-top:9px;display:inline-block}
-.nbox{margin-top:8px}
+.nbox{margin-top:6px}
 .nrow{display:flex;gap:8px;align-items:flex-end}
 .nrow .note{margin-top:0;flex:1;min-width:0}
 .nok{flex:none;font-family:"Barlow Condensed",sans-serif;font-size:11.5px;letter-spacing:.08em;
-  text-transform:uppercase;padding:4px 10px;border:1px solid var(--line-2);border-radius:4px;
-  background:var(--panel-2);color:var(--muted);cursor:pointer;line-height:1.5}
+  text-transform:uppercase;padding:2px 9px;border:1px solid var(--line-2);border-radius:4px;
+  background:var(--panel-2);color:var(--muted);cursor:pointer;line-height:1.35}
 .nok:hover{border-color:var(--cy);color:var(--cy)}
-.nlist{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
-.nchip{display:inline-flex;align-items:baseline;gap:7px;max-width:100%;padding:4px 8px;
-  border-radius:4px;font-size:12px;line-height:1.45;border:1px solid var(--line)}
-.nchip b{font-weight:400;color:var(--ink);overflow-wrap:anywhere}
-.nchip em{font-style:normal;font-family:"IBM Plex Mono",monospace;font-size:10.5px;
-  white-space:nowrap;color:var(--muted)}
-.nchip i{font-style:normal;font-size:11.5px;color:var(--ink-2);overflow-wrap:anywhere}
+.nlist{display:grid;gap:6px;margin-top:7px}
+/* R36: la nota a sinistra, «applicata il…» piccola a destra, l'esito su una riga intera sotto
+   (prima tre pezzi affiancati in colonne da 80 px: «la mail non è / del tutto / corretta») */
+.nchip{display:grid;grid-template-columns:minmax(0,1fr) auto auto;column-gap:10px;row-gap:3px;align-items:baseline;
+  max-width:100%;padding:5px 9px;border-radius:4px;font-size:13px;line-height:1.45;border:1px solid var(--line)}
+.nchip b{grid-column:1;grid-row:1;font-weight:400;color:var(--ink);overflow-wrap:anywhere}
+.ogmain .nchip b{display:block;font-size:inherit;font-weight:400;line-height:inherit}
+.nchip em{grid-column:2;grid-row:1;font-style:normal;font-family:"IBM Plex Mono",monospace;font-size:11px;
+  color:var(--muted);text-align:right;max-width:20ch}
+.nchip i{grid-column:1/-1;grid-row:2;font-style:normal;font-size:12.5px;color:var(--ink-2);overflow-wrap:anywhere}
+.nchip .ndel{grid-column:3;grid-row:1}
+.nchip em.em-l{grid-column:1 / 3;grid-row:2;text-align:left;max-width:none}
+.nchip em.em-l ~ i{grid-row:3}
+.nold>summary{cursor:pointer;list-style:none;display:inline-flex;align-items:center;gap:6px;
+  font-family:"Barlow Condensed",sans-serif;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--done)}
+.nold>summary::-webkit-details-marker{display:none}
+.nold>summary::before{content:"\2713";font-size:11px}
+.nold>summary:hover{color:var(--cy)}
+.nold>.nlist{margin-top:6px}
 .nchip.wait{background:rgba(216,169,58,.10);border-color:rgba(216,169,58,.45)}
 .nchip.wait em{color:var(--warn)}
 .nchip.ok{background:rgba(27,136,98,.08);border-color:rgba(27,136,98,.30)}
@@ -191,8 +246,8 @@ li.done .txt{color:var(--muted);text-decoration:line-through}
 .ndel{flex:none;border:none;background:none;cursor:pointer;color:var(--muted);
   font-size:14px;line-height:1;padding:0 0 0 2px}
 .ndel:hover{color:var(--late)}
-.note{width:100%;margin-top:8px;padding:5px 0;border:none;border-bottom:1px dashed var(--line-2);
-  background:transparent;color:#8A5D02;font:inherit;font-size:13.5px;font-style:italic}
+.note{width:100%;margin-top:6px;padding:2px 0 3px;border:none;border-bottom:1px dashed var(--line-2);
+  background:transparent;color:#8A5D02;font:inherit;font-size:13px;line-height:1.35;font-style:italic}
 .note::placeholder{color:var(--muted);font-style:normal}
 .note:focus{outline:none;border-bottom:1px solid var(--cy)}
 .note:not(:placeholder-shown){border-bottom:1px solid #D8A93A}
@@ -282,6 +337,15 @@ section.og.bk-sec h3 .oghint.bk-n{display:inline;margin:0 0 0 4px;font:600 13px 
   color:var(--muted);white-space:nowrap}
 .tick.m{border-left:1px solid #A8D4E7}
 .tick.m span{color:var(--cy);font-weight:600}
+/* R36: asse su tre fasce: bandierina «oggi» in alto, i mesi, i lunedì */
+.track.tl-asse{height:62px}
+.tl-mesi{position:absolute;left:0;right:0;top:18px;height:21px;border-top:1px solid var(--line)}
+.tl-mese{position:absolute;top:0;bottom:0;border-left:1px solid #A8D4E7;overflow:hidden}
+.tl-mese.tronco{border-left-color:transparent}
+.tl-mese span{position:absolute;left:6px;top:3px;font-family:"IBM Plex Mono",monospace;font-size:10.5px;font-weight:600;
+  letter-spacing:.06em;color:var(--cy);white-space:nowrap}
+.tl-giorni{position:absolute;left:0;right:0;top:39px;bottom:0;border-top:1px solid var(--line)}
+.tl-giorni .tick span{top:4px;left:5px}
 .tl-row{display:grid;grid-template-columns:250px 1fr;border-top:1px solid var(--line)}
 .tl-row:hover{background:var(--panel-2)}
 .tl-group{display:grid;grid-template-columns:250px 1fr;border-top:1px solid var(--line-2);background:var(--panel-2)}
@@ -309,9 +373,10 @@ section.og.bk-sec h3 .oghint.bk-n{display:inline;margin:0 0 0 4px;font:600 13px 
 .dlab{position:absolute;top:12px;font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--muted);
   white-space:nowrap;padding-left:17px}
 .today{position:absolute;top:0;bottom:0;width:0;border-left:1.5px solid var(--late);z-index:3}
-.today-flag{position:absolute;top:2px;transform:translateX(-100%);padding-right:6px;
-  font-family:"Barlow Condensed",sans-serif;font-size:11px;letter-spacing:.14em;text-transform:uppercase;
-  color:var(--late)}
+.today-flag{position:absolute;top:2px;transform:translateX(-50%);padding:0 6px;z-index:4;white-space:nowrap;
+  border-radius:3px;background:var(--late);line-height:14px;
+  font-family:"Barlow Condensed",sans-serif;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;
+  color:#fff}
 .legend{display:flex;flex-wrap:wrap;gap:18px;padding:12px 16px;border-top:1px solid var(--line-2);
   font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--muted);align-items:center}
 .legend i{display:inline-block;width:24px;height:10px;margin-right:7px;vertical-align:-1px;border-radius:2px;
@@ -790,6 +855,39 @@ li.trip .tag.prog{background:rgba(176,124,6,.12);border-color:rgba(176,124,6,.34
 section.og{background:var(--panel);border:1px solid var(--line);border-radius:6px;
   box-shadow:var(--shadow);overflow:hidden}
 section.og.wide{margin-top:18px}
+/* R36: le sezioni di Oggi e i gruppi di «Tutti gli altri» fuori schermo non si impaginano finché non ci
+   arrivi (altezza stimata, poi ricordata); nel PDF tutto torna visibile (#printarea) */
+section.og.cv{content-visibility:auto;contain-intrinsic-size:auto 520px}
+section.og.cv-l{contain-intrinsic-size:auto 4000px}
+.ogcm[open]{content-visibility:auto;contain-intrinsic-size:auto 700px}
+#printarea section.og,#printarea .ogcm,#printarea .card{content-visibility:visible!important;contain-intrinsic-size:none!important}
+/* sotto-titoli di «Da fare adesso»: scaduti, entro 3 giorni, critici */
+.ogsub{display:flex;align-items:baseline;gap:10px;padding:9px 16px 7px;border-top:1px solid var(--line-2);
+  background:var(--panel-2);font-family:"Barlow Condensed",sans-serif;font-size:12.5px;letter-spacing:.14em;text-transform:uppercase}
+.ogsub b{color:var(--ink);font-weight:600}
+.ogsub span{font-family:"IBM Plex Mono",monospace;font-size:12px;letter-spacing:0;text-transform:none;color:var(--muted)}
+section.og h3 + .ogsub{border-top:none}
+/* contatore dei task fermi: apre Task › Fermi da 21 gg */
+.ogfermi{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 10px;width:100%;margin:0 0 12px;padding:10px 16px;
+  border:1px solid var(--line-2);border-left:3px solid var(--vi);border-radius:8px;background:var(--panel);
+  cursor:pointer;text-align:left;font:600 14px "IBM Plex Sans",sans-serif;color:var(--ink)}
+.ogfermi b{font-family:"IBM Plex Mono",monospace;font-size:18px;font-weight:600}
+.ogfermi span{font-weight:400;font-size:var(--fs-m);color:var(--muted)}
+.ogfermi i{margin-left:auto;font-style:normal;font-size:18px;color:var(--vi)}
+.ogfermi:hover{border-color:var(--vi)}
+/* comprimi tutto (facoltativo, parte sempre aperto) */
+.ogcomp{margin-left:auto;flex:none;border:1px solid var(--line-2);background:transparent;border-radius:99px;cursor:pointer;
+  font:600 11px "Barlow Condensed",sans-serif;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);padding:3px 11px}
+.ogcomp:hover{border-color:var(--cy);color:var(--cy)}
+/* esito della delega (rifiutata / contestata) */
+.ogmain span.dlgesito{color:var(--late);font-weight:500;margin-top:4px}
+.ogmain span.dlgesito b{display:inline;font-size:inherit;font-weight:700;line-height:inherit;color:inherit}
+@media (min-width:1100px){
+  .ogcmb{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+  .ogcmb > .ogrow:nth-child(odd){border-right:1px solid var(--line)}
+}
+.ogcmb > .ogrow{border-top:1px solid var(--line)}
+.og-altri .ogcm>summary{padding:9px 16px}
 section.og h3{margin:0;padding:13px 16px;border-bottom:1px solid var(--line);background:var(--panel-2);
   font-family:"Barlow Condensed",sans-serif;font-size:12.5px;font-weight:600;letter-spacing:.18em;
   text-transform:uppercase;color:var(--ink-2);display:flex;align-items:center;gap:9px}
@@ -802,19 +900,29 @@ i.dt.gr{background:var(--gr)} i.dt.cy{background:var(--cy)} i.dt.vi{background:v
 .ogrow[data-goto],.ogrow[data-cm]{cursor:pointer}
 .ogrow[data-goto]:hover,.ogrow[data-cm]:hover{background:var(--ground-2)}
 .ogmain{flex:1;min-width:0}
-.ogmain b{display:block;font-size:13.5px;font-weight:500;line-height:1.4}
-.ogmain b em{font-style:normal;color:var(--muted);font-weight:400;font-size:12.5px}
-.ogmain span{display:block;font-size:12px;color:var(--muted);margin-top:2px;line-height:1.4}
+.ogmain b{display:block;font-size:var(--fs-l);font-weight:500;line-height:1.4}
+.ogmain b em{font-style:normal;color:var(--muted);font-weight:400;font-size:var(--fs-m)}
+.ogmain span{display:block;font-size:var(--fs-m);color:var(--muted);margin-top:2px;line-height:1.45}
 .ogmain span.why{color:var(--ink-2);margin-top:4px;padding-left:9px;border-left:2px solid var(--line-2)}
-.ogwhen{font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--muted);white-space:nowrap;
+.ogwhen{font-family:"IBM Plex Mono",monospace;font-size:13px;font-weight:600;color:var(--ink-2);white-space:nowrap;
   display:flex;align-items:center;gap:6px;padding-top:2px}
 .ogwhen.bad{color:var(--late);font-weight:600}
+.ogwhen.soon{color:var(--warn)}
+.ogwhen > i{font-style:normal;font-size:12px}
+/* R36: al telefono la scadenza sale in testa alla riga dei dati invece di occupare una riga sua */
+.ogwtel{display:none;font-style:normal;font-family:"IBM Plex Mono",monospace;font-size:13px;font-weight:600;color:var(--ink-2);margin-right:4px}
+.ogwtel::after{content:" \00b7";font-weight:400;color:var(--muted)}
+.ogwtel.bad{color:var(--late)} .ogwtel.soon{color:var(--warn)}
+@media (max-width:760px){
+  .ogrow.act > .ogwhen{display:none}
+  .ogmain .ogwtel{display:inline}
+}
 .ogrow.bad{background:rgba(198,59,36,.045)}
 .ogrow.u-alta .ogmain b{color:var(--late)}
 .ogempty{margin:0;padding:16px;color:var(--muted);font-size:13px}
 .ogrow.act{align-items:flex-start}
 .ogrow.act .box{margin-top:1px}
-.ogrow.act .note{margin-top:6px;font-size:12px}
+.ogrow.act .note{margin-top:5px;font-size:13px}
 .ogrow.done{opacity:.5}
 .ogrow.done .ogmain b{text-decoration:line-through;color:var(--muted)}
 section.og h3 .oghint{display:block;margin-top:3px;font-family:"IBM Plex Sans",sans-serif;
@@ -1150,6 +1258,27 @@ h1 em{background:linear-gradient(100deg,#4FC6F0 15%,#5FE0AC 85%);
   font-family:"Barlow Condensed",sans-serif;font-weight:600;font-size:11px;letter-spacing:.08em;
   text-transform:uppercase;color:var(--muted);padding:1px 7px;max-width:170px;line-height:1.6}
 .dlgsel:hover{border-color:var(--cy);color:var(--cy)}
+/* R36: «Delega…» e' un bottone; i nomi stanno in un pannello solo, condiviso da tutti i task */
+.dlgbtn{border:1px solid var(--line-2);background:#fff;border-radius:99px;cursor:pointer;
+  font-family:"Barlow Condensed",sans-serif;font-weight:600;font-size:11.5px;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--muted);padding:1px 10px;max-width:220px;line-height:1.6;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dlgbtn::after{content:" \25BE";font-size:9px}
+.dlgbtn:hover,.dlgbtn[aria-expanded="true"]{border-color:var(--cy);color:var(--cy)}
+.dlgpop{position:absolute;z-index:90;width:280px;max-width:calc(100vw - 16px);max-height:min(60vh,420px);overflow:auto;
+  padding:6px;border:1px solid var(--line-2);border-radius:10px;background:var(--panel);
+  box-shadow:0 12px 34px rgba(15,34,51,.22)}
+.dlgpop .dlgh{padding:6px 8px 8px;font:600 12px "Barlow Condensed",sans-serif;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-2)}
+.dlgpop .dlgh small{display:block;margin-top:2px;font:400 12px "IBM Plex Sans",sans-serif;letter-spacing:0;text-transform:none;color:var(--muted)}
+.dlgpop button{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 8px;width:100%;padding:7px 8px;border:0;border-radius:6px;
+  background:transparent;text-align:left;cursor:pointer;color:var(--ink)}
+.dlgpop button b{font-weight:600;font-size:14px}
+.dlgpop button em{font-style:normal;font:600 10.5px "Barlow Condensed",sans-serif;letter-spacing:.1em;text-transform:uppercase;color:var(--cy)}
+.dlgpop button span{flex-basis:100%;font-size:12.5px;color:var(--muted)}
+.dlgpop button:hover,.dlgpop button:focus{background:var(--panel-2);outline:none}
+.dlgpop button:focus-visible{box-shadow:inset 0 0 0 2px var(--cy)}
+.dlgpop button.sug{background:rgba(11,127,174,.08)}
+.dlgpop .dlgvuoto{margin:6px 8px;color:var(--muted);font-size:13px}
 .dlgoff{border:1px solid var(--line-2);background:#fff;border-radius:99px;cursor:pointer;
   font-family:"Barlow Condensed",sans-serif;font-weight:600;font-size:11px;letter-spacing:.08em;
   text-transform:uppercase;color:var(--muted);padding:1px 9px;line-height:1.6}
@@ -1177,6 +1306,19 @@ h1 em{background:linear-gradient(100deg,#4FC6F0 15%,#5FE0AC 85%);
   text-transform:uppercase;color:var(--ink-2)}
 .fbar b{font-family:"IBM Plex Mono",monospace;font-size:14px;color:var(--ink)}
 .fbar.hot{border-color:var(--late);background:rgba(198,59,36,.06)}
+.fbar.calmo{border-color:var(--line)}
+/* R36: Task › Fermi da 21 gg */
+.seg.sub .tvn{font-family:"IBM Plex Mono",monospace;font-size:11.5px;font-weight:600;margin-left:4px}
+.fermi-intro{margin:0 0 14px;padding:10px 14px;border:1px solid var(--line-2);border-left:3px solid var(--vi);border-radius:8px;
+  background:var(--panel);font-size:var(--fs-m);line-height:1.5;color:var(--ink-2)}
+.fermi-intro b{font-family:"IBM Plex Mono",monospace;color:var(--ink)}
+.fermi-intro em{font-style:normal;font-weight:600;color:var(--ink)}
+.frmact{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.frmb{border:1px solid var(--line-2);background:#fff;border-radius:99px;cursor:pointer;
+  font-family:"Barlow Condensed",sans-serif;font-weight:600;font-size:11.5px;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--ink-2);padding:2px 11px;line-height:1.6}
+.frmb:hover{border-color:var(--cy);color:var(--cy)}
+.frmb[data-fchiudi]:hover{border-color:var(--done);color:var(--done)}
 .fbar.hot b{color:var(--late)}
 .fbar button{margin-left:auto}
 .tl.gantt .gr{display:grid;grid-template-columns:250px 1fr;gap:10px;align-items:center;
@@ -1743,6 +1885,7 @@ html[data-sb-theme="jarvis"] .evbtn, html[data-sb-theme="jarvis"] .pk,
 html[data-sb-theme="jarvis"] .step .mk i, html[data-sb-theme="jarvis"] .tasklink button,
 html[data-sb-theme="jarvis"] .prio, html[data-sb-theme="jarvis"] .btn.ghost,
 html[data-sb-theme="jarvis"] .prep .tag, html[data-sb-theme="jarvis"] .dlgsel,
+html[data-sb-theme="jarvis"] .dlgbtn, html[data-sb-theme="jarvis"] .frmb,
 html[data-sb-theme="jarvis"] .dlgoff, html[data-sb-theme="jarvis"] .autobtn:not(.on),
 html[data-sb-theme="jarvis"] .dmark {
   background: var(--panel-2); color: var(--ink-2); border-color: var(--line-2);
@@ -1755,6 +1898,12 @@ html[data-sb-theme="jarvis"] select, html[data-sb-theme="jarvis"] textarea {
   background: #0A1524; color: var(--ink); border-color: var(--line-2);
 }
 html[data-sb-theme="jarvis"] .tl-bar { background: color-mix(in srgb, var(--c) 32%, #0A1524); }
+html[data-sb-theme="jarvis"] .today-flag { color: #06121E; }
+html[data-sb-theme="jarvis"] .dlgpop { background: #0E1B2B; border-color: rgba(56,189,248,.35); box-shadow: 0 16px 40px rgba(0,0,0,.6); }
+html[data-sb-theme="jarvis"] .dlgpop button.sug { background: rgba(56,189,248,.12); }
+html[data-sb-theme="jarvis"] .dlgpop button:hover, html[data-sb-theme="jarvis"] .dlgpop button:focus { background: rgba(56,189,248,.10); }
+html[data-sb-theme="jarvis"] .ogfermi, html[data-sb-theme="jarvis"] .fermi-intro { background: rgba(14,27,43,.72); }
+html[data-sb-theme="jarvis"] .tl-mese, html[data-sb-theme="jarvis"] .tick.m { border-left-color: rgba(56,189,248,.45); }
 html[data-sb-theme="jarvis"] .tl-row.done .tl-bar { background: color-mix(in srgb, var(--done) 26%, #0A1524); }
 html[data-sb-theme="jarvis"] .legend i { background: color-mix(in srgb, var(--cy) 30%, #0A1524); }
 html[data-sb-theme="jarvis"] li.trip .tag.c { background: color-mix(in srgb, var(--c) 18%, #0A1524); }
